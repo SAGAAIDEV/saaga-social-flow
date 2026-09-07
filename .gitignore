@@ -1,2 +1,30 @@
-/target
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
 .env
+.env.local
+.env.*.local
+
+# OS files
+*.log
+Thumbs.db
+
+# Development
+debug/
+*.deb
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
