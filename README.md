@@ -46,22 +46,44 @@ cargo run
 
 ## Configuration
 
-Create a `.env` file in the project root (or set environment variables):
+Copy `.env.example` to `.env` and fill in your API keys:
 
 ```bash
-# LLM API for thumbnail generation (Gemini)
-GEMINI_API_KEY=your_api_key
-
-# Buffer scheduling integration
-BUFFER_ACCESS_TOKEN=your_buffer_token
-
-# Strapi CMS for blog publishing
-STRAPI_URL=http://localhost:1337
-STRAPI_TOKEN=your_strapi_token
-
-# Optional: logging level
-RUST_LOG=debug
+cp .env.example .env
 ```
+
+### Required API Keys
+
+1. **OpenRouter API Key** (LLM for thumbnail blurbs)
+   - Sign up: https://openrouter.ai/
+   - Generate token in Settings → API Keys
+   - Set `OPENROUTER_API_KEY=sk_...`
+
+2. **Buffer API Key** (social scheduling)
+   - Visit: https://publish.buffer.com/settings/api
+   - Generate access token
+   - Set `BUFFER_API_KEY=...`
+
+3. **Strapi CMS** (blog publishing)
+   - Local: `STRAPI_API_URL=http://localhost:1337`
+   - Production: `STRAPI_API_URL=https://cms.saagasolve.com`
+   - Generate API token in Strapi Admin → Settings → API Tokens
+   - Set `STRAPI_API_TOKEN=...` and `BLOG_PUBLIC_BASE=http://localhost:3000`
+
+### Optional Configuration
+
+```bash
+# Logging level (off, error, warn, info, debug, trace)
+RUST_LOG=info
+
+# Twitter handle for Buffer context
+BUFFER_TWITTER_HANDLE=@your_handle
+
+# Path to Node.js for content workflow
+CONTENT_NODE_BIN=/usr/local/bin/node
+```
+
+See `.env.example` for complete reference.
 
 ## Usage
 
