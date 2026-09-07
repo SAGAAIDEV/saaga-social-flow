@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "sourceId": "example:video-to-article",
+  "blocks": [
+    {
+      "stepId": "publishing_steps",
+      "block": {
+        "__component": "content.embed", "componentKey": "step_cards", "componentVersion": 1,
+        "heading": "From recording to article",
+        "config": { "steps": [
+          { "title": "Prepare the topic", "body": "Keep the full video, vertical summary, and transcript together." },
+          { "title": "Build the article", "body": "Use the transcript to write the article and add components that explain the steps." },
+          { "title": "Review and publish", "body": "Review the draft and search preview. Check SEO and internal links after publication." }
+        ] }
+      }
+    },
+    {
+      "stepId": "seo_resources",
+      "block": {
+        "__component": "content.embed", "componentKey": "link_cards", "componentVersion": 1,
+        "heading": "Check the published page",
+        "config": { "cards": [
+          { "title": "On-page SEO checker", "description": "Review the published page's SEO.", "href": "/on-page-seo-checker" },
+          { "title": "Internal link checker", "description": "Check how the article connects to your other pages.", "href": "/internal-link-checker" }
+        ] }
+      }
+    }
+  ]
+}

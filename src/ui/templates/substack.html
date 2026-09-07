@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+
+{% block content %}
+<style>
+  /* A page you glance at mid-sentence, not one you read: the beats sit wide and
+     the copy affordances stay out of the way until the row is under the cursor. */
+  .opts { margin: 0; padding-left: 18px; }
+  .opts li { margin: 3px 0; }
+  .sec { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin: 12px 0; }
+  .sec h3 { font-size: 13px; margin: 0; font-weight: 600; }
+  .sec .where { color: var(--dim); font-size: 11px; margin-left: 6px; font-weight: 400; }
+  .sec ul { margin: 5px 0 0; padding-left: 18px; }
+  blockquote {
+    margin: 10px 0; padding: 8px 12px; background: var(--panel);
+    border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0;
+  }
+  blockquote p { margin: 0; }
+  blockquote .where { display: block; color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .copy {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
+    border: 1px solid var(--line); background: transparent; color: var(--dim);
+    opacity: 0; transition: opacity .1s;
+  }
+  li:hover .copy, blockquote:hover .copy, h3:hover .copy { opacity: 1; }
+  .copy:hover { color: var(--accent); border-color: var(--accent); }
+  .path { color: var(--dim); font-size: 11px; word-break: break-all; margin-top: 2px; }
+</style>
+
+<h1>Substack</h1>
+<div class="sub">
+  Notes to hand-type from. Nothing here is finished prose — that is the point.
+</div>
+
+<div class="bar">
+  {{ ui.action("Generate Notes", {"type": "generateSubstack"},
+               primary=true, disabled=not can_generate) }}
+  {% if markdown %}
+  {{ ui.action("Copy All", {"type": "copyText", "text": markdown}) }}
+  {% endif %}
+  {{ ui.action("Edit Prompt", {"type": "editSubstackPrompt"}) }}
+  {{ ui.tag(prompt.label, "ok" if not prompt.builtin else "") }}
+</div>
+<div class="path">{{ prompt.path }}</div>
+
+{% if blocked %}<p class="empty">{{ blocked }}</p>{% endif %}
+{% if summary %}<div class="sub">{{ summary }}</div>{% endif %}
+
+{% macro options(title, items) %}
+{% if items %}
+<h2>{{ title }}</h2>
+<ul class="opts">
+  {% for item in items %}
+  <li>{{ item }}<button class="copy"
+      data-send='{{ {"type": "copyText", "text": item} | tojson }}'>copy</button></li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}
+
+{{ options("Title options", titles) }}
+{{ options("Subtitle options", subtitles) }}
+{{ options("Opening lines", hooks) }}
+
+{% if sections %}
+<h2>Sections</h2>
+{% for section in sections %}
+<div class="sec">
+  <h3>{{ section.index }}. {{ section.heading }}{% if section.marker %}<span
+      class="where">{{ section.marker }}</span>{% endif %}</h3>
+  <ul>
+    {% for beat in section.beats %}
+    <li>{{ beat }}<button class="copy"
+        data-send='{{ {"type": "copyText", "text": beat} | tojson }}'>copy</button></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if quotes %}
+<h2>Quotes — verbatim, do not paraphrase</h2>
+{% for quote in quotes %}
+<blockquote>
+  <p>{{ quote.text }}<button class="copy"
+      data-send='{{ {"type": "copyText", "text": quote.text} | tojson }}'>copy</button></p>
+  {% if quote.marker %}<span class="where">{{ quote.marker }}</span>{% endif %}
+</blockquote>
+{% endfor %}
+{% endif %}
+
+{{ options("Closing options", close) }}
+
+{% if links %}
+<h2>Links</h2>
+<ul class="opts">
+  {% for link in links %}
+  <li>{{ link.label }}: {{ link.url }}<button class="copy"
+      data-send='{{ {"type": "copyText", "text": link.url} | tojson }}'>copy</button></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if markdown_path %}<div class="path">{{ markdown_path }}</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,53 @@
+{#
+  Reusable pane components.
+
+  Every macro takes plain data and emits markup plus, where it acts, a `data-send`
+  payload. That attribute is the whole contract with `ui::web`: the delegated
+  click handler in base.html reads it, JSON-encodes it, and Rust parses it into a
+  `WebEvent`. A component never names a JavaScript function, so adding one cannot
+  break another.
+#}
+
+{# A button that posts `payload` when clicked. #}
+{% macro action(label, payload, primary=false, disabled=false) %}
+<button
+  class="{% if primary %}primary{% endif %}"
+  {% if disabled %}disabled{% endif %}
+  data-send='{{ payload | tojson }}'>{{ label }}</button>
+{% endmacro %}
+
+{# A checkbox whose change posts `payload` with the new value appended. #}
+{% macro toggle(label, checked, payload) %}
+<label>
+  <input type="checkbox" {% if checked %}checked{% endif %} data-send='{{ payload | tojson }}'>
+  <span>{{ label }}</span>
+</label>
+{% endmacro %}
+
+{# A small pill. `tone` is one of ok / bad / warn, or omitted for neutral. #}
+{% macro tag(text, tone="") %}
+<span class="tag {{ tone }}">{{ text }}</span>
+{% endmacro %}
+
+{# A bulleted list, or nothing at all when empty — an empty heading reads as a
+   finding of "none", which is not the same as having nothing to say. #}
+{% macro bullets(title, items) %}
+{% if items %}
+<h2>{{ title }}</h2>
+<ul>
+  {% for item in items %}<li>{{ item }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}
+
+{# A rendered line diff. `changes` is a list of {kind, text} where kind is
+   same / add / del / skip. Colour is what makes a deletion visible; the native
+   pane could only ever show this as plain text. #}
+{% macro diff(changes) %}
+<pre class="diff">{% for change in changes %}<span class="{{ change.kind }}">{{ change.text }}</span>{% endfor %}</pre>
+{% endmacro %}
+
+{# A card wrapping one reviewable item. #}
+{% macro card() %}
+<div class="card">{{ caller() }}</div>
+{% endmacro %}

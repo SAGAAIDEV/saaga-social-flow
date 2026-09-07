@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+
+{% block content %}
+<style>
+  /* One decision per glance: is this safe to publish, and where did it go. */
+  .live {
+    margin: 10px 0; padding: 8px 12px; background: var(--panel);
+    border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0;
+  }
+  .live a { color: var(--accent); word-break: break-all; }
+  .live .where { display: block; color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .warn { color: var(--warn, #d08a2a); font-size: 12px; margin-top: 4px; }
+  .field { margin: 10px 0; }
+  .field .name { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+  .field .value { word-break: break-word; }
+  .blk { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin: 12px 0; }
+  .blk h3 { font-size: 13px; margin: 0; font-weight: 600; }
+  .blk .kind { color: var(--dim); font-size: 11px; margin-left: 6px; font-weight: 400; }
+  .blk .toc { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+  .blk .html {
+    font-family: ui-monospace, monospace; font-size: 11px; color: var(--dim);
+    white-space: pre-wrap; word-break: break-word; margin-top: 4px;
+  }
+  .path { color: var(--dim); font-size: 11px; word-break: break-all; margin-top: 2px; }
+  .count { color: var(--dim); font-size: 11px; margin-left: 6px; }
+  .copy {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
+    border: 1px solid var(--line); background: transparent; color: var(--dim);
+    opacity: 0; transition: opacity .1s;
+  }
+  .live:hover .copy { opacity: 1; }
+  .copy:hover { color: var(--accent); border-color: var(--accent); }
+  .pick { display: inline-flex; align-items: center; gap: 6px; }
+  .pick .name { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+
+  /*
+    Figures read as a column of rows rather than a grid of thumbnails: the
+    caption is the thing being reviewed, and a grid sizes itself for the
+    pictures and leaves no room to read.
+  */
+  .fig { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .fig img {
+    width: 168px; flex: 0 0 168px; height: auto; border-radius: 4px;
+    border: 1px solid var(--line); background: var(--panel);
+  }
+  .fig .meta { color: var(--dim); font-size: 11px; }
+  .fig .cap { margin: 3px 0; word-break: break-word; }
+  .fig .alt { color: var(--dim); font-size: 11px; font-style: italic; }
+  .fig .none { color: var(--dim); font-size: 12px; font-style: italic; }
+</style>
+
+<h1>Blog</h1>
+<div class="sub">
+  The longform as a video post on saagasolve.com/education. Drafted for review, not queued.
+</div>
+
+<!--
+  Left to right is the order of commitment. Write Article costs an LLM call and
+  a local file; Preview costs nothing; Create Draft makes a CMS entry with a
+  permanent slug. The primary style is on Create Draft because it is the one
+  that finishes the stage, but the two before it are what make it safe.
+-->
+<div class="bar">
+  {{ ui.action("Write Article", {"type": "writeBlog"}) }}
+  {{ ui.action("Preview", {"type": "previewBlog"}, disabled=not article) }}
+  {{ ui.action("Create Draft", {"type": "publishBlog"}, primary=true, disabled=not can_publish) }}
+  {{ ui.action("Edit Prompt", {"type": "editBlogPrompt"}) }}
+  {{ ui.tag(prompt.label, "ok" if not prompt.builtin else "") }}
+</div>
+<div class="path">
+  {% if article %}
+  Create Draft publishes the draft below as it stands — Write Article to replace it.
+  {% else %}
+  Write Article drafts locally; nothing reaches the CMS until Create Draft.
+  {% endif %}
+</div>
+<div class="path">{{ prompt.path }}</div>
+
+<!--
+  The byline and the taxonomy, picked from the CMS's own rows rather than typed.
+  Above the fold and beside the Publish button because they are the two fields
+  nothing downstream can correct: a post that goes up under the wrong author is
+  live and wrong, and one with no education category never appears under any
+  filter on /education.
+-->
+<div class="bar">
+  <label class="pick">
+    <span class="name">Author</span>
+    <select data-send-change='{{ {"type": "blogAuthor"} | tojson }}'>
+      {% for choice in authors %}
+      <option value="{{ choice.id }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="pick">
+    <span class="name">Category</span>
+    <select data-send-change='{{ {"type": "blogCategory"} | tojson }}'>
+      {% for choice in categories %}
+      <option value="{{ choice.id }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {{ ui.action("Refresh", {"type": "refreshBlogLibrary"}) }}
+</div>
+<div class="path">{{ library_hint }}</div>
+
+{% if blocked %}<p class="empty">{{ blocked }}</p>{% endif %}
+
+{% if posted %}
+<div class="live">
+  <div><a href="{{ posted.url }}">{{ posted.url }}</a>
+    <button class="copy" data-send='{{ {"type": "copyText", "text": posted.url} | tojson }}'>copy</button>
+  </div>
+  <span class="where">
+    {{ "published" if posted.published else "created as a draft" }} {{ posted.created_at }}
+  </span>
+  <span class="where">admin: {{ posted.admin_url }}<button class="copy"
+      data-send='{{ {"type": "copyText", "text": posted.admin_url} | tojson }}'>copy</button></span>
+  {% if posted.warning %}<div class="warn">{{ posted.warning }}</div>{% endif %}
+</div>
+{% endif %}
+
+<!--
+  Figures. Above the article because they are captured *before* it is written and
+  the blurbs are what get placed into it — reviewing them after the body would be
+  reading the illustrations after the page they belong on.
+-->
+<h2>Figures</h2>
+<div class="bar">
+  {{ ui.action("Capture Figure  ⌃⇧S", {"type": "captureFigure"}) }}
+  {{ ui.action("Write Blurbs", {"type": "writeBlurbs"}, disabled=not figures.can_write) }}
+</div>
+<div class="path">{{ figures.hint }}</div>
+
+{% for figure in figures.rows %}
+<div class="fig">
+  <img src="{{ figure.url }}" alt="{{ figure.alt }}">
+  <div>
+    <div class="meta">{{ figure.label }} · {{ figure.moment }} · {{ figure.size }}</div>
+    {% if figure.written %}
+    <div class="cap">{{ figure.caption }}</div>
+    <div class="alt">alt: {{ figure.alt }}</div>
+    {% else %}
+    <div class="none">No blurb yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+{% if article %}
+<div class="sub">{{ article.summary }}</div>
+
+<div class="field">
+  <div class="name">Title</div>
+  <div class="value">{{ article.title }}</div>
+</div>
+{% if article.h1 %}
+<div class="field">
+  <div class="name">Heading</div>
+  <div class="value">{{ article.h1 }}</div>
+</div>
+{% endif %}
+<div class="field">
+  <div class="name">Slug</div>
+  <div class="value">/blog/{{ article.slug }}</div>
+</div>
+{% if article.control_warning %}
+<div class="field">
+  <div class="name">Search</div>
+  <div class="value">{{ article.control_warning }}</div>
+</div>
+{% endif %}
+<div class="field">
+  <div class="name">Description<span class="count">{{ article.description_length }} chars — 140 to 160</span></div>
+  <div class="value">{{ article.description }}</div>
+</div>
+{% if article.long_description %}
+<div class="field">
+  <div class="name">Long description</div>
+  <div class="value">{{ article.long_description }}</div>
+</div>
+{% endif %}
+<div class="field">
+  <div class="name">Caption</div>
+  <div class="value">{{ article.caption }}</div>
+</div>
+{% if article.keywords %}
+<div class="field">
+  <div class="name">Keywords</div>
+  <div class="value">{{ article.keywords | join(", ") }}</div>
+</div>
+{% endif %}
+{% if article.keyword_targets %}
+<div class="field">
+  <div class="name">Keyword brief</div>
+  {% for target in article.keyword_targets %}<div class="value">{{ target }}</div>{% endfor %}
+</div>
+{% endif %}
+{% if article.faq %}
+<div class="field">
+  <div class="name">FAQ<span class="count">published as structured data</span></div>
+  {% for entry in article.faq %}<div class="value">{{ entry }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<h2>Body</h2>
+{% for block in article.blocks %}
+<div class="blk">
+  <h3>{{ block.index }}<span class="kind">{{ block.kind }}</span></h3>
+  {% if block.headings %}
+  <ul class="toc">
+    {% for heading in block.headings %}<li>{{ heading }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <div class="html">{{ block.body }}</div>
+</div>
+{% endfor %}
+
+{% if article_path %}<div class="path">{{ article_path }}</div>{% endif %}
+{% endif %}
+{% endblock %}

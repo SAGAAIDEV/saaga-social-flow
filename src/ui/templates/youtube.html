@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+#youtube-details { max-width: 900px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+#youtube-details input, #youtube-details textarea { box-sizing: border-box; padding: 10px; background: #0e1116; color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+#youtube-details :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+<h1>YouTube</h1>
+<p class="sub">Save the video details, choose visibility above, then upload. Next: Blog (Strapi).</p>
+<form id="youtube-details">
+  <p><label for="youtube-title">Title</label></p>
+  <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%">
+  <p><label for="youtube-description">Description</label></p>
+  <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit">{{ metadata.description }}</textarea>
+  <div class="bar"><button type="submit">Save video details</button></div>
+</form>
+<pre style="white-space:pre-wrap;font:inherit">{{ info }}</pre>
+<script>
+document.getElementById('youtube-details').addEventListener('submit', function(event) {
+  event.preventDefault();
+  send({type: 'saveYoutube', fields: {title: this.elements.title.value, description: this.elements.description.value}});
+});
+</script>
+{% endblock %}

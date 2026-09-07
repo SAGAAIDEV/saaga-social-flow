@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* Self-contained on purpose: the pane is loaded with no base URL, so there is
+     nothing for a stylesheet link to resolve against. */
+  :root {
+    --bg: #0b0d10;
+    --panel: #14181d;
+    --line: #232a32;
+    --text: #d7dee7;
+    --dim: #8b94a0;
+    --accent: #6aa9ff;
+    --ok: #4ec9a5;
+    --bad: #ff6b6b;
+    --warn: #e0a758;
+    --add-bg: #10301f;
+    --add-fg: #7ee2a8;
+    --del-bg: #3a1618;
+    --del-fg: #ff9b9b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 -apple-system, system-ui, sans-serif;
+    padding: 14px;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+  h2 { font-size: 12px; margin: 18px 0 6px; color: var(--dim);
+       text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .sub { color: var(--dim); margin-bottom: 4px; }
+  .bar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
+  button {
+    font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { border-color: var(--accent); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
+  .grow { flex: 1; }
+  .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim); white-space: nowrap;
+  }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.bad { color: var(--bad); border-color: var(--bad); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  .why { color: var(--dim); margin: 6px 0 0; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 2px 0; }
+  .muted { color: var(--dim); }
+  .empty { color: var(--dim); padding: 20px 0; }
+  pre.diff {
+    margin: 8px 0 0; padding: 8px; overflow-x: auto;
+    background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre.diff span { display: block; padding: 0 4px; white-space: pre-wrap; }
+  pre.diff .add { background: var(--add-bg); color: var(--add-fg); }
+  pre.diff .del { background: var(--del-bg); color: var(--del-fg); }
+  pre.diff .same { color: var(--dim); }
+  pre.diff .skip { color: #5b6470; font-style: italic; }
+</style>
+</head>
+<body>
+{% block content %}{% endblock %}
+<script>
+  // The entire JS side of the bridge. Panes are re-rendered whole by Rust, so
+  // there is no state here to fall out of step with the files on disk.
+  function send(payload) {
+    window.webkit.messageHandlers.app.postMessage(JSON.stringify(payload));
+  }
+  document.addEventListener('click', function (event) {
+    const el = event.target.closest('[data-send]');
+    if (!el) return;
+    const payload = JSON.parse(el.dataset.send);
+    if (el.type === 'checkbox') payload.value = el.checked;
+    send(payload);
+  });
+  // A dropdown reports on change, not on click — clicking one only opens it.
+  document.addEventListener('change', function (event) {
+    const el = event.target.closest('[data-send-change]');
+    if (!el) return;
+    const payload = JSON.parse(el.dataset.sendChange);
+    payload.value = el.value;
+    send(payload);
+  });
+</script>
+</body>
+</html>

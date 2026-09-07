@@ -1,0 +1,473 @@
+{% extends "base.html" %}
+{#
+  The Edit tab: hand-trim one chapter before Render cuts and stitches it.
+
+  # State, and the one rule this pane bends
+
+  Every other pane here is stateless by design — Rust re-renders it whole, so it cannot
+  disagree with the files (see `ui::web`). This one keeps a working copy of the keep-list
+  in JavaScript, because a repaint reloads the page, and reloading mid-edit would throw
+  away the zoom level, the scroll position and the playhead every time you dropped a
+  segment. An editor that loses your place on every click is not usable.
+
+  What that rule protects is kept anyway: every committed change posts the *whole* span
+  list to Rust immediately, which normalises and writes it. There is no unsaved state and
+  no delta to lose — a dropped message costs the last action, never the file. Rust
+  repaints on three events only: opening another chapter, Reset, and a finished render.
+
+  # The model
+
+  One list of kept spans, in source milliseconds. Dropped time is the gap between them.
+  Dragging over the waveform, clicking a segment and clicking words all build the same
+  thing — a time selection — and Keep / Drop act on it. Nothing else to learn.
+#}
+{% block content %}
+<style>
+  .rail { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 14px; }
+  .rail button { padding: 4px 9px; display: flex; align-items: center; gap: 6px; }
+  .rail button.open { border-color: var(--accent); color: #fff; background: #1b2431; }
+  .rail .t { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .rail button.open .t { color: #9db8dd; }
+  .rail .dot { color: var(--ok); font-size: 9px; }
+
+  .editor { display: flex; gap: 14px; align-items: flex-start; }
+  .stage { width: 420px; flex: none; }
+  .stage video { width: 100%; border-radius: 6px; background: #000; display: block; }
+  .side { flex: 1; min-width: 0; }
+  .readout { font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+  .readout b { color: #fff; font-weight: 600; }
+  .readout .drop { color: var(--warn); }
+
+  /* The waveform lives in wavesurfer's own scroll wrapper, so kept spans are drawn as
+     regions rather than as an overlay of ours — they then track zoom and scroll for
+     free instead of needing to be kept in step with them. */
+  .wave-wrap { margin: 12px 0 4px; background: #0e1116;
+               border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  #wave { cursor: text; }
+  .hint { color: var(--dim); font-size: 11px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .hint kbd { background: #1a1f26; border: 1px solid var(--line); border-radius: 3px;
+              padding: 0 4px; font: inherit; color: var(--text); }
+
+  .words { margin-top: 12px; line-height: 2.1; }
+  .word { cursor: pointer; padding: 1px 3px; border-radius: 3px; }
+  .word:hover { background: #1e2530; }
+  .word.dropped { color: #5b6470; text-decoration: line-through; }
+  .word.sel { background: #24405e; color: #fff; }
+
+  .note { color: var(--warn); margin: 8px 0 0; }
+  label.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+                color: var(--dim); }
+</style>
+
+<h1>Edit</h1>
+<div class="sub">
+  Trim each chapter before Render cuts it. Drag over the audio to select, then Keep or
+  Drop — the longform and the vertical short both follow this.
+</div>
+
+{% if blocked %}
+  <p class="empty">{{ blocked }}</p>
+{% else %}
+
+<div class="rail">
+  {% for ch in chapters %}
+  <button class="{% if ch.open %}open{% endif %}"
+          data-send='{"type":"openChapter","chapter":{{ ch.n }}}'>
+    <span>{{ ch.label }}</span>
+    <span class="t">{{ ch.source_label }}&thinsp;&rarr;&thinsp;{{ ch.cut_label }}</span>
+    {% if ch.edited %}<span class="dot" title="edited by hand">&#9679;</span>{% endif %}
+  </button>
+  {% endfor %}
+</div>
+
+{% if open %}
+<div class="editor">
+  <div class="stage">
+    <video id="take" src="{{ open.video_url }}" preload="metadata" playsinline></video>
+  </div>
+  <div class="side">
+    <div class="readout">
+      Chapter {{ open.label }} &middot;
+      {{ open.source_label }} source &rarr; <b id="cut-label">{{ open.cut_label }}</b> cut &middot;
+      <span class="drop" id="drop-label">{{ open.dropped_label }} dropped</span> &middot;
+      <span id="seg-label">{{ open.segments }} segment(s)</span>
+    </div>
+    <div class="bar">
+      <button id="btn-keep" class="primary">Keep</button>
+      <button id="btn-drop">Drop</button>
+      <button id="btn-only">Keep only this</button>
+      <button id="btn-undo" disabled>Undo</button>
+    </div>
+    <div class="bar">
+      <button id="btn-head">Trim start to playhead</button>
+      <button id="btn-tail">Trim end from playhead</button>
+    </div>
+    <div class="bar">
+      <button id="btn-apply" class="primary">Cut &amp; render chapter {{ open.label }}</button>
+      <button data-send='{"type":"resetEdit","chapter":{{ open.n }}}'
+              {% if not open.edited %}disabled{% endif %}>Reset to auto cut</button>
+    </div>
+    <div class="bar">
+      <label class="check">
+        <input type="checkbox" id="preview" checked>
+        <span>Play the cut (skip dropped time)</span>
+      </label>
+      <button id="btn-zoom-out">&minus;</button>
+      <button id="btn-zoom-in">+</button>
+    </div>
+    {% if open.note %}<p class="note">{{ open.note }}</p>{% endif %}
+  </div>
+</div>
+
+<div class="wave-wrap"><div id="wave"></div></div>
+<div class="hint">
+  <span><kbd>drag</kbd> select</span>
+  <span><kbd>click</kbd> a segment</span>
+  <span><kbd>⌘/⇧ click</kbd> add to selection</span>
+  <span><kbd>space</kbd> play</span>
+  <span><kbd>K</kbd> keep</span>
+  <span><kbd>X</kbd> drop</span>
+  <span><kbd>⌘Z</kbd> undo</span>
+</div>
+
+<div class="words">
+  {% for word in open.words %}<span class="word {% if not word.kept %}dropped{% endif %}"
+    data-start="{{ word.start }}" data-end="{{ word.end }}">{{ word.text }}</span>
+  {% endfor %}
+</div>
+
+<script>{{ wavesurfer_js | safe }}</script>
+<script>{{ regions_js | safe }}</script>
+<script>
+(function () {
+  "use strict";
+
+  var CH = {{ open.n }};
+  var DURATION_MS = {{ open.duration_ms }};
+  var PEAKS = {{ open.peaks | tojson }};
+  // Must match `edit::keep::MIN_SPAN_MS`. Rust is authoritative — it normalises every
+  // list on the way to disk — and matching here only keeps the screen from showing
+  // something the file will not agree with.
+  var MIN_MS = 34;
+
+  var spans = {{ open.spans | tojson }};
+  var selection = [];      // time ranges the actions apply to
+  var undoStack = [];
+  var marquee = null;      // the region visualising `selection`, when it is not a segment
+  var adding = false;      // true while we are the ones creating regions
+  var anchor = null;       // the word a shift-click extends from
+  var addMod = false;      // ⌘/⇧ was held on the last mousedown
+  var pxPerSec = 0;
+
+  function post(payload) {
+    window.webkit.messageHandlers.app.postMessage(JSON.stringify(payload));
+  }
+
+  // ---- span algebra, mirroring edit::keep ---------------------------------------
+
+  function clamp(ms) { return Math.max(0, Math.min(DURATION_MS, Math.round(ms))); }
+
+  function normalize(list) {
+    var out = [];
+    list.map(function (s) {
+      return [clamp(Math.min(s[0], s[1])), clamp(Math.max(s[0], s[1]))];
+    }).sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; })
+      .forEach(function (s) {
+        var last = out[out.length - 1];
+        // A gap the cut cannot express is closed rather than left to round.
+        if (last && s[0] - last[1] < MIN_MS) last[1] = Math.max(last[1], s[1]);
+        else out.push([s[0], s[1]]);
+      });
+    return out.filter(function (s) { return s[1] - s[0] >= MIN_MS; });
+  }
+
+  function union(list, span) { return normalize(list.concat([span])); }
+
+  function subtract(list, span) {
+    var lo = Math.min(span[0], span[1]), hi = Math.max(span[0], span[1]);
+    var out = [];
+    list.forEach(function (k) {
+      if (hi <= k[0] || lo >= k[1]) { out.push(k); return; }
+      if (lo > k[0]) out.push([k[0], lo]);
+      if (hi < k[1]) out.push([hi, k[1]]);
+    });
+    return normalize(out);
+  }
+
+  function keepOnly(list, sel) {
+    var out = [];
+    list.forEach(function (k) {
+      sel.forEach(function (s) {
+        var a = Math.max(k[0], Math.min(s[0], s[1]));
+        var b = Math.min(k[1], Math.max(s[0], s[1]));
+        if (b > a) out.push([a, b]);
+      });
+    });
+    return normalize(out);
+  }
+
+  function keptMs(list) {
+    return list.reduce(function (sum, s) { return sum + (s[1] - s[0]); }, 0);
+  }
+
+  function clock(ms) {
+    var total = Math.round(Math.max(0, ms) / 1000);
+    return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+  }
+
+  // ---- the waveform ------------------------------------------------------------
+
+  var video = document.getElementById("take");
+  var ws = WaveSurfer.create({
+    container: "#wave",
+    media: video,
+    // Mirrored around zero so the envelope draws symmetrically: wavesurfer takes the
+    // min and max of each pixel's samples, and an all-positive array would render as
+    // a half waveform.
+    peaks: [PEAKS.reduce(function (acc, v) {
+      acc.push(v / 255, -v / 255);
+      return acc;
+    }, [])],
+    duration: DURATION_MS / 1000,
+    height: 96,
+    waveColor: "#48566a",
+    progressColor: "#6f8299",
+    cursorColor: "#6aa9ff",
+    cursorWidth: 2,
+    normalize: false,
+  });
+  var regions = ws.registerPlugin(WaveSurfer.Regions.create());
+
+  var KEEP_COLOR = "rgba(78, 201, 165, 0.16)";
+  var SEL_COLOR = "rgba(106, 169, 255, 0.34)";
+  var keepRegions = [];
+
+  function isSelected(span) {
+    return selection.some(function (s) { return s[0] === span[0] && s[1] === span[1]; });
+  }
+
+  function drawSpans() {
+    adding = true;
+    keepRegions.forEach(function (r) { r.remove(); });
+    keepRegions = spans.map(function (s) {
+      var region = regions.addRegion({
+        start: s[0] / 1000,
+        end: s[1] / 1000,
+        color: isSelected(s) ? SEL_COLOR : KEEP_COLOR,
+        drag: false,
+        resize: false,
+      });
+      // Never intercept a drag: starting a selection on top of a kept span has to work,
+      // and that is most of the timeline.
+      if (region.element) region.element.style.pointerEvents = "none";
+      return region;
+    });
+    adding = false;
+  }
+
+  function clearMarquee() {
+    if (marquee) { adding = true; marquee.remove(); adding = false; marquee = null; }
+  }
+
+  function showMarquee(span) {
+    clearMarquee();
+    adding = true;
+    marquee = regions.addRegion({
+      start: span[0] / 1000, end: span[1] / 1000,
+      color: SEL_COLOR, drag: true, resize: true,
+    });
+    adding = false;
+  }
+
+  function paint() {
+    drawSpans();
+    document.getElementById("cut-label").textContent = clock(keptMs(spans));
+    document.getElementById("drop-label").textContent =
+      clock(DURATION_MS - keptMs(spans)) + " dropped";
+    document.getElementById("seg-label").textContent = spans.length + " segment(s)";
+    document.getElementById("btn-undo").disabled = undoStack.length === 0;
+    document.querySelectorAll(".word").forEach(function (el) {
+      var start = +el.dataset.start, end = +el.dataset.end;
+      var kept = spans.some(function (s) { return end > s[0] && start < s[1]; });
+      el.classList.toggle("dropped", !kept);
+      el.classList.toggle("sel", selection.some(function (s) {
+        return start >= s[0] && end <= s[1];
+      }));
+    });
+  }
+
+  /// The one place the list changes: remember it, redraw, and write it through.
+  function commit(next) {
+    if (next.length === 0) {
+      // Refusing here rather than at the boundary, because the boundary would have to
+      // answer with a repaint and the answer someone needs is "that would delete the
+      // whole chapter".
+      window.alert("That would drop the whole chapter. Keep something first.");
+      return;
+    }
+    undoStack.push(spans);
+    spans = next;
+    paint();
+    post({ type: "saveEdit", chapter: CH, spans: spans });
+  }
+
+  // ---- selecting ---------------------------------------------------------------
+
+  document.addEventListener("mousedown", function (event) {
+    addMod = event.shiftKey || event.metaKey;
+  }, true);
+
+  regions.enableDragSelection({ color: SEL_COLOR });
+
+  regions.on("region-created", function (region) {
+    if (adding) return;              // one of ours
+    if (marquee) { adding = true; marquee.remove(); adding = false; }
+    marquee = region;
+    selection = [[region.start * 1000, region.end * 1000]];
+    paint();
+  });
+
+  regions.on("region-updated", function (region) {
+    if (region !== marquee) return;
+    selection = [[region.start * 1000, region.end * 1000]];
+    paint();
+  });
+
+  // Clicking the timeline seeks; clicking a kept segment also selects it, which is the
+  // multi-select the actions below act on.
+  ws.on("click", function (relativeX) {
+    var ms = relativeX * DURATION_MS;
+    var hit = spans.filter(function (s) { return ms >= s[0] && ms < s[1]; })[0];
+    if (!hit) {
+      if (!addMod) { selection = []; clearMarquee(); paint(); }
+      return;
+    }
+    clearMarquee();
+    if (addMod) {
+      if (!isSelected(hit)) selection.push([hit[0], hit[1]]);
+    } else {
+      selection = [[hit[0], hit[1]]];
+    }
+    paint();
+  });
+
+  document.querySelectorAll(".word").forEach(function (el) {
+    el.addEventListener("click", function (event) {
+      var start = +el.dataset.start, end = +el.dataset.end;
+      var span;
+      if (event.shiftKey && anchor) {
+        span = [Math.min(anchor[0], start), Math.max(anchor[1], end)];
+      } else {
+        anchor = [start, end];
+        span = [start, end];
+      }
+      selection = [span];
+      showMarquee(span);
+      ws.setTime(span[0] / 1000);
+      paint();
+    });
+  });
+
+  // ---- actions -----------------------------------------------------------------
+
+  function selected() {
+    if (selection.length === 0) {
+      window.alert("Select something first — drag over the audio, or click a segment.");
+      return null;
+    }
+    return selection;
+  }
+
+  function act(id, fn) {
+    document.getElementById(id).addEventListener("click", function () { fn(); });
+  }
+
+  act("btn-keep", function () {
+    var sel = selected();
+    if (!sel) return;
+    commit(sel.reduce(function (acc, s) { return union(acc, s); }, spans));
+  });
+
+  act("btn-drop", function () {
+    var sel = selected();
+    if (!sel) return;
+    commit(sel.reduce(function (acc, s) { return subtract(acc, s); }, spans));
+    selection = [];
+    clearMarquee();
+    paint();
+  });
+
+  act("btn-only", function () {
+    var sel = selected();
+    if (!sel) return;
+    commit(keepOnly(spans, sel));
+  });
+
+  act("btn-head", function () {
+    commit(subtract(spans, [0, ws.getCurrentTime() * 1000]));
+  });
+
+  act("btn-tail", function () {
+    commit(subtract(spans, [ws.getCurrentTime() * 1000, DURATION_MS]));
+  });
+
+  act("btn-undo", function () {
+    if (undoStack.length === 0) return;
+    spans = undoStack.pop();
+    paint();
+    post({ type: "saveEdit", chapter: CH, spans: spans });
+  });
+
+  act("btn-apply", function () {
+    post({ type: "applyEdit", chapter: CH });
+  });
+
+  act("btn-zoom-in", function () { zoom(1.8); });
+  act("btn-zoom-out", function () { zoom(1 / 1.8); });
+
+  function zoom(factor) {
+    var container = document.getElementById("wave");
+    var fit = container.clientWidth / Math.max(DURATION_MS / 1000, 0.001);
+    if (pxPerSec === 0) pxPerSec = fit;
+    pxPerSec = Math.max(fit, Math.min(600, pxPerSec * factor));
+    ws.zoom(pxPerSec);
+    drawSpans();
+  }
+
+  // ---- playing the cut ---------------------------------------------------------
+
+  var preview = document.getElementById("preview");
+
+  ws.on("timeupdate", function (time) {
+    if (!preview.checked || !ws.isPlaying()) return;
+    var ms = time * 1000;
+    // A few ms of slack: `timeupdate` lands wherever the media element happens to be,
+    // and a hair before a span's start is inside it as far as anyone listening cares.
+    if (spans.some(function (s) { return ms >= s[0] - 20 && ms < s[1]; })) return;
+    var next = spans.filter(function (s) { return s[0] > ms; })[0];
+    if (next) ws.setTime(next[0] / 1000);
+    else { video.pause(); ws.setTime(spans[0][0] / 1000); }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) return;
+    var key = event.key.toLowerCase();
+    if (key === " " || event.code === "Space") { event.preventDefault(); ws.playPause(); }
+    else if (key === "k") document.getElementById("btn-keep").click();
+    else if (key === "x" || key === "backspace" || key === "delete") {
+      event.preventDefault();
+      document.getElementById("btn-drop").click();
+    } else if (key === "z" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      document.getElementById("btn-undo").click();
+    } else if (key === "+" || key === "=") zoom(1.8);
+    else if (key === "-") zoom(1 / 1.8);
+  });
+
+  ws.on("ready", function () { paint(); });
+  paint();
+})();
+</script>
+{% endif %}
+{% endif %}
+{% endblock %}

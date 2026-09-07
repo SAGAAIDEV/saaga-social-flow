@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+
+{% block content %}
+<h1>Reflect{% if report %} — {{ report.project }}{% endif %}</h1>
+<div class="sub">
+  {% if report %}{{ report.inputs }} · {{ report.generated_at }}
+  {% else %}Reads local files. Only Reflect and Validate cost a model call.{% endif %}
+</div>
+
+<div class="bar">
+  {{ ui.action("Reflect", {"type": "reflect"}, primary=true) }}
+  {{ ui.action("Apply Selected", {"type": "apply"}, disabled=not can_apply) }}
+  {% if report %}{{ ui.tag(applicable ~ " ready to apply", "ok" if applicable else "") }}{% endif %}
+</div>
+
+{% if not report %}
+  <p class="empty">
+    Press Reflect. It reads every generative step's preamble and output, what you
+    kept versus what you edited, what you declined to post, and any measured
+    performance — then proposes replacement prompts.
+  </p>
+{% else %}
+
+  {{ ui.bullets("Keep", report.keep) }}
+  {{ ui.bullets("Drop", report.drop) }}
+
+  {% if report.evidence %}
+  <h2>Evidence</h2>
+  {% for item in report.evidence %}
+    <div class="row">
+      <span class="grow">{{ item.claim }}</span>
+      {% if item.grounded %}{{ ui.tag(item.backing) }}
+      {% else %}{{ ui.tag("no posts cited — general advice", "warn") }}{% endif %}
+    </div>
+  {% endfor %}
+  {% endif %}
+
+  <h2>Proposed rewrites</h2>
+  {% if not report.rewrites %}
+    <p class="empty">No rewrites proposed — the evidence did not support one.</p>
+  {% endif %}
+
+  {% for rewrite in report.rewrites %}
+    {% call ui.card() %}
+      <div class="row">
+        {{ ui.toggle(rewrite.prompt_id, rewrite.approved,
+                     {"type": "approve", "index": rewrite.index}) }}
+        {{ ui.tag(rewrite.scale) }}
+        {{ ui.tag(rewrite.status, rewrite.tone) }}
+        {{ ui.action("Validate", {"type": "validate", "index": rewrite.index}) }}
+      </div>
+      <p class="why">{{ rewrite.why }}</p>
+      <div class="muted">{{ rewrite.version_note }}</div>
+      {{ ui.diff(rewrite.diff) }}
+      {% if rewrite.validation %}
+        <p class="why">validation: {{ rewrite.validation }}</p>
+      {% endif %}
+    {% endcall %}
+  {% endfor %}
+{% endif %}
+{% endblock %}

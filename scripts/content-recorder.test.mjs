@@ -1,0 +1,44 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadTopic } from "./content-job.mjs";
+
+const repo = process.env.CONTENT_REPO_ROOT;
+const binary = process.env.CONTENT_RECORDER_BIN;
+test("recorder exports a valid job and resumes without overwriting human input", { skip: !binary }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "recorder-components-"));
+  const session = path.join(directory, "session with spaces");
+  await mkdir(path.join(session, "drafts"), { recursive: true });
+  await mkdir(path.join(session, "blog"));
+  await writeFile(path.join(session, "blog/article.json"), JSON.stringify({title:"A test article",slug:"test-article",description:"A fixture for component export",blocks:[]}));
+  const horizontal = path.join(directory, "horizontal.mp4");
+  const vertical = path.join(directory, "vertical.mp4");
+  // File references only: no rendering or media probing occurs in this stage.
+  await writeFile(horizontal, "fixture");
+  await writeFile(vertical, "fixture");
+  const transcript = path.join(directory, "transcript.txt");
+  await writeFile(transcript, "Explain the steps and let readers expand each card.");
+  const steps = path.join(directory, "steps.json");
+  await writeFile(steps, JSON.stringify([{id:"explanation",brief:"Create expandable cards explaining the transcript."}]));
+  const base = ["blog-components", "--session", session, "--landing-repo", repo, "--source-id", "test:one-topic"];
+  const call = (args) => spawnSync(binary, args, { encoding: "utf8", timeout: 30000 });
+  const first = call([...base,"--horizontal",horizontal,"--vertical",vertical,"--transcript",transcript,"--steps",steps]);
+  assert.equal(first.status, 0, first.stderr);
+  const job = path.join(session,"blog/component-job");
+  const topic = await loadTopic(job);
+  assert.equal(topic.sourceId,"test:one-topic");
+  assert.equal(topic.slug,"test-article");
+  assert.ok(topic.videos.horizontal.endsWith("horizontal.mp4"));
+  assert.ok(topic.videos.vertical.endsWith("vertical.mp4"));
+  await writeFile(path.join(job,"transcript.txt"),"Human revised this transcript.");
+  const second = call(base);
+  assert.equal(second.status,0,second.stderr);
+  assert.equal(await readFile(path.join(job,"transcript.txt"),"utf8"),"Human revised this transcript.");
+  const mismatch = call([...base.slice(0,-1),"test:different-topic"]);
+  assert.notEqual(mismatch.status,0);
+  assert.match(mismatch.stderr,/another source ID/);
+});

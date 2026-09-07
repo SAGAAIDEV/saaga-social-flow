@@ -1,0 +1,10 @@
+{
+  "name": "saaga-card",
+  "private": true,
+  "type": "module",
+  "description": "Procedural thumbnail card. No dependencies: bun transpiles the TSX and jsx.ts is the whole runtime.",
+  "scripts": {
+    "test": "bun test",
+    "sheet": "bun run sheet.tsx"
+  }
+}

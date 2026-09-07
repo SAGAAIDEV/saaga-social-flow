@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [],
+
+    // Classic JSX against our own factory, which is what makes this package
+    // dependency-free: `h` below returns an HTML string, so there is no React,
+    // no virtual DOM, and nothing to install. Bun transpiles TSX natively.
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
+  }
+}

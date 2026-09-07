@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "sourceId": "example:video-to-article",
+  "slug": "turn-a-video-into-an-article",
+  "title": "Turn a video into an editable article",
+  "destination": "ai-seo-automation",
+  "transcript": "transcript.txt",
+  "videos": {
+    "horizontal": "horizontal.mp4",
+    "vertical": "vertical.mp4"
+  },
+  "steps": [
+    { "id": "publishing_steps", "brief": "Build expandable cards explaining the publishing steps in the transcript." },
+    { "id": "seo_resources", "brief": "Build clickable cards linking readers to our on-page SEO checker and internal link checker." }
+  ]
+}

@@ -1,0 +1,109 @@
+[package]
+name = "stream-recorder"
+version = "0.1.0"
+edition = "2021"
+description = "Native camera + screen + mic recorder for SAAGA screencasts — separate files, one shared clock, streamed take/chapter markers"
+
+[[bin]]
+name = "stream-recorder"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+global-hotkey = "0.8"
+# Figures are written as lossless WebP — see `figure::encode` — and ImageIO
+# cannot encode that format, so the encode (and the PNG hop into it) is here.
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+objc2-foundation = "0.3"
+objc2-quartz-core = "0.3"
+raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+winit = "0.30"
+
+# Capture/encode stack — added now so the dependency set resolves and builds
+# from the start, wired up incrementally starting with the mic spike.
+# "objc2-core-media" is one of only three non-default features on
+# objc2-av-foundation (confirmed against its Cargo.toml) — needed for the
+# CMSampleBuffer-based delegate methods and recommended-settings calls.
+# "objc2-core-video" is what makes AVAssetWriterInputPixelBufferAdaptor usable:
+# both `pixelBufferPool` and `appendPixelBuffer:withPresentationTime:` are
+# `#[cfg]`'d behind it in the generated bindings, so without it they are not
+# "unimplemented" — they do not exist, and the call site fails as a mystery
+# "no method found" with nothing pointing at the cause.
+objc2-av-foundation = { version = "0.3", features = [
+    "objc2-core-media",
+    "objc2-core-video",
+] }
+objc2-screen-capture-kit = "0.3"
+# "objc2-core-audio-types" exposes CMAudioFormatDescriptionGetStreamBasicDescription,
+# which is how the delegate reads the layout (rate/bytes-per-frame/flags) a
+# sample buffer actually carries — see the format-change guard in av_delegate.
+objc2-core-media = { version = "0.3", features = ["objc2-core-audio-types"] }
+objc2-core-audio-types = "0.3"
+objc2-core-video = "0.3"
+# The GPU path every pixel op renders through. Its *default* features already
+# include "objc2-metal" and "objc2-core-video", which is what makes
+# `CIContext::contextWithMTLDevice:` and `render:toCVPixelBuffer:` exist —
+# both are `#[cfg]`'d behind them, so a trimmed feature set would make the
+# whole render path vanish rather than fail to link.
+objc2-core-image = "0.3"
+# Named directly as well as via core-image's default features, because
+# `MTLCreateSystemDefaultDevice` is called here rather than reached through
+# Core Image, and a transitive dependency is not an import path.
+objc2-metal = "0.3"
+# Live face tracking. Safe bindings to MediaPipe's *Tasks* C API — the surface
+# Google's own Python bindings run on — rather than the Solutions API deprecated
+# in 2023 that every older Rust binding wraps.
+#
+# Nothing is linked: the ~34 MB `libmediapipe` is `dlopen`ed and fetched into
+# `~/.cache/mediapipe-rs/` on first use, so this crate builds on a machine that
+# has never seen MediaPipe and adds no build-time host dependency. The cost of
+# that convenience is a one-time download on a real code path, which is why
+# `face::FaceTracker` forces it to happen on a background thread and never at a
+# chapter boundary.
+mediapipe = "0.1"
+block2 = "0.6"
+dispatch2 = "0.3"
+ureq = { version = "2.12", features = ["json"] }
+rig = "0.41.0"
+schemars = "1"
+tokio = { version = "1", features = ["rt", "macros", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+objc2-web-kit = { version = "0.3", features = [
+    "objc2-app-kit",
+    "WKWebView",
+    "WKWebViewConfiguration",
+    "WKNavigation",
+    # The JS→Rust half of the webview bridge: a script message handler is how a
+    # button in an HTML pane reaches the same UiEvent channel the native controls
+    # already post to. See `ui::web`.
+    "WKUserContentController",
+    "WKScriptMessage",
+    "WKScriptMessageHandler",
+    # The procedural thumbnail's rasteriser: an offscreen web view is loaded with
+    # the card's HTML and photographed. `WKNavigationDelegate` is how it knows
+    # the page is laid out — snapshotting before `didFinish` reliably yields a
+    # blank card — and `WKSnapshotConfiguration` is the snapshot itself.
+    # See src/card/raster.rs.
+    "WKNavigationDelegate",
+    "WKSnapshotConfiguration",
+] }
+# Jinja2 for Rust, by Jinja's own author. The webview panes are rendered here
+# rather than in JavaScript, so `{% macro %}` is what makes a checkbox row or a
+# button bar reusable across panes — see src/ui/templates/.
+# `json` adds the `tojson` filter, which is how a component emits its `data-send`
+# payload — see src/ui/templates/components.html.
+minijinja = { version = "2.24", features = ["json"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+
+[profile.release]
+opt-level = 3
