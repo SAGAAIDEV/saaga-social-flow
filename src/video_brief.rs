@@ -105,7 +105,7 @@ impl Source {
             } else {
                 &self.notes
             },
-            &self.transcript
+            self.transcript
         ))
     }
     pub fn status(&self) -> String {

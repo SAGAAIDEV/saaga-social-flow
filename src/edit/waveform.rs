@@ -121,8 +121,10 @@ fn decode(audio: &Path) -> Result<Peaks> {
     }
     let samples: Vec<i16> = out
         .stdout
-        .chunks_exact(2)
-        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_le_bytes(*pair))
         .collect();
     Ok(Peaks {
         hz: PEAKS_HZ,
