@@ -611,8 +611,15 @@ mod tests {
                 },
                 article => None::<()>,
                 article_path => None::<String>,
+                figures => no_figures(),
             },
         );
+        // The pane rendered, rather than the error page standing in for it. In a
+        // debug build that page dumps the referenced variables, so every string
+        // below is in it too — which is how these two tests passed for weeks
+        // without the `figures` block the template had started to need, and
+        // failed the moment CI ran them in release.
+        assert!(!html.contains("template error"), "{html}");
         // Displayed with `/` as `&#x2f;` — minijinja escapes it and the browser
         // decodes it back, so the host is what to assert on, not the whole URL.
         assert!(html.contains("saagasolve.com"));
@@ -641,8 +648,10 @@ mod tests {
                 posted => None::<()>,
                 article => None::<()>,
                 article_path => None::<String>,
+                figures => no_figures(),
             },
         );
+        assert!(!html.contains("template error"), "{html}");
         assert!(html.contains("Not on YouTube yet"));
         assert!(!html.contains("article.json"));
     }
