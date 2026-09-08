@@ -2360,7 +2360,22 @@ impl App {
     }
 
     fn select_posts_model(&mut self, idx: usize) {
-        self.posts_pick.choose_model(idx);
+        if self.posts_pick.choose_model(idx) {
+            self.save_posts_choice();
+        }
+    }
+
+    /// Write the Post tab's model and provider down.
+    ///
+    /// The twin of [`Self::save_notes_choice`], and absent until now — which is
+    /// why the Post tab forgot its model on every launch.
+    fn save_posts_choice(&self) {
+        let mut cfg = crate::config::load();
+        cfg.posts_model = Some(self.posts_pick.model().to_string());
+        cfg.posts_provider = self.posts_pick.provider().map(str::to_string);
+        if let Err(e) = crate::config::save(&cfg) {
+            eprintln!("stream-recorder: could not save the post model choice: {e:#}");
+        }
     }
 
     /// Picks the Notes tab's provider, then re-fills its model popup.
@@ -2390,6 +2405,9 @@ impl App {
             live.control_target
                 .set_posts_models(self.posts_pick.menu(), self.posts_pick.menu_index());
         }
+        // Changing the provider also repairs the model against the new catalog,
+        // so both halves have to be written, not just the provider.
+        self.save_posts_choice();
     }
 
     /// Keeps the audience/tone instructions between runs.

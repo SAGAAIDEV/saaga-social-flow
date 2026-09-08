@@ -47,6 +47,21 @@ pub struct Config {
     /// Extra instructions appended when building notes.
     #[serde(default)]
     pub notes_prompt: Option<String>,
+    /// The Post tab's own model and provider.
+    ///
+    /// Separate fields rather than reusing `notes_*`: the two stages pick
+    /// independently on purpose (see [`crate::notes::Picker`]), and social copy
+    /// is short and cheap where notes are long — the right model for one is
+    /// routinely the wrong one for the other.
+    ///
+    /// These were missing entirely until the Settings tab gained a models
+    /// section: the Post tab's dropdowns changed the running choice and nothing
+    /// ever wrote it down, so every launch silently reverted to the default and
+    /// the dropdown you set yesterday was not the model that ran today.
+    #[serde(default)]
+    pub posts_model: Option<String>,
+    #[serde(default)]
+    pub posts_provider: Option<String>,
     /// The Post tab's audience/tone instructions, remembered between projects.
     ///
     /// Here rather than in the project because it is a standing preference — who

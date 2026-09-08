@@ -19,7 +19,7 @@ mod transcribe;
 mod view;
 
 pub use openrouter::{
-    load_providers, ModelMenuRow, AUTO_PROVIDER,
+    default_model, load_providers, ModelMenuRow, AUTO_PROVIDER,
 };
 pub use picker::Picker;
 pub use deck::{load as load_notes, NotesData};

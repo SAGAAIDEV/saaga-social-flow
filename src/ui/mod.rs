@@ -1457,6 +1457,7 @@ pub fn settings_page(note: Option<&str>) -> String {
             missing => crate::settings::missing_required(),
             env_path => path,
             team_count => crate::settings::sops::provided().len(),
+            models => crate::settings::models(),
             saved => note.unwrap_or(""),
         },
     )

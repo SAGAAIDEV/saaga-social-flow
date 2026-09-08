@@ -351,6 +351,74 @@ pub fn status() -> Vec<Status> {
         .collect()
 }
 
+/// One stage's model choice, as the Settings pane draws it.
+///
+/// The pane renders what is *stored*, not a live catalog: building the dropdown
+/// needs a provider-scoped model list from OpenRouter, and a settings screen
+/// that blocks on a network call — or worse, renders an empty dropdown when the
+/// call fails — is a worse answer than naming the choice and pointing at the
+/// tab that can change it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelChoice {
+    pub stage: &'static str,
+    /// What this model is used for, in the reader's terms.
+    pub detail: &'static str,
+    pub model: String,
+    /// `None` is OpenRouter's automatic routing.
+    pub provider: String,
+    /// Which tab's dropdowns change it.
+    pub where_to_change: &'static str,
+}
+
+/// Every stage's model and provider, read from the saved config.
+///
+/// Central on purpose: these were spread across three panes with no single
+/// place showing what would actually run, and the Post tab's pair was not
+/// written down at all — chosen from a dropdown, used for that session, and
+/// silently back to the default on the next launch.
+pub fn models() -> Vec<ModelChoice> {
+    let cfg = crate::config::load();
+    let auto = || "Auto (OpenRouter routes)".to_string();
+    let notes_model = cfg
+        .notes_model
+        .clone()
+        .unwrap_or_else(crate::notes::default_model);
+    // Unset means the Post tab starts from the Notes choice, which is what
+    // startup does — so showing the Notes model here is what will actually run.
+    let posts_model = cfg.posts_model.clone().unwrap_or_else(|| notes_model.clone());
+    let posts_provider = cfg
+        .posts_provider
+        .clone()
+        .or_else(|| cfg.notes_provider.clone());
+
+    let mut out = vec![
+        ModelChoice {
+            stage: "Notes, titles and video copy",
+            detail: "Chapter notes, the video title and description, and the blog article.",
+            model: notes_model,
+            provider: cfg.notes_provider.clone().unwrap_or_else(auto),
+            where_to_change: "the dropdowns beside Notes",
+        },
+        ModelChoice {
+            stage: "Social posts",
+            detail: "The copy written for each platform on the Generate posts tab.",
+            model: posts_model,
+            provider: posts_provider.unwrap_or_else(auto),
+            where_to_change: "the dropdowns on Generate posts",
+        },
+    ];
+    if let Some(first) = cfg.thumbnail.models.first() {
+        out.push(ModelChoice {
+            stage: "Thumbnail images",
+            detail: "The image model the thumbnail stage draws with.",
+            model: first.id.clone(),
+            provider: "through OpenRouter".to_string(),
+            where_to_change: "the Thumbnails tab",
+        });
+    }
+    out
+}
+
 /// Print what is set and where it came from, without printing a secret.
 ///
 /// The headless twin of the Settings tab, for the case the tab cannot help
@@ -406,6 +474,11 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
             };
             writeln!(out, "  {mark:<8} {:<24} {from}", field.key)?;
         }
+    }
+
+    writeln!(out, "\nModels")?;
+    for choice in models() {
+        writeln!(out, "  {:<28} {} ({})", choice.stage, choice.model, choice.provider)?;
     }
 
     let missing = missing_required();
@@ -739,6 +812,38 @@ mod tests {
         assert_eq!(parsed.get("B").map(String::as_str), Some("two"));
         assert_eq!(parsed.get("C"), None);
         assert_eq!(parsed.get("D").map(String::as_str), Some("four"));
+    }
+
+    /// Every stage has to name a model, including the ones whose config is
+    /// unset — an empty row here reads as "no model", when what is really
+    /// happening is that a default runs.
+    #[test]
+    fn every_stage_names_a_model_and_a_provider() {
+        for choice in models() {
+            assert!(!choice.model.trim().is_empty(), "{} has no model", choice.stage);
+            assert!(!choice.provider.trim().is_empty(), "{} has no provider", choice.stage);
+            assert!(
+                !choice.where_to_change.trim().is_empty(),
+                "{} does not say where to change it",
+                choice.stage
+            );
+        }
+    }
+
+    /// The Post tab falls back to the Notes model when it has never been given
+    /// one, because that is what startup actually does — showing a different
+    /// model here than the one that will run is the bug this section exists to
+    /// end.
+    #[test]
+    fn an_unset_post_model_reports_the_notes_model_that_will_run() {
+        let cfg = crate::config::load();
+        if cfg.posts_model.is_some() {
+            return; // This machine has made a choice; nothing to infer.
+        }
+        let rows = models();
+        let notes = rows.iter().find(|c| c.stage.starts_with("Notes")).expect("notes row");
+        let posts = rows.iter().find(|c| c.stage == "Social posts").expect("posts row");
+        assert_eq!(posts.model, notes.model, "posts should mirror notes when unset");
     }
 
     /// The report is what a teammate runs when something is wrong, so it has to
