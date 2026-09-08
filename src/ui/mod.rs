@@ -783,8 +783,8 @@ impl ControlTarget {
         alert.addButtonWithTitle(&NSString::from_str("Delete the whole Buffer queue"));
         match alert.runModal() {
             // NSAlertFirstButtonReturn is 1000, and they count up from there.
-            n if n == 1001 => Some(ClearChoice::Project),
-            n if n == 1002 => Some(ClearChoice::Everything),
+            1001 => Some(ClearChoice::Project),
+            1002 => Some(ClearChoice::Everything),
             _ => None,
         }
     }
@@ -1298,6 +1298,7 @@ fn pin_bottom(view: &NSView) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn layout_left(
     width: f64,
     height: f64,
@@ -1534,6 +1535,7 @@ pub fn settings_page(note: Option<&str>) -> String {
 }
 
 /// Build the record window's controls and tabs.
+#[allow(clippy::too_many_arguments)]
 pub fn attach_controls(
     window: &Window,
     cameras: &[CaptureDevice],

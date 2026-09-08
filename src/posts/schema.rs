@@ -100,7 +100,7 @@ pub fn load_manifest(dir: &Path) -> Result<PostsManifest> {
     let json_path = dir.join(POSTS_JSON);
     let text = std::fs::read_to_string(&json_path)
         .with_context(|| format!("reading {}", json_path.display()))?;
-    Ok(serde_json::from_str(&text).with_context(|| format!("parsing {}", json_path.display()))?)
+    serde_json::from_str(&text).with_context(|| format!("parsing {}", json_path.display()))
 }
 
 #[cfg(test)]

@@ -49,12 +49,12 @@ pub fn create_composed_writer(
     let settings = video_settings(spec.width(), spec.height())?;
     let url_string = NSString::from_str(&out_path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&url_string);
-    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, &file_type) }
+    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type) }
         .map_err(|e| anyhow!("could not create the {} writer: {e:?}", spec.name()))?;
 
     let video_input = unsafe {
         AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &video_type,
+            video_type,
             Some(&settings),
         )
     };
@@ -89,7 +89,7 @@ pub fn create_composed_writer(
         })?;
         let input = unsafe {
             AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-                &audio_type,
+                audio_type,
                 Some(settings),
             )
         };

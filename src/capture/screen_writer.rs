@@ -117,14 +117,11 @@ pub fn create_screen_writer(
 
     let url_string = NSString::from_str(&out_path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&url_string);
-    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, &file_type) }
+    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type) }
         .map_err(|e| anyhow!("could not create the screen asset writer: {e:?}"))?;
 
     let input = unsafe {
-        AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &video_type,
-            Some(settings),
-        )
+        AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(video_type, Some(settings))
     };
     unsafe { input.setExpectsMediaDataInRealTime(true) };
 

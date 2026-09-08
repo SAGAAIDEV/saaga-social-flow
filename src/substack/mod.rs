@@ -30,7 +30,8 @@ use crate::session::Session;
 
 pub enum SubstackEvent {
     Status(String),
-    Ready(PathBuf, SubstackNotes),
+    /// Boxed: the notes are most of a page and the enum travels by value.
+    Ready(PathBuf, Box<SubstackNotes>),
     /// Terminal failure. Distinct from a `Status` saying the same words: the app
     /// has to know the thread is gone so it can re-enable the button.
     Failed(String),
@@ -49,7 +50,7 @@ pub fn spawn_generate(
             move || match run(&session, &model, provider.as_deref(), &tx) {
                 Ok((path, notes)) => {
                     eprintln!("stream-recorder: substack notes → {}", path.display());
-                    let _ = tx.send(SubstackEvent::Ready(path, notes));
+                    let _ = tx.send(SubstackEvent::Ready(path, Box::new(notes)));
                 }
                 Err(err) => {
                     eprintln!("stream-recorder: substack notes failed: {err:#}");

@@ -43,7 +43,7 @@ pub fn devices_of(media_type: &AVMediaType) -> Retained<NSArray<AVCaptureDevice>
     // would make the discovery session find nothing and silently take the
     // fallback path below on every call.
     let is_audio =
-        unsafe { objc2_av_foundation::AVMediaTypeAudio }.is_some_and(|audio| media_type == &*audio);
+        unsafe { objc2_av_foundation::AVMediaTypeAudio }.is_some_and(|audio| media_type == audio);
     let types: &[&AVCaptureDeviceType] = unsafe {
         if is_audio {
             // `Microphone` supersedes `BuiltInMicrophone` and covers external

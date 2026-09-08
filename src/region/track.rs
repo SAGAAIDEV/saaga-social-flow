@@ -93,7 +93,9 @@ pub fn tracked_crop(
     floor: (f64, f64),
 ) -> BufferRect {
     let (x, y, w, h) = rest;
-    if !(w > 0.0 && h > 0.0) || !x.is_finite() || !y.is_finite() {
+    // Comparisons rather than `<= 0.0`, so a NaN side reads as no area too.
+    let has_area = w > 0.0 && h > 0.0;
+    if !has_area || !x.is_finite() || !y.is_finite() {
         return rest;
     }
     if !pointer.0.is_finite() || !pointer.1.is_finite() || !punch.is_finite() {

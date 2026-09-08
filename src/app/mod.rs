@@ -1314,6 +1314,7 @@ impl App {
             match event {
                 crate::substack::SubstackEvent::Status(msg) => self.set_substack_status(&msg),
                 crate::substack::SubstackEvent::Ready(path, notes) => {
+                    let notes = *notes;
                     self.substack_busy = false;
                     self.update_substack_view();
                     self.set_substack_status(&format!(

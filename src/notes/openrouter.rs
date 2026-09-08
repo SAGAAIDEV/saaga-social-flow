@@ -94,7 +94,7 @@ pub fn model_menu(list: &[ModelChoice]) -> Vec<ModelMenuRow> {
     }
     let mut out = Vec::new();
     for (cat, mut models) in groups {
-        models.sort_by(|a, b| short_label(a).cmp(&short_label(b)));
+        models.sort_by_key(|a| short_label(a));
         out.push(ModelMenuRow::Header(cat));
         for model in models {
             out.push(ModelMenuRow::Model {

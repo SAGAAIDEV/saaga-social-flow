@@ -311,10 +311,15 @@ impl VideoOp for Cover {
                 .clone()
                 .context("the cover op needs a GPU render context and this session has none")?,
         );
-        self.pool = Some(Arc::new(
+        // Shared with the render callback on the capture queue; the pool is a
+        // CoreVideo handle this crate cannot mark `Send`, which is all the lint
+        // sees. An `Rc` would be wrong for exactly that reason.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let pool = Arc::new(
             Pool::create(self.output.w, self.output.h)
                 .context("creating the cover op's pixel buffer pool")?,
-        ));
+        );
+        self.pool = Some(pool);
         self.failed = 0;
         Ok(())
     }

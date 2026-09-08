@@ -221,7 +221,7 @@ impl PointRect {
     /// contents are already in this space and nothing converts back. Adding a
     /// `from_appkit` would be an untested second implementation of the same
     /// y-flip waiting to disagree with this one.
-    pub fn to_appkit(&self, geom: &DisplayGeometry) -> CGRect {
+    pub fn to_appkit(self, geom: &DisplayGeometry) -> CGRect {
         // AppKit y is measured up from the *primary* screen's bottom edge and
         // names the rect's bottom; Core Graphics y is measured down from the
         // primary's top edge and names its top. Flipping needs the primary's
@@ -248,7 +248,7 @@ impl PointRect {
     ///
     /// What `SCScreenshotManager::captureImageInRect:` takes — see
     /// [`crate::figure::shot`].
-    pub fn to_cg_global(&self, geom: &DisplayGeometry) -> CGRect {
+    pub fn to_cg_global(self, geom: &DisplayGeometry) -> CGRect {
         CGRect::new(
             CGPoint::new(self.x + geom.cg_origin.0, self.y + geom.cg_origin.1),
             CGSize::new(self.w, self.h),
@@ -260,7 +260,7 @@ impl PointRect {
     /// A separate method from the field access it happens to be, so the call
     /// site reads as a deliberate handoff into ScreenCaptureKit's units rather
     /// than as a rect being passed somewhere by luck.
-    pub fn to_source_rect(&self) -> CGRect {
+    pub fn to_source_rect(self) -> CGRect {
         CGRect::new(CGPoint::new(self.x, self.y), CGSize::new(self.w, self.h))
     }
 

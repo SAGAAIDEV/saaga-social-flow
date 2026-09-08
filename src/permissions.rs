@@ -22,7 +22,7 @@ use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCapture
 pub fn ensure_audio_access() -> Result<bool> {
     let media_type =
         unsafe { AVMediaTypeAudio }.ok_or_else(|| anyhow!("AVMediaTypeAudio unavailable"))?;
-    ensure_access(&media_type)
+    ensure_access(media_type)
 }
 
 /// Block until the user answers the camera permission prompt, or return
@@ -30,7 +30,7 @@ pub fn ensure_audio_access() -> Result<bool> {
 pub fn ensure_video_access() -> Result<bool> {
     let media_type =
         unsafe { AVMediaTypeVideo }.ok_or_else(|| anyhow!("AVMediaTypeVideo unavailable"))?;
-    ensure_access(&media_type)
+    ensure_access(media_type)
 }
 
 /// Whether this process may capture the screen, prompting once if the user

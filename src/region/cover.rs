@@ -150,7 +150,9 @@ pub fn offset_for_point(
     let fit = cover_zoom(src, slot, (0.5, 0.5), zoom);
     let overflow = fit.overflow(src);
     let axis = |point: f64, span: f64, visible: f64, overflow: f64| {
-        if !(overflow > 0.0) || !point.is_finite() {
+        // A comparison rather than `<= 0.0`: a NaN overflow must read as none.
+        let overflowing = overflow > 0.0;
+        if !overflowing || !point.is_finite() {
             return 0.5;
         }
         // Where the window's *top-left* has to sit for its centre to land on

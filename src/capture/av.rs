@@ -37,13 +37,13 @@ pub type CameraDevice = CaptureDevice;
 pub fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let media_type =
         unsafe { AVMediaTypeAudio }.ok_or_else(|| anyhow!("AVMediaTypeAudio unavailable"))?;
-    device_picker::list_devices(&media_type)
+    device_picker::list_devices(media_type)
 }
 
 pub fn list_camera_devices() -> Result<Vec<CameraDevice>> {
     let media_type =
         unsafe { AVMediaTypeVideo }.ok_or_else(|| anyhow!("AVMediaTypeVideo unavailable"))?;
-    device_picker::list_devices(&media_type)
+    device_picker::list_devices(media_type)
 }
 
 /// The microphone System Settings › Sound has as its input, when AVFoundation
@@ -160,11 +160,11 @@ impl Connection {
         // These must exist: without them writer inputs fall back to passthrough
         // (no encoding) and the output is unplayable. Fail fast instead.
         let video_settings = unsafe {
-            video_output.recommendedVideoSettingsForAssetWriterWithOutputFileType(&file_type)
+            video_output.recommendedVideoSettingsForAssetWriterWithOutputFileType(file_type)
         }
         .ok_or_else(|| anyhow!("no recommended video settings for this session"))?;
         let audio_settings = unsafe {
-            audio_output.recommendedAudioSettingsForAssetWriterWithOutputFileType(&file_type)
+            audio_output.recommendedAudioSettingsForAssetWriterWithOutputFileType(file_type)
         }
         .ok_or_else(|| anyhow!("no recommended audio settings for this session"))?;
 
@@ -374,12 +374,12 @@ pub fn create_chapter_writer(
     // Create the AVAssetWriter.
     let url_string = NSString::from_str(&out_path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&url_string);
-    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, &file_type) }
+    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type) }
         .map_err(|e| anyhow!("could not create asset writer: {e:?}"))?;
 
     let video_writer_input = unsafe {
         AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &video_type,
+            video_type,
             Some(video_settings),
         )
     };
@@ -387,7 +387,7 @@ pub fn create_chapter_writer(
 
     let audio_writer_input = unsafe {
         AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &audio_type,
+            audio_type,
             Some(audio_settings),
         )
     };
@@ -444,12 +444,12 @@ pub fn create_audio_writer(
 
     let url_string = NSString::from_str(&out_path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&url_string);
-    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, &file_type) }
+    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type) }
         .map_err(|e| anyhow!("could not create asset writer: {e:?}"))?;
 
     let audio_input = unsafe {
         AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &audio_type,
+            audio_type,
             Some(audio_settings),
         )
     };

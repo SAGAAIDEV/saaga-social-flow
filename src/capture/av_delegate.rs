@@ -155,6 +155,10 @@ impl AvDelegate {
     /// Create a delegate with no writer attached — capture runs and buffers
     /// are counted-and-dropped until a writer is installed via `state_arc()`
     /// (normally by the Router, or `Connection::install_writer`).
+    // `state` is shared with the capture callbacks, which the system runs on
+    // its own queue, so the `Arc` is real; its payload is an Objective-C handle
+    // this crate cannot mark `Send`, which is all the lint sees.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Retained<Self> {
         let this = Self::alloc().set_ivars(AvDelegateIvars {
             state: std::sync::Arc::new(Mutex::new(None)),

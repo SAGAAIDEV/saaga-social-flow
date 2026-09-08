@@ -294,7 +294,7 @@ impl Graph {
                 if run.dropped_any {
                     self.counters.dropped += 1;
                 }
-                return run;
+                run
             }
             Ok(Err(message)) => {
                 self.bypass(&format!("{} graph: {message}", self.stream.as_str()));

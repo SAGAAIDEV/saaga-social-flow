@@ -114,7 +114,7 @@ impl App {
     pub(super) fn screen_wanted(&self) -> Option<&str> {
         self.layout()
             .needs_screen()
-            .then(|| self.screen_uid.as_deref())
+            .then_some(self.screen_uid.as_deref())
             .flatten()
     }
 

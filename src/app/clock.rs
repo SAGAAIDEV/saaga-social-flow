@@ -186,6 +186,8 @@ impl RecordClock {
         }
     }
 
+    /// Only the tests read this back; the app asks the router, not the clock.
+    #[cfg(test)]
     pub fn is_paused(&self) -> bool {
         self.open
             .as_ref()

@@ -131,6 +131,10 @@ define_class!(
 );
 
 impl ScreenDelegate {
+    // `state` is shared with the capture callbacks, which the system runs on
+    // its own queue, so the `Arc` is real; its payload is an Objective-C handle
+    // this crate cannot mark `Send`, which is all the lint sees.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Retained<Self> {
         let this = Self::alloc().set_ivars(ScreenDelegateIvars {
             state: Arc::new(Mutex::new(None)),

@@ -153,10 +153,9 @@ fn explain(stderr: &str) -> String {
     // someone to re-run `aws sso login` when they simply have no access wastes
     // the one instruction they will actually follow.
     if lower.contains("accessdenied") || lower.contains("not authorized") {
-        return format!(
-            "your AWS account has no grant on the saaga dev KMS key — \
+        return "your AWS account has no grant on the saaga dev KMS key — \
              ask for kms:Decrypt on it, then retry"
-        );
+            .to_string();
     }
     if lower.contains("expired") || lower.contains("sso session") || lower.contains("invalid_grant")
     {

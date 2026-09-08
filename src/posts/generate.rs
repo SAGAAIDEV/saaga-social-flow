@@ -119,6 +119,7 @@ pub struct VideoContext {
     pub transcript_text: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_posts(
     videos: &[VideoContext],
     project_title: &str,

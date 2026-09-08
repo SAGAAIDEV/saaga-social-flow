@@ -115,6 +115,7 @@ pub struct BlockView {
 /// rather than under a path this function is given, so loading them internally
 /// would make the pane — and every test of it — depend on whatever the machine
 /// happens to have picked.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     root: &Path,
     dir: &Path,

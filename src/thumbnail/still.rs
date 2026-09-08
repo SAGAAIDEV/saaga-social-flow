@@ -203,7 +203,7 @@ fn list_in(root: &Path, subdir: &str) -> Vec<PathBuf> {
             Some((at, path))
         })
         .collect();
-    stills.sort_by(|a, b| b.0.cmp(&a.0));
+    stills.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
     stills.into_iter().map(|(_, path)| path).collect()
 }
 

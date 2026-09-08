@@ -81,6 +81,8 @@ impl Pause {
         self.floor = now;
     }
 
+    /// Only the tests read this back; the router tracks the break itself.
+    #[cfg(test)]
     pub fn is_paused(&self) -> bool {
         self.paused_at.is_some()
     }
@@ -90,7 +92,8 @@ impl Pause {
         self.removed.is_some()
     }
 
-    /// Everything removed so far, in seconds.
+    /// Everything removed so far, in seconds. Only the tests read it back.
+    #[cfg(test)]
     pub fn removed_seconds(&self) -> f64 {
         self.removed.map(crate::timesync::seconds).unwrap_or(0.0)
     }

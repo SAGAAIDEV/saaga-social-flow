@@ -48,7 +48,7 @@ pub struct Corpus {
     /// Plan items a human left unapproved, with the reason they exist.
     pub declined: Vec<String>,
     /// Measured posts: label, window, and the metrics that came back.
-    pub measured: Vec<(String, String, Vec<(String, f64)>)>,
+    pub measured: Vec<Measured>,
     pub llm_steps: usize,
 }
 
@@ -206,8 +206,12 @@ pub fn declined(plan: &SchedulePlan) -> Vec<String> {
         .collect()
 }
 
+/// One measured post: its label, the window it was measured over, and the
+/// metrics that came back.
+pub type Measured = (String, String, Vec<(String, f64)>);
+
 /// Measured posts, flattened to (label, window, metrics).
-pub fn measured(rows: &[AnalyticsRow]) -> Vec<(String, String, Vec<(String, f64)>)> {
+pub fn measured(rows: &[AnalyticsRow]) -> Vec<Measured> {
     rows.iter()
         .filter(|row| !row.metrics.is_empty())
         .map(|row| {

@@ -478,6 +478,7 @@ fn bake_duration(body: &str, seconds: f64, block: &str) -> Result<String> {
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_wrapper(
     workspace: &Path,
     id: &str,
