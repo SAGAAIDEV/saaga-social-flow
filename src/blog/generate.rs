@@ -513,8 +513,12 @@ pub fn generate_article(
         bail!("no transcribed chapters to write an article from");
     }
 
-    let system =
+    let mut system =
         crate::agent::prompt::resolve(crate::agent::prompt::BLOG, SYSTEM_PROMPT, prompt_root);
+    if let Some(note) = stale_preamble(&system, figures, components) {
+        eprintln!("stream-recorder: {note}");
+        system = crate::agent::prompt::builtin_version(SYSTEM_PROMPT);
+    }
     let prompt = build_user_prompt(longform, figures, components);
 
     let (extracted, step) = crate::agent::extract::extract::<ArticleExtraction>(
@@ -531,6 +535,75 @@ pub fn generate_article(
         bail!("the model returned nothing publishable — no title, slug, description or body");
     }
     Ok((article, step))
+}
+
+/// Why the standing prompt cannot run this draft, or `None` when it can.
+///
+/// The builtin describes every block kind, but a standing overlay in the prompt
+/// library is a copy of the builtin as it was the day it was seeded — see
+/// [`crate::agent::prompt::ensure_library_overlay`] — and one seeded before
+/// figures or components existed says nothing about them. The offers still
+/// reach the model in the user prompt, but a kind the preamble never named is a
+/// kind the model never emits, and every figure captured for the video is left
+/// out of the article without a word. That is exactly what happened to the
+/// first figure-bearing drafts, and why this exists: a preamble that does not
+/// describe a kind this draft needs is not used, and the builtin runs instead.
+///
+/// Relative to what is offered, deliberately. A stale prompt costs nothing on a
+/// video with no figures, and a house prompt someone tuned should keep running
+/// for as long as it can.
+pub fn stale_preamble(
+    system: &crate::agent::prompt::Resolved,
+    figures: &[FigureOffer],
+    components: &[EmbedOffer],
+) -> Option<String> {
+    if system.is_builtin() {
+        return None;
+    }
+    let mut missing = Vec::new();
+    if !figures.is_empty() && !describes_block(&system.text, "figure") {
+        missing.push("figure");
+    }
+    if !components.is_empty() && !describes_block(&system.text, "embed") {
+        missing.push("embed");
+    }
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "the standing blog prompt ({}) predates the {} block and would leave every offered \
+         one out, so this draft runs on the builtin — Edit Prompt and re-seed it to keep your \
+         changes",
+        system.label(),
+        missing.join(" and "),
+    ))
+}
+
+/// [`stale_preamble`] for a caller that has not resolved the prompt itself: the
+/// status line a draft starts with, which should say up front that the standing
+/// prompt is being bypassed rather than leave it to the log.
+pub fn stale_preamble_note(
+    prompt_root: Option<&std::path::Path>,
+    figures: &[FigureOffer],
+    components: &[EmbedOffer],
+) -> Option<String> {
+    let system =
+        crate::agent::prompt::resolve(crate::agent::prompt::BLOG, SYSTEM_PROMPT, prompt_root);
+    stale_preamble(&system, figures, components)
+}
+
+/// Whether `preamble` introduces `kind` as a block: a line that opens with the
+/// kind's name and then a dash or a colon, the way the builtin's block list is
+/// written. Deliberately not a bare word search — "embed" appears in any prompt
+/// that mentions the video embed at the top of the page, and the overlay this
+/// was written against mentioned it three times without describing the block.
+fn describes_block(preamble: &str, kind: &str) -> bool {
+    preamble.lines().any(|line| {
+        line.trim_start()
+            .strip_prefix(kind)
+            .map(str::trim_start)
+            .is_some_and(|rest| rest.starts_with(['—', '–', '-', ':']))
+    })
 }
 
 /// The whole longform, chapter by chapter — the same shape the Substack and Post
@@ -1084,6 +1157,78 @@ mod tests {
             manifest_at < chapter_at,
             "the manifest is buried under the transcript"
         );
+    }
+
+    /// The failure this guards against, as it happened: a library overlay seeded
+    /// before figures existed lists text, quote and table; the user prompt
+    /// offers three figures; and the model, never told a `figure` block exists,
+    /// places none. Such a preamble is not used for a draft that offers them.
+    #[test]
+    fn a_preamble_that_predates_figures_is_not_used_when_figures_are_offered() {
+        let stale = crate::agent::prompt::Resolved {
+            text: "blocks — the body, in order, mixing three kinds:\n\n  text — the spine.\n\n  \
+                   quote — a line worth remembering.\n\n  table — at most one.\n\nThe video is \
+                   embedded at the top; the article has to stand on its own if the\nembed fails."
+                .into(),
+            version: None,
+            hash: "6f1467aaeaaabf7e".into(),
+        };
+        let component = EmbedOffer { id: "steps".into(), brief: "How the retry works.".into() };
+
+        let note = stale_preamble(&stale, &offered(&[1]), &[]).expect("a stale prompt is noticed");
+        assert!(note.contains("predates the figure block"), "{note}");
+        assert!(note.contains("unversioned (6f1467aa"), "names the prompt that ran: {note}");
+        assert!(note.contains("Edit Prompt"), "says what to do about it: {note}");
+
+        let note = stale_preamble(&stale, &[], std::slice::from_ref(&component)).unwrap();
+        assert!(note.contains("predates the embed block"), "{note}");
+        assert!(!note.contains("figure"), "nothing was said about figures: {note}");
+
+        let both = stale_preamble(&stale, &offered(&[1]), std::slice::from_ref(&component)).unwrap();
+        assert!(both.contains("figure and embed block"), "{both}");
+    }
+
+    /// Stale only relative to what is offered. A video with nothing to place
+    /// runs on whatever prompt is standing, and a prompt that does describe the
+    /// kinds — the builtin, or a house prompt seeded from it and tuned — is left
+    /// alone however it is versioned: the check reads the text, not the label.
+    #[test]
+    fn a_preamble_is_only_stale_relative_to_what_is_offered() {
+        let stale = crate::agent::prompt::Resolved {
+            text: "text — the spine.".into(),
+            version: None,
+            hash: "abc".into(),
+        };
+        assert_eq!(stale_preamble(&stale, &[], &[]), None);
+
+        let component = EmbedOffer { id: "steps".into(), brief: "b".into() };
+        let builtin = crate::agent::prompt::builtin_version(SYSTEM_PROMPT);
+        assert_eq!(
+            stale_preamble(&builtin, &offered(&[1]), std::slice::from_ref(&component)),
+            None
+        );
+
+        let house = crate::agent::prompt::Resolved {
+            text: SYSTEM_PROMPT.replace("saagasolve.com", "example.com"),
+            version: None,
+            hash: "def".into(),
+        };
+        assert_eq!(
+            stale_preamble(&house, &offered(&[1]), std::slice::from_ref(&component)),
+            None
+        );
+    }
+
+    /// The word alone is not enough: every article prompt mentions the video
+    /// embed, and the old overlay did, without describing an `embed` block.
+    #[test]
+    fn a_block_is_described_by_its_own_line_not_by_a_passing_mention() {
+        assert!(describes_block("  embed — an interactive component.", "embed"));
+        assert!(describes_block("figure: a screenshot", "figure"));
+        assert!(describes_block("figure - a screenshot", "figure"));
+        assert!(!describes_block("if the\nembed fails, the article stands alone", "embed"));
+        assert!(!describes_block("Use each figure at most once.", "figure"));
+        assert!(!describes_block("figures — the plural is a different word", "figure"));
     }
 
     /// Most videos have no figures, and the prompt must not imply otherwise.

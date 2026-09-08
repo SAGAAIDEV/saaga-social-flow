@@ -44,7 +44,7 @@
 //! | `mod.rs` | the record and its append-only ledger — the only part with no AppKit or network in it |
 //! | [`snip`] | the overlay you drag the rectangle on |
 //! | [`shot`] | that rectangle to a picture, through ScreenCaptureKit |
-//! | [`encode`] | that picture to the one shape, size and format every figure has |
+//! | [`encode`] | that picture to a lossless file at its own size, under a ceiling |
 //! | [`aside`] | the microphone alone, recorded while the author explains the figure |
 //! | [`blurb`] | the vision call that says what the picture shows |
 //! | [`pane`] | what the Blog tab draws about all of it |

@@ -125,21 +125,16 @@ fn size_label(selection: &PointRect, geometry: &DisplayGeometry) {
     };
 }
 
-/// What the label says: the pixels under the box and, when they differ, the
-/// size they become — see [`crate::figure::encode`]. An arrow up is the one
-/// thing a thumbnail cannot show and the difference between a crisp figure and
-/// a soft one: the box is smaller than the figure it will be scaled up into.
+/// What the label says: the pixels under the box and, when the encoder will
+/// bring them down to its ceiling, the size they become — see
+/// [`crate::figure::encode::published_size`]. Nothing is ever scaled up, so
+/// there is no arrow the other way: a small box is a small figure.
 pub(super) fn size_text(w: i64, h: i64) -> String {
-    let (tw, th) = (
-        i64::from(crate::figure::encode::WIDTH),
-        i64::from(crate::figure::encode::HEIGHT),
-    );
-    if w < tw {
-        format!("{w} × {h}  ↑ {tw} × {th}")
-    } else if w > tw {
-        format!("{w} × {h}  ↓ {tw} × {th}")
-    } else {
-        format!("{w} × {h}")
+    let (pw, ph) =
+        crate::figure::encode::published_size(w.max(0) as u32, h.max(0) as u32);
+    match (i64::from(pw), i64::from(ph)) == (w, h) {
+        true => format!("{w} × {h}"),
+        false => format!("{w} × {h}  ↓ {pw} × {ph}"),
     }
 }
 

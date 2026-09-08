@@ -36,12 +36,13 @@
 //! screenshot despite the sharing type, the captured area contains nothing of
 //! ours to composite.
 //!
-//! ## The box is 4:3
+//! ## The box is what you drag
 //!
-//! Every figure is published at one size — see [`crate::figure::encode`] — so
-//! the drag chooses *how much* of the screen, never what shape. The box grows
-//! from the press toward the pointer at 4:3, and the label shows the pixels
-//! under it and what they will become. See [`aspect_rect`].
+//! Figures are published at their own size — see [`crate::figure::encode`] — so
+//! the drag chooses the rectangle itself, shape and all. It runs from the press
+//! to the pointer whichever way the hand went, and stops at the display's edge,
+//! because a rect past it is one ScreenCaptureKit answers with nothing. The
+//! label shows the pixels under it. See [`drag_rect`].
 //!
 //! ## Layout of this module
 //!
@@ -102,70 +103,37 @@ pub(super) struct SnipState {
 }
 
 impl SnipState {
-    /// The selection as it stands: a 4:3 box grown from the press toward the
-    /// pointer, held inside the display — see [`aspect_rect`].
+    /// The selection as it stands: the rectangle from the press to the
+    /// pointer, held inside the display — see [`drag_rect`].
     pub(super) fn selection(&self) -> Option<PointRect> {
         let anchor = self.anchor?;
         let cursor = self.cursor?;
-        Some(aspect_rect(
-            anchor,
-            cursor,
-            crate::figure::encode::ASPECT,
-            &self.geometry,
-        ))
+        Some(drag_rect(anchor, cursor, &self.geometry))
     }
 }
 
-/// The box a drag from `anchor` toward `cursor` selects, locked to `aspect`
-/// (width over height) and held inside the display.
+/// The rectangle a drag from `anchor` to `cursor` selects, held inside the
+/// display.
 ///
-/// Every figure is the same shape — see [`crate::figure::encode`] — so the drag
-/// sets a *size*, not a rectangle. The axis that has travelled further, in
-/// aspect terms, sets it and the other follows, so the box grows smoothly
-/// under the pointer rather than snapping between two fits. It grows from the
-/// corner the press landed on, in the direction the pointer went, which is
-/// what makes dragging up-left and dragging down-right the same gesture.
-///
-/// Held inside the display by *shrinking*, not by clamping an edge. The pointer
-/// is not confined to the window, and a source rect past the display's edge is
-/// one ScreenCaptureKit answers with nothing — but pulling one edge back on its
-/// own would break the aspect, and a figure that is not 4:3 is exactly what the
-/// lock exists to prevent. A press that itself landed off the display is
-/// brought onto it first, so there is somewhere to grow from.
-fn aspect_rect(
-    anchor: (f64, f64),
-    cursor: (f64, f64),
-    aspect: f64,
-    geometry: &DisplayGeometry,
-) -> PointRect {
+/// Any shape. A figure is published at the size it was dragged at — see
+/// [`crate::figure::encode`] — so the box is exactly the two corners the hand
+/// named, normalised so that dragging up-left and dragging down-right are the
+/// same gesture. Both corners are clamped to the display rather than the box
+/// being shrunk to a shape, because there is no shape to keep: the pointer is
+/// not confined to the window, and a source rect past the display's edge is one
+/// ScreenCaptureKit answers with nothing, so the edge is simply where the
+/// selection stops.
+fn drag_rect(anchor: (f64, f64), cursor: (f64, f64), geometry: &DisplayGeometry) -> PointRect {
     let (max_w, max_h) = geometry.points;
     let ax = anchor.0.clamp(0.0, max_w);
     let ay = anchor.1.clamp(0.0, max_h);
-    let dx = cursor.0 - ax;
-    let dy = cursor.1 - ay;
-    let right = dx >= 0.0;
-    let down = dy >= 0.0;
-
-    // The size asked for: the further axis, measured in widths.
-    let mut w = dx.abs().max(dy.abs() * aspect);
-    let mut h = w / aspect;
-    // The room there is from the press in the direction of travel, and the
-    // largest box of this shape that fits in it.
-    let room_w = if right { max_w - ax } else { ax };
-    let room_h = if down { max_h - ay } else { ay };
-    if w > room_w {
-        w = room_w;
-        h = w / aspect;
-    }
-    if h > room_h {
-        h = room_h;
-        w = h * aspect;
-    }
+    let cx = cursor.0.clamp(0.0, max_w);
+    let cy = cursor.1.clamp(0.0, max_h);
     PointRect {
-        x: if right { ax } else { ax - w },
-        y: if down { ay } else { ay - h },
-        w,
-        h,
+        x: ax.min(cx),
+        y: ay.min(cy),
+        w: (cx - ax).abs(),
+        h: (cy - ay).abs(),
     }
 }
 

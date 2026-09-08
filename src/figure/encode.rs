@@ -1,12 +1,23 @@
-//! The figure's picture: one shape, one size, one format.
+//! The figure's picture: the pixels you dragged over, lossless, and no bigger
+//! than the column needs.
 //!
-//! Every figure is **4:3, 1600 × 1200, lossless WebP**. The drag is locked to
-//! the shape — see [`crate::figure::snip`] — and whatever it covered is
-//! resampled here to the one size, so figures line up in the article column
-//! at the same width and the same height rather than each choosing its own.
-//! 1600 × 1200 is twice an ~800 px column, which is what holds up on a retina
-//! screen; a figure is usually a screenshot of text, exactly the content that
-//! turns to mush when it is scaled at the wrong step.
+//! A figure used to be one shape and one size — every drag was cropped to 4:3
+//! and resampled to 1600 × 1200 so figures lined up in the article column at
+//! the same width and height. That lock is gone. A terminal is wide, a dialog
+//! is tall and a menu is a strip, and forcing each into the same box either cut
+//! off what the figure was taken to show or padded it with screen nobody meant
+//! to include. The file is now the rectangle that was dragged, at the pixels
+//! the display had under it, and the ledger records each figure's own size so
+//! the page lays it out in its own box — see
+//! [`crate::blog::payload::FigureMedia`].
+//!
+//! The one thing still imposed is a ceiling. A drag over most of a 5K display
+//! is a 5000-pixel-wide lossless file of many megabytes, for a column ~800
+//! points wide that shows at most twice that on a retina screen. So the longer
+//! edge is capped at [`MAX_EDGE`] and the picture is scaled down to fit with
+//! its shape kept. Nothing is ever scaled *up*: a screenshot of text is the
+//! content that turns to mush when it is resampled, and enlarging one invents
+//! pixels that were never on screen.
 //!
 //! Lossless WebP because of that content too. A JPEG of a terminal window rings
 //! around every glyph; a lossless WebP of the same window is sharp and, for
@@ -17,11 +28,11 @@
 //! ## The PNG hop
 //!
 //! The pixels leave Core Image as a PNG and are read back by the `image` crate
-//! before they are cropped, resampled and encoded. Rendering straight to a
-//! bitmap would save the round trip, but Core Image's bitmap row order is a
-//! convention this crate would have to get right blind; PNG is a format, and
-//! a wrong guess here is a figure published upside down. The hop costs a
-//! fraction of a second per figure, on ScreenCaptureKit's queue, once.
+//! before they are sized and encoded. Rendering straight to a bitmap would save
+//! the round trip, but Core Image's bitmap row order is a convention this crate
+//! would have to get right blind; PNG is a format, and a wrong guess here is a
+//! figure published upside down. The hop costs a fraction of a second per
+//! figure, on ScreenCaptureKit's queue, once.
 //!
 //! [`crate::thumbnail::still`] keeps its own JPEG path: a still is a reference
 //! image fed to a model, not a published picture, and the two have nothing to
@@ -29,17 +40,17 @@
 
 use std::io::Cursor;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use image::codecs::webp::WebPEncoder;
 use image::{imageops, ExtendedColorType, ImageFormat, ImageReader, RgbImage};
 use objc2_core_graphics::{CGColorSpace, CGImage};
 use objc2_core_image::{kCIFormatRGBA8, CIContext, CIImage};
 use objc2_foundation::NSDictionary;
 
-/// Width over height. The drag is locked to it and the file is cropped to it.
-pub const ASPECT: f64 = 4.0 / 3.0;
-pub const WIDTH: u32 = 1600;
-pub const HEIGHT: u32 = 1200;
+/// The most pixels a figure has along its longer edge. Three times an ~800
+/// point column, which is past what any display shows it at, and the point
+/// where a lossless file of flat UI stops being a few hundred kilobytes.
+pub const MAX_EDGE: u32 = 2400;
 pub const EXTENSION: &str = "webp";
 
 /// The picture as it is published, from the image the shutter answered with.
@@ -68,42 +79,44 @@ fn png_of(image: &CGImage) -> Result<Vec<u8>> {
     Ok(data.to_vec())
 }
 
-/// Crop to 4:3 about the centre, resample to the one size, encode lossless.
+/// Bring the picture under the ceiling if it is over it, keep its shape, and
+/// encode it lossless.
 ///
 /// Split from the Core Image half so it can be tested with pixels made here.
 pub fn encode_rgb(pixels: RgbImage) -> Result<Vec<u8>> {
-    let framed = frame(pixels);
-    let resized = imageops::resize(&framed, WIDTH, HEIGHT, imageops::FilterType::Lanczos3);
+    let (w, h) = pixels.dimensions();
+    if w == 0 || h == 0 {
+        bail!("the screenshot has no pixels in it");
+    }
+    let (pw, ph) = published_size(w, h);
+    let sized = match (pw, ph) == (w, h) {
+        true => pixels,
+        false => imageops::resize(&pixels, pw, ph, imageops::FilterType::Lanczos3),
+    };
     let mut out = Vec::new();
     WebPEncoder::new_lossless(&mut out)
-        .encode(resized.as_raw(), WIDTH, HEIGHT, ExtendedColorType::Rgb8)
+        .encode(sized.as_raw(), pw, ph, ExtendedColorType::Rgb8)
         .context("encoding the figure as WebP")?;
     Ok(out)
 }
 
-/// Trim to exactly 4:3 about the centre.
+/// The size a picture of `w` × `h` is published at: itself, unless its longer
+/// edge is past [`MAX_EDGE`], in which case it is scaled to fit with the shape
+/// kept — the shorter edge rounded, and never below a pixel.
 ///
-/// The drag is aspect-locked, so this is normally a pixel of rounding. It
-/// matters when the display's edge cut the box short of the shape — and it is
-/// a crop rather than a stretch, because a resample to a different shape would
-/// squash every glyph a fraction and nobody would be able to say why the
-/// figure looked wrong.
-fn frame(pixels: RgbImage) -> RgbImage {
-    let (w, h) = pixels.dimensions();
-    if w == 0 || h == 0 {
-        return pixels;
+/// Shared with the snip overlay's label, so what the label promises while you
+/// drag is exactly what the encoder does once you let go.
+pub fn published_size(w: u32, h: u32) -> (u32, u32) {
+    let long = w.max(h);
+    if long <= MAX_EDGE {
+        return (w, h);
     }
-    let (cw, ch) = if f64::from(w) / f64::from(h) > ASPECT {
-        // Too wide: keep the height, trim the sides.
-        (((f64::from(h) * ASPECT).round() as u32).min(w), h)
-    } else {
-        // Too tall: keep the width, trim top and bottom.
-        (w, ((f64::from(w) / ASPECT).round() as u32).min(h))
-    };
-    if (cw, ch) == (w, h) {
-        return pixels;
+    let scale = f64::from(MAX_EDGE) / f64::from(long);
+    let scaled = |edge: u32| ((f64::from(edge) * scale).round() as u32).max(1);
+    match w >= h {
+        true => (MAX_EDGE, scaled(h)),
+        false => (scaled(w), MAX_EDGE),
     }
-    imageops::crop_imm(&pixels, (w - cw) / 2, (h - ch) / 2, cw, ch).to_image()
 }
 
 /// The pixel size an image file declares, from its header alone.
@@ -129,48 +142,65 @@ mod tests {
         RgbImage::from_fn(w, h, |x, y| Rgb([(x % 256) as u8, (y % 256) as u8, 128]))
     }
 
-    /// Whatever was dragged, the file is one size and one format.
+    /// Whatever shape was dragged is the shape of the file, at the pixels that
+    /// were under it. The one thing every figure shares is the format.
     #[test]
-    fn every_figure_comes_out_the_same_size_as_webp() {
-        for (w, h) in [(800, 600), (3000, 2250), (640, 500), (1000, 400)] {
+    fn a_figure_keeps_the_size_and_shape_it_was_dragged_at() {
+        for (w, h) in [(800, 600), (640, 500), (1000, 400), (300, 900), (2400, 1350)] {
             let bytes = encode_rgb(gradient(w, h)).expect("encodes");
             assert_eq!(&bytes[0..4], b"RIFF", "{w}x{h} is not a RIFF container");
             assert_eq!(&bytes[8..12], b"WEBP", "{w}x{h} is not WebP");
-            assert_eq!(dimensions(&bytes), Some((WIDTH, HEIGHT)), "{w}x{h}");
+            assert_eq!(dimensions(&bytes), Some((w, h)), "{w}x{h} was resized");
         }
     }
 
-    /// Off-shape input is cropped about the centre, never stretched.
+    /// Past the ceiling the picture comes down to it — on whichever edge is the
+    /// long one — with the shape kept, so a wide figure stays wide.
     #[test]
-    fn an_off_shape_picture_is_cropped_to_four_by_three_about_the_centre() {
-        let wide = frame(gradient(1000, 600));
-        assert_eq!(wide.dimensions(), (800, 600));
-        // The centre column of the original is the centre column of the crop.
-        assert_eq!(wide.get_pixel(400, 0), gradient(1000, 600).get_pixel(500, 0));
+    fn a_figure_past_the_ceiling_is_scaled_down_with_its_shape_kept() {
+        assert_eq!(published_size(4800, 3000), (2400, 1500));
+        assert_eq!(published_size(1500, 4800), (750, 2400));
+        assert_eq!(published_size(3000, 3000), (2400, 2400));
+        // A hairline strip does not round away to nothing.
+        assert_eq!(published_size(9600, 1), (2400, 1));
 
-        let tall = frame(gradient(400, 600));
-        assert_eq!(tall.dimensions(), (400, 300));
-        assert_eq!(tall.get_pixel(0, 150), gradient(400, 600).get_pixel(0, 300));
+        let bytes = encode_rgb(gradient(4800, 3000)).expect("encodes");
+        assert_eq!(dimensions(&bytes), Some((2400, 1500)));
+    }
 
-        let already = frame(gradient(800, 600));
-        assert_eq!(already.dimensions(), (800, 600));
+    /// A small drag is a small figure. Enlarging a screenshot of text invents
+    /// pixels that were never on screen, so the encoder never does it.
+    #[test]
+    fn nothing_is_ever_scaled_up() {
+        assert_eq!(published_size(320, 200), (320, 200));
+        assert_eq!(published_size(MAX_EDGE, 10), (MAX_EDGE, 10));
+        let bytes = encode_rgb(gradient(320, 200)).expect("encodes");
+        assert_eq!(dimensions(&bytes), Some((320, 200)));
+    }
+
+    /// A picture with nothing in it is refused rather than written as a file
+    /// nothing can open.
+    #[test]
+    fn an_empty_picture_is_refused() {
+        assert!(encode_rgb(RgbImage::new(0, 10)).is_err());
+        assert!(encode_rgb(RgbImage::new(10, 0)).is_err());
     }
 
     /// Lossless means the pixels survive: a flat colour encodes and decodes to
     /// exactly itself.
     #[test]
     fn the_encoding_is_lossless() {
-        let flat = RgbImage::from_pixel(1600, 1200, Rgb([17, 200, 91]));
+        let flat = RgbImage::from_pixel(640, 480, Rgb([17, 200, 91]));
         let bytes = encode_rgb(flat).expect("encodes");
         let back = image::load_from_memory(&bytes).expect("decodes").to_rgb8();
         assert_eq!(back.get_pixel(0, 0), &Rgb([17, 200, 91]));
-        assert_eq!(back.get_pixel(1599, 1199), &Rgb([17, 200, 91]));
+        assert_eq!(back.get_pixel(639, 479), &Rgb([17, 200, 91]));
     }
 
     /// The whole path a real capture takes, on a picture whose corners are
-    /// known: a `CGImage` built here goes through Core Image, the PNG hop, the
-    /// crop and the resample, and has to come out the right way up and the
-    /// right way round. This is the test the PNG hop exists to make passable.
+    /// known: a `CGImage` built here goes through Core Image, the PNG hop and
+    /// the encode, and has to come out the right way up, the right way round,
+    /// and at its own size. This is the test the PNG hop exists to make passable.
     #[test]
     fn a_cgimage_comes_out_the_right_way_up_and_the_right_way_round() {
         use objc2_core_graphics::{
@@ -218,10 +248,11 @@ mod tests {
 
         let bytes = encode_cg(&image).expect("encodes");
         let back = image::load_from_memory(&bytes).expect("decodes").to_rgb8();
-        assert_eq!(back.dimensions(), (WIDTH, HEIGHT));
-        let top_left = back.get_pixel(WIDTH / 4, HEIGHT / 4);
-        let bottom_right = back.get_pixel(WIDTH * 3 / 4, HEIGHT * 3 / 4);
-        let top_right = back.get_pixel(WIDTH * 3 / 4, HEIGHT / 4);
+        let (w, h) = (w as u32, h as u32);
+        assert_eq!(back.dimensions(), (w, h), "the size it was dragged at");
+        let top_left = back.get_pixel(w / 4, h / 4);
+        let bottom_right = back.get_pixel(w * 3 / 4, h * 3 / 4);
+        let top_right = back.get_pixel(w * 3 / 4, h / 4);
         assert!(top_left[0] > 200 && top_left[2] < 50, "top-left is {top_left:?}, expected red");
         assert!(
             bottom_right[2] > 200 && bottom_right[0] < 50,

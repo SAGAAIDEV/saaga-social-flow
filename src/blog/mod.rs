@@ -313,13 +313,13 @@ fn write_draft(
         );
     }
     let offers = figures::offers(session);
-    let _ = tx.send(BlogEvent::Status(format!(
-        "Writing the article from {} chapter(s){} via {model}…",
+    let requested = components::requested(session);
+    let _ = tx.send(BlogEvent::Status(drafting_status(
         longform.chapters.len(),
-        match offers.len() {
-            0 => String::new(),
-            n => format!(" with {n} figure(s) to place"),
-        },
+        offers.len(),
+        figures::unblurbed(session),
+        model,
+        generate::stale_preamble_note(Some(&session.root), &offers, &requested).as_deref(),
     )));
     let (article, step) = generate::generate_article(
         &longform,
@@ -328,12 +328,45 @@ fn write_draft(
         provider,
         Some(&session.root),
         &offers,
-        &components::requested(session),
+        &requested,
     )?;
     let dir = session.blog_dir();
     let path = schema::save(&dir, &article)?;
     crate::agent::trace::write_step(&dir, &session.root, &step)?;
     Ok(path)
+}
+
+/// The line a draft starts with: what it is written from, what it may place,
+/// and what it is leaving out — said where the button was pressed rather than
+/// left to the log.
+///
+/// The two things it can leave out are the two ways a captured figure fails to
+/// reach the article. A figure with no blurb is never offered — see
+/// [`figures::offers`] — and a standing prompt that predates figures never
+/// places one — see [`generate::stale_preamble`]. Both used to be silent, and
+/// the first anyone knew was an article with no pictures in it.
+fn drafting_status(
+    chapters: usize,
+    offered: usize,
+    unblurbed: usize,
+    model: &str,
+    stale_prompt: Option<&str>,
+) -> String {
+    let mut line = format!("Writing the article from {chapters} chapter(s)");
+    if offered > 0 {
+        line.push_str(&format!(" with {offered} figure(s) to place"));
+    }
+    line.push_str(&format!(" via {model}…"));
+    if unblurbed > 0 {
+        line.push_str(&format!(
+            " {unblurbed} figure(s) have no blurb and are left out — press Write Blurbs, then \
+             Write Article again."
+        ));
+    }
+    if let Some(note) = stale_prompt {
+        line.push_str(&format!(" Note: {note}."));
+    }
+    line
 }
 
 /// What a preview left on disk.
@@ -575,9 +608,14 @@ fn run(
         Err(_) => {
             // Written last of the cheap-to-refuse steps, because it is the
             // expensive one: a byline that does not resolve should cost nothing.
-            status(format!(
-                "Writing the article from {} chapter(s) via {model}…",
-                longform.chapters.len()
+            let offers = figures::offers(session);
+            let requested = components::requested(session);
+            status(drafting_status(
+                longform.chapters.len(),
+                offers.len(),
+                figures::unblurbed(session),
+                model,
+                generate::stale_preamble_note(Some(&session.root), &offers, &requested).as_deref(),
             ));
             let (article, step) = generate::generate_article(
                 &longform,
@@ -585,8 +623,8 @@ fn run(
                 model,
                 provider,
                 Some(&session.root),
-                &figures::offers(session),
-                &components::requested(session),
+                &offers,
+                &requested,
             )?;
             schema::save(&dir, &article)?;
             crate::agent::trace::write_step(&dir, &session.root, &step)?;
@@ -1056,6 +1094,26 @@ mod tests {
             "{err}"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What the draft leaves out is said where the button was pressed, not in
+    /// the log: an unblurbed figure is never offered, and a stale standing
+    /// prompt never places one, and the first anyone knew of either was an
+    /// article with no pictures in it.
+    #[test]
+    fn the_drafting_status_says_what_is_placed_and_what_is_left_out() {
+        assert_eq!(
+            drafting_status(3, 0, 0, "m", None),
+            "Writing the article from 3 chapter(s) via m…"
+        );
+        let figured = drafting_status(3, 2, 1, "m", None);
+        assert!(figured.contains("with 2 figure(s) to place via m…"), "{figured}");
+        assert!(figured.contains("1 figure(s) have no blurb"), "{figured}");
+        assert!(figured.contains("press Write Blurbs"), "says which button: {figured}");
+
+        let stale = drafting_status(3, 2, 0, "m", Some("the standing blog prompt predates it"));
+        assert!(stale.ends_with("Note: the standing blog prompt predates it."), "{stale}");
+        assert!(!stale.contains("no blurb"), "nothing was left out for want of a blurb");
     }
 
     /// A draft is the prerequisite, and saying so is the difference between a
