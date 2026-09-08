@@ -1,0 +1,19 @@
+# Matches the convention in saaga/saaga, strapi-cms and the other saaga repos:
+# multi-region KMS keys, dotenv format, and the file name carrying the stage.
+#
+# dotenv rather than the binary store on purpose — variable names stay in
+# plaintext and only values are encrypted, so `git diff` shows *which* key
+# changed rather than one unreadable blob. The `.env` suffix is also what lets
+# sops pick the store itself, which is why no call site passes --input-type.
+creation_rules:
+  - path_regex: (^|/)dev\.sops\.env$
+    kms: arn:aws:kms:us-east-1:827913618293:key/mrk-5c773050b08947a68267662e3a59fe94
+    aws_profile: dev
+
+  - path_regex: (^|/)local\.sops\.env$
+    kms: arn:aws:kms:us-east-1:827913618293:key/mrk-5c773050b08947a68267662e3a59fe94
+    aws_profile: dev
+
+  - path_regex: (^|/)prd\.sops\.env$
+    kms: arn:aws:kms:us-east-1:829578223535:key/mrk-44c023d0adf8414686c9f29186f86dc4
+    aws_profile: prod

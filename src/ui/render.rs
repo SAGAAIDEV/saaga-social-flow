@@ -45,6 +45,7 @@ fn environment() -> Environment<'static> {
         .expect("substack template");
     env.add_template("blog.html", BLOG).expect("blog template");
     env.add_template("youtube.html", include_str!("templates/youtube.html")).expect("youtube template");
+    env.add_template("settings.html", include_str!("templates/settings.html")).expect("settings template");
     env.add_template("video-brief.html", include_str!("templates/video-brief.html")).expect("video brief template");
     env
 }

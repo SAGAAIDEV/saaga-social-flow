@@ -60,6 +60,7 @@ mod router;
 mod schedule;
 mod session;
 mod sessions;
+mod settings;
 mod stage;
 mod substack;
 mod thumbnail;
@@ -82,7 +83,14 @@ pub(crate) fn load_dotenv() {
     let screencast = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../screencast/.env");
     let next_to_cwd = std::env::current_dir().ok().map(|d| d.join(".env"));
-    for path in [Some(next_to_crate), Some(screencast), next_to_cwd]
+    // Last, so it never shadows a checkout's own file on a development machine.
+    // It is also the only one of these that exists on a machine that installed a
+    // release: the binary ships in a tarball, so `CARGO_MANIFEST_DIR` names a
+    // path on the CI runner and the working directory is wherever it was
+    // launched from. This is the file the Settings tab writes — see
+    // `settings::env_path`.
+    let per_user = settings::user_env_path().ok();
+    for path in [Some(next_to_crate), Some(screencast), next_to_cwd, per_user]
         .into_iter()
         .flatten()
     {
@@ -108,6 +116,10 @@ pub(crate) fn load_dotenv() {
             }
         }
     }
+    // Last, so every `.env` above wins over it: the team file holds the shared
+    // saaga credentials, and a personal key or a shell export is an override of
+    // those rather than something they should silently replace.
+    settings::sops::load();
 }
 
 fn main() -> Result<()> {
@@ -129,7 +141,8 @@ fn main() -> Result<()> {
 
     if let Some(command) = &args.command {
         match command {
-            Command::BlogComponents(request) => return blog::components::run(request),
+            Command::Credentials => return settings::report(&mut std::io::stdout()),
+        Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,
                 format,

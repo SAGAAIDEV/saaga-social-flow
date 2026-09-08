@@ -125,6 +125,15 @@ pub enum WebEvent {
     /// exactly what is on screen — a copy button that re-fetched its own text
     /// from disk could hand over something the reader is not looking at.
     CopyText { text: String },
+
+    /// The Settings form. Only the boxes that were filled in travel: the pane
+    /// is never handed a stored secret, so an untouched box arrives absent
+    /// rather than empty, and `settings::write` leaves what it does not hear
+    /// about alone.
+    SaveSettings { fields: std::collections::BTreeMap<String, String> },
+    /// Check one group of credentials against the live service, by
+    /// `settings::Group::slug`.
+    TestSettings { service: String },
 }
 
 impl WebEvent {
@@ -180,6 +189,8 @@ impl WebEvent {
             WebEvent::BlogAuthor { value } => UiEvent::BlogAuthorSelected(value),
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
             WebEvent::CopyText { text } => UiEvent::CopyText(text),
+            WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
+            WebEvent::TestSettings { service } => UiEvent::TestSettings(service),
         }
     }
 }
@@ -309,6 +320,24 @@ impl WebPane {
             objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable
                 | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable,
         );
+    }
+
+    /// Runs JavaScript in the pane, leaving the page as it is.
+    ///
+    /// For updating one element when a redraw would be wrong — the Settings
+    /// pane's test results land while there is half-typed text in the boxes
+    /// around them, and `show` would throw that away.
+    ///
+    /// Errors are dropped: the only caller sends a fixed script with a
+    /// serialised payload, so a failure here is a bug in that script rather
+    /// than a condition the pane can act on.
+    pub fn eval(&self, script: &str) {
+        unsafe {
+            self.webview.evaluateJavaScript_completionHandler(
+                &NSString::from_str(script),
+                None,
+            );
+        }
     }
 
     /// Replaces the pane with freshly rendered HTML.
