@@ -34,6 +34,17 @@ pub fn offers(session: &Session) -> Vec<generate::FigureOffer> {
         .collect()
 }
 
+/// How many captured figures have no blurb, and so are not in [`offers`].
+///
+/// For the status line a draft starts with. Leaving them out is right — see
+/// [`offers`] — but leaving them out silently is not: a figure snipped while
+/// nothing was recording gets no aside and so no automatic blurb, and until
+/// Write Blurbs is pressed it is a picture the article is never offered. The
+/// first anyone knew of that was an article with no pictures in it.
+pub fn unblurbed(session: &Session) -> usize {
+    crate::figure::unwritten(&session.root).len()
+}
+
 /// Uploads each figure the article places and gathers what the CMS needs.
 ///
 /// A figure that is placed but missing from the ledger, or whose JPEG has been

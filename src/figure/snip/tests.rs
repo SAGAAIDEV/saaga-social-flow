@@ -24,43 +24,38 @@ fn state(anchor: (f64, f64), cursor: (f64, f64)) -> SnipState {
     }
 }
 
-/// A drag is a 4:3 box grown from the press toward the pointer: the same size
-/// whichever way the hand went, anchored on the corner the press landed on.
+/// A drag is the rectangle between the press and the pointer, whichever way
+/// the hand went: the two gestures name the same box.
 #[test]
-fn a_drag_is_a_four_by_three_box_grown_from_the_press() {
+fn a_drag_is_the_rectangle_between_the_press_and_the_pointer() {
     let forward = state((100.0, 100.0), (400.0, 300.0)).selection().unwrap();
-    assert_eq!(forward, PointRect { x: 100.0, y: 100.0, w: 300.0, h: 225.0 });
+    assert_eq!(forward, PointRect { x: 100.0, y: 100.0, w: 300.0, h: 200.0 });
     let backward = state((400.0, 300.0), (100.0, 100.0)).selection().unwrap();
-    assert_eq!(backward, PointRect { x: 100.0, y: 75.0, w: 300.0, h: 225.0 });
+    assert_eq!(backward, forward);
 }
 
-/// The further axis sets the size, so a mostly-vertical drag is still 4:3 —
-/// wider than the hand moved, rather than a tall sliver.
+/// No shape is imposed: a tall drag is a tall figure and a strip is a strip.
+/// Figures are published at the size they were dragged at.
 #[test]
-fn the_further_axis_sets_the_size() {
+fn the_box_takes_whatever_shape_was_dragged() {
     let tall = state((100.0, 100.0), (150.0, 400.0)).selection().unwrap();
-    assert_eq!(tall, PointRect { x: 100.0, y: 100.0, w: 400.0, h: 300.0 });
+    assert_eq!(tall, PointRect { x: 100.0, y: 100.0, w: 50.0, h: 300.0 });
+    let strip = state((100.0, 100.0), (900.0, 140.0)).selection().unwrap();
+    assert_eq!(strip, PointRect { x: 100.0, y: 100.0, w: 800.0, h: 40.0 });
 }
 
-/// The pointer is not confined to the window, so a drag off the edge has to
-/// come back inside it — ScreenCaptureKit answers a rect past the display
-/// with nothing at all. It shrinks rather than losing an edge: a clamped edge
-/// would break the shape the lock exists to keep.
+/// The pointer is not confined to the window, so a drag off the edge stops at
+/// it — ScreenCaptureKit answers a rect past the display with nothing at all.
 #[test]
-fn a_drag_off_the_display_shrinks_to_fit_and_stays_four_by_three() {
+fn a_drag_off_the_display_stops_at_its_edge() {
     let selection = state((1400.0, 900.0), (2000.0, 1400.0)).selection().unwrap();
-    assert_eq!((selection.x, selection.y), (1400.0, 900.0), "grows from the press");
-    assert!(selection.x + selection.w <= 1512.0, "{selection:?}");
-    assert!(selection.y + selection.h <= 982.0, "{selection:?}");
-    assert!((selection.w / selection.h - 4.0 / 3.0).abs() < 1e-9, "{selection:?}");
-    // The 82 points below the press are the binding edge.
-    assert_eq!(selection.h, 82.0, "{selection:?}");
+    assert_eq!(selection, PointRect { x: 1400.0, y: 900.0, w: 112.0, h: 82.0 });
 }
 
 #[test]
-fn a_press_from_outside_the_display_grows_from_its_edge() {
+fn a_press_from_outside_the_display_starts_at_its_edge() {
     let selection = state((-200.0, -50.0), (300.0, 200.0)).selection().unwrap();
-    assert_eq!(selection, PointRect { x: 0.0, y: 0.0, w: 300.0, h: 225.0 });
+    assert_eq!(selection, PointRect { x: 0.0, y: 0.0, w: 300.0, h: 200.0 });
 }
 
 /// A click on a window covering the whole display must not file a figure.
@@ -71,12 +66,13 @@ fn a_click_that_did_not_travel_is_not_a_capture() {
     assert!(is_capture(&state((400.0, 400.0), (460.0, 480.0)).selection().unwrap()));
 }
 
-/// The label says what the pixels under the box become, and which way.
+/// The label is the pixels under the box, and says so when the encoder will
+/// bring them down to its ceiling. Nothing is scaled up, so no arrow that way.
 #[test]
-fn the_size_label_says_when_the_figure_will_be_scaled() {
+fn the_size_label_says_when_the_figure_will_be_scaled_down() {
     assert_eq!(super::draw::size_text(1600, 1200), "1600 × 1200");
-    assert_eq!(super::draw::size_text(1280, 960), "1280 × 960  ↑ 1600 × 1200");
-    assert_eq!(super::draw::size_text(2400, 1800), "2400 × 1800  ↓ 1600 × 1200");
+    assert_eq!(super::draw::size_text(640, 900), "640 × 900");
+    assert_eq!(super::draw::size_text(4800, 3000), "4800 × 3000  ↓ 2400 × 1500");
 }
 
 #[test]

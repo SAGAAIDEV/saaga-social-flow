@@ -66,7 +66,7 @@ impl Set {
     }
 }
 pub fn load(root: &Path) -> Result<Set> {
-    let set: Set = serde_json::from_str(&std::fs::read_to_string(root.join(MANIFEST)).context("Generate the artwork set on Thumbnails first")?)?;
+    let set: Set = serde_json::from_str(&std::fs::read_to_string(root.join(MANIFEST)).context("no artwork set drawn yet")?)?;
     for kind in Kind::ALL { set.path(root, kind)?; }
     Ok(set)
 }
@@ -78,11 +78,11 @@ pub fn load(root: &Path) -> Result<Set> {
 pub fn current(root: &Path, set: &Set) -> Result<()> {
     let design = super::load(root);
     if set.card_hash != crate::agent::prompt::hash_of(&design.fingerprint()) {
-        bail!("Design changed — generate artwork again before publishing");
+        bail!("Design changed since the artwork was drawn — redraw it before publishing");
     }
     let photo = super::photo(root).context("The artwork photo is missing")?;
     if set.source_hash != crate::agent::prompt::hash_of_bytes(&std::fs::read(photo)?) {
-        bail!("Photo changed — generate artwork again before publishing");
+        bail!("Photo changed since the artwork was drawn — redraw it before publishing");
     }
     Ok(())
 }

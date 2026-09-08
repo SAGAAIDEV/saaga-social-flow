@@ -1,8 +1,9 @@
 //! Native AppKit controls inside the winit record window.
 //!
-//! Five primary steps: video recording, thumbnails, YouTube, Blog (Strapi),
-//! and Socials. Recording groups capture/render/review; Socials groups writing,
-//! media upload, Buffer scheduling, analytics and prompt review.
+//! Four primary steps: video recording, YouTube, Blog (Strapi), and Socials.
+//! Recording holds the capture controls on the left and, on the right, the
+//! title, artwork and rendered clips that one render produces; Socials groups
+//! writing, media upload, Buffer scheduling, analytics and prompt review.
 //! The navigation contract lives in [`workflow`].
 
 use std::cell::{Cell, RefCell};
@@ -15,7 +16,7 @@ use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAlert, NSAutoresizingMaskOptions, NSBorderType, NSBox, NSButton, NSButtonType,
-    NSControlStateValueOff, NSControlStateValueOn,
+    NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
     NSFont, NSFontWeight, NSLevelIndicator,
     NSLevelIndicatorStyle, NSPopUpButton, NSProgressIndicator,
     NSProgressIndicatorStyle, NSScrollView,
@@ -213,6 +214,9 @@ const TIMER_H: f64 = 22.0;
 const METER_W: f64 = 90.0;
 const BUTTON_GAP: f64 = 4.0;
 const GROUP_H: f64 = 114.0;
+/// One progress row under the render button: a caption and a small bar.
+const BAR_H: f64 = 14.0;
+const CAPTION_W: f64 = 72.0;
 const PROMPT_H: f64 = 52.0;
 
 pub struct ControlTargetIvars {
@@ -264,6 +268,9 @@ pub struct ControlTargetIvars {
     render_status: RefCell<Option<Retained<NSTextField>>>,
     thumbnail_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
+    /// The two bars under Render video and thumbnails — see `layout_left`.
+    render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
+    thumbnail_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
 
     // Post tab
     posts_model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
@@ -646,6 +653,8 @@ impl ControlTarget {
             render_status: RefCell::new(None),
             thumbnail_status: RefCell::new(None),
             render_summary: RefCell::new(None),
+            render_bar: RefCell::new(None),
+            thumbnail_bar: RefCell::new(None),
             posts_model_popup: RefCell::new(None),
             posts_provider_popup: RefCell::new(None),
             posts_prompt_view: RefCell::new(None),
@@ -968,6 +977,39 @@ impl ControlTarget {
         }
     }
 
+    /// The video bar: the cut, the compositions and the render, as a fraction.
+    pub fn set_render_progress(&self, fraction: f64) {
+        if let Some(bar) = self.ivars().render_bar.borrow().clone() {
+            Self::show_fraction(&bar, fraction);
+        }
+    }
+
+    /// The thumbnails bar. `None` while the copy is being written — a model
+    /// call with no measurable middle, so the bar runs indeterminate rather than
+    /// sitting at zero looking stuck — and a fraction once the artwork is being
+    /// drawn, one picture of the set at a time.
+    pub fn set_thumbnail_progress(&self, fraction: Option<f64>) {
+        if let Some(bar) = self.ivars().thumbnail_bar.borrow().clone() {
+            match fraction {
+                Some(fraction) => Self::show_fraction(&bar, fraction),
+                None => {
+                    bar.setIndeterminate(true);
+                    unsafe { bar.startAnimation(None) };
+                }
+            }
+        }
+    }
+
+    /// A determinate bar at `fraction` of the way along. Stops any indeterminate
+    /// run first: a bar switched to determinate while animating keeps spinning.
+    fn show_fraction(bar: &NSProgressIndicator, fraction: f64) {
+        if bar.isIndeterminate() {
+            unsafe { bar.stopAnimation(None) };
+            bar.setIndeterminate(false);
+        }
+        bar.setDoubleValue(fraction.clamp(0.0, 1.0) * 100.0);
+    }
+
     // Post tab updates
     pub fn set_posts_status(&self, text: &str) {
         if let Some(field) = self.ivars().posts_status.borrow().clone() {
@@ -1181,6 +1223,7 @@ pub struct Layout {
     prompt: (Retained<NSTextField>, Retained<NSTextField>),
     notes_group: (Retained<NSBox>, Vec<Retained<NSButton>>),
     render_status: Retained<NSTextField>,
+    progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)>,
     last: Cell<(u32, u32, u32, u32)>,
 }
 
@@ -1208,6 +1251,7 @@ impl Layout {
             &self.project_name,
             &self.left_groups,
             &self.render_status,
+            &self.progress_rows,
             preview,
         );
         layout_right(
@@ -1260,6 +1304,7 @@ fn layout_left(
     project_name: &NSTextField,
     groups: &[(Retained<NSBox>, Vec<Retained<NSButton>>)],
     render_status: &NSTextField,
+    progress_rows: &[(Retained<NSTextField>, Retained<NSProgressIndicator>)],
     preview: &PreviewHost,
 ) {
     let content_w = (width - PAD * 2.0).max(80.0);
@@ -1305,7 +1350,22 @@ fn layout_left(
         ));
         layout_group_buttons(frame, buttons);
     }
-    let progress_y = stack_bottom - SECTION_GAP - LABEL_H;
+    // Under the buttons: one row per bar, then the status line, and the preview
+    // takes whatever is left.
+    y = stack_bottom - SECTION_GAP;
+    for (caption, bar) in progress_rows {
+        y -= BAR_H;
+        caption.setFrame(NSRect::new(
+            NSPoint::new(PAD, y),
+            NSSize::new(CAPTION_W, BAR_H),
+        ));
+        bar.setFrame(NSRect::new(
+            NSPoint::new(PAD + CAPTION_W + GAP, y),
+            NSSize::new((content_w - CAPTION_W - GAP).max(40.0), BAR_H),
+        ));
+        y -= GAP;
+    }
+    let progress_y = y - LABEL_H;
     render_status.setFrame(row(progress_y, LABEL_H));
     preview.set_frame(NSRect::new(
         NSPoint::new(PAD, PAD),
@@ -1413,8 +1473,8 @@ fn make_button_group(
 
 /// Everything [`attach_controls`] hands back, named.
 ///
-/// A struct rather than a tuple because four of these fields are `WebPane` and two more
-/// are forms: in positional form, wiring the Edit pane where the Review pane belongs
+/// A struct rather than a tuple because several of these fields are `WebPane` and two more
+/// are forms: in positional form, wiring the Edit pane where the Blog pane belongs
 /// compiles cleanly and shows up as the wrong tab on screen. Names make that a
 /// compile error instead of a bug report.
 pub struct Attached {
@@ -1427,12 +1487,11 @@ pub struct Attached {
     pub posts_form: crate::posts::PostsForm,
     pub schedule_form: crate::schedule::ScheduleForm,
     pub reflect_pane: WebPane,
-    pub thumbnail_pane: WebPane,
-    pub review_pane: WebPane,
     pub edit_pane: Option<WebPane>,
     pub substack_pane: Option<WebPane>,
     pub blog_pane: WebPane,
     pub publish_pane: WebPane,
+    /// The recording page's right-hand pane: details, artwork and review.
     pub video_brief_pane: WebPane,
     pub settings_pane: WebPane,
     pub layout: Layout,
@@ -1457,6 +1516,7 @@ pub fn settings_page(note: Option<&str>) -> String {
             missing => crate::settings::missing_required(),
             env_path => path,
             team_count => crate::settings::sops::provided().len(),
+            models => crate::settings::models(),
             saved => note.unwrap_or(""),
         },
     )
@@ -1554,8 +1614,25 @@ pub fn attach_controls(
         item.setView(Some(host));
         notebook_tabs.addTabViewItem(&item);
     }
+    // One native line above the pane for what the copy and artwork jobs are
+    // doing: progress arriving mid-run must not cost a whole-pane repaint,
+    // which would throw away the notes someone is typing and their scroll.
+    let host_bounds = brief_host.bounds();
+    let thumbnail_status = NSTextField::labelWithString(
+        &NSString::from_str("Record a video, then press Render video and thumbnails."), mtm,
+    );
+    thumbnail_status.setFrame(NSRect::new(
+        NSPoint::new(PAD, host_bounds.size.height - 30.0),
+        NSSize::new((host_bounds.size.width - PAD * 2.0).max(80.0), 20.0),
+    ));
+    pin_top(&thumbnail_status);
+    brief_host.addSubview(&thumbnail_status);
+    *target.ivars().thumbnail_status.borrow_mut() = Some(thumbnail_status);
     let video_brief_pane = WebPane::attach(&brief_host, mtm, tx.clone());
-    video_brief_pane.set_frame(brief_host.bounds());
+    video_brief_pane.set_frame(NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(host_bounds.size.width, (host_bounds.size.height - 34.0).max(60.0)),
+    ));
     video_brief_pane.fill_below();
     let right = speaking_host;
 
@@ -1791,7 +1868,7 @@ pub fn attach_controls(
         ("", sel!(onNewChapter:)),                    // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                 // 1 │ Record
         ("Stop", sel!(onStop:)),
-        ("Render video", sel!(onRunRender:)),
+        ("Render video and thumbnails", sel!(onRunRender:)),
         ("Notes", sel!(onNotes:)),                    // 4 ┐ Notes (right pane)
         ("Copy Transcript", sel!(onCopyTranscript:)), // 5 ┘
         ("New Project", sel!(onNewProject:)),         // 6 ┐
@@ -1819,9 +1896,43 @@ pub fn attach_controls(
     *target.ivars().regions_button.borrow_mut() = Some(built[REGIONS].clone());
 
     *target.ivars().render_button.borrow_mut() = Some(built[3].clone());
-    let render_status = NSTextField::labelWithString(&NSString::from_str("Record a video, then render it here."), mtm);
+    let render_status = NSTextField::labelWithString(
+        &NSString::from_str("Record a video, then render it. One press: photo, cut, title, artwork, YouTube."),
+        mtm,
+    );
     left.addSubview(&render_status);
     *target.ivars().render_status.borrow_mut() = Some(render_status.clone());
+
+    // Two bars for the two halves of the press. The cut and render run on one
+    // thread and report a fraction; the copy and artwork that follow run as a
+    // chain of hops on the main thread, which the status line alone never made
+    // legible as one wait. Always shown, empty until a run starts: a bar that
+    // appeared only mid-run would shift the preview under the pointer.
+    let progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)> = [
+        ("Video", &target.ivars().render_bar),
+        ("Thumbnails", &target.ivars().thumbnail_bar),
+    ]
+    .into_iter()
+    .map(|(caption, slot)| {
+        let label = NSTextField::labelWithString(&NSString::from_str(caption), mtm);
+        label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        left.addSubview(&label);
+        let bar = NSProgressIndicator::initWithFrame(
+            NSProgressIndicator::alloc(mtm),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+        );
+        bar.setStyle(NSProgressIndicatorStyle::Bar);
+        bar.setControlSize(NSControlSize::Small);
+        bar.setIndeterminate(false);
+        bar.setMinValue(0.0);
+        bar.setMaxValue(100.0);
+        bar.setDoubleValue(0.0);
+        left.addSubview(&bar);
+        *slot.borrow_mut() = Some(bar.clone());
+        (label, bar)
+    })
+    .collect();
 
     let left_groups = [("Record", &built[RECORD]), ("Session", &built[SESSION])]
         .into_iter()
@@ -1853,30 +1964,6 @@ pub fn attach_controls(
     };
     draft_item.setLabel(&NSString::from_str("Record"));
     draft_item.setView(Some(&split));
-
-    let thumb_host = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    fill_parent(&thumb_host);
-    let thumbnail_status = NSTextField::labelWithString(
-        &NSString::from_str("Capture a frame, then draw a card or generate images."), mtm,
-    );
-    thumbnail_status.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0, bounds.size.height - 34.0),
-        NSSize::new(bounds.size.width - PAD * 4.0, 20.0),
-    ));
-    pin_top(&thumbnail_status);
-    thumb_host.addSubview(&thumbnail_status);
-    *target.ivars().thumbnail_status.borrow_mut() = Some(thumbnail_status);
-    let thumbnail_pane = WebPane::attach(&thumb_host, mtm, tx.clone());
-    thumbnail_pane.set_frame(NSRect::new(
-        NSPoint::new(PAD, PAD),
-        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
-    ));
-    thumbnail_pane.fill_below();
-    let thumbnail_item = unsafe {
-        NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str("thumbnails")))
-    };
-    thumbnail_item.setLabel(&NSString::from_str("Thumbnails"));
-    thumbnail_item.setView(Some(&thumb_host));
 
     // ==========================================
     // TAB 2: POST
@@ -2036,29 +2123,6 @@ pub fn attach_controls(
     };
     post_item.setLabel(&NSString::from_str("Generate posts"));
     post_item.setView(Some(&post_view));
-
-    // ==========================================
-    // TAB 3: REVIEW (watch the renders)
-    // ==========================================
-    // Deliberately in front of Distribute: this is the last place a bad render
-    // can be caught before it is on a social network.
-    let review_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    fill_parent(&review_view);
-    let review_pane = WebPane::attach(&review_view, mtm, tx.clone());
-    review_pane.set_frame(NSRect::new(
-        NSPoint::new(PAD, PAD),
-        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
-    ));
-    review_pane.fill_below();
-
-    let review_item = unsafe {
-        NSTabViewItem::initWithIdentifier(
-            NSTabViewItem::alloc(),
-            Some(&NSString::from_str("review")),
-        )
-    };
-    review_item.setLabel(&NSString::from_str("Review"));
-    review_item.setView(Some(&review_view));
 
     // ==========================================
     // TAB 4: DISTRIBUTE (AWS S3)
@@ -2635,8 +2699,7 @@ pub fn attach_controls(
     settings_item.setView(Some(&settings_view));
 
     workflow::attach(&tab_view, bounds, mtm, &[
-        ("draft", &draft_item), ("review", &review_item),
-        ("thumbnails", &thumbnail_item), ("youtube", &publish_item), ("blog", &blog_item),
+        ("draft", &draft_item), ("youtube", &publish_item), ("blog", &blog_item),
         ("post", &post_item), ("distribute", &distribute_item), ("schedule", &schedule_item),
         ("analytics", &analytics_item), ("reflect", &reflect_item),
     ]);
@@ -2655,6 +2718,7 @@ pub fn attach_controls(
         prompt: (prompt_label, prompt_field),
         notes_group: (notes_box, notes_buttons.to_vec()),
         render_status,
+        progress_rows,
         last: Cell::new((0, 0, 0, 0)),
     };
     layout.sync(&preview, &notes);
@@ -2668,8 +2732,6 @@ pub fn attach_controls(
         posts_form,
         schedule_form,
         reflect_pane,
-        thumbnail_pane,
-        review_pane,
         edit_pane: None,
         substack_pane: None,
         blog_pane,

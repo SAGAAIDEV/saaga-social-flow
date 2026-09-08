@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;chapterLabel&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Label&quot;,&quot;default&quot;:&quot;Chapter&quot;,&quot;maxLength&quot;:24},
+    {&quot;id&quot;:&quot;chapterNumber&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Number&quot;,&quot;default&quot;:&quot;01&quot;,&quot;maxLength&quot;:4},
+    {&quot;id&quot;:&quot;chapterTopic&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Topic&quot;,&quot;default&quot;:&quot;The New Workflow&quot;,&quot;maxLength&quot;:80},
+    {&quot;id&quot;:&quot;accentColor&quot;,&quot;type&quot;:&quot;color&quot;,&quot;label&quot;:&quot;Accent Color&quot;,&quot;default&quot;:&quot;#EB5200&quot;},
+    {&quot;id&quot;:&quot;backgroundColor&quot;,&quot;type&quot;:&quot;color&quot;,&quot;label&quot;:&quot;Background Color&quot;,&quot;default&quot;:&quot;#FDEEE6&quot;},
+    {&quot;id&quot;:&quot;textColor&quot;,&quot;type&quot;:&quot;color&quot;,&quot;label&quot;:&quot;Text Color&quot;,&quot;default&quot;:&quot;#111111&quot;},
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Card Duration&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:15,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;},
+    {&quot;id&quot;:&quot;holdFromStart&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Composed From Frame One&quot;,&quot;default&quot;:0,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:1}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-cpt0" id="root" data-composition-id="chapter-title-card" data-start="0" data-width="1920" data-height="1080" data-duration="3">
+        <style>
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+            font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600;
+            font-style: normal;
+            font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700;
+            font-style: normal;
+            font-display: block;
+          }
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          .ctc-scene {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+          }
+          .ctc-bg {
+            position: absolute;
+            inset: 0;
+            background: var(--backgroundColor, #fdeee6);
+          }
+          .ctc-pattern {
+            position: absolute;
+            right: -76px;
+            bottom: -218px;
+            width: 760px;
+            height: 760px;
+            object-fit: contain;
+            opacity: 0.12;
+          }
+          .ctc-content {
+            position: absolute;
+            inset: 0;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 96px 180px 108px;
+            text-align: center;
+          }
+          .ctc-label {
+            color: var(--accentColor, #eb5200);
+            font-size: 48px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            opacity: 0;
+          }
+          .ctc-number {
+            margin-top: 18px;
+            color: var(--textColor, #111111);
+            font-size: 420px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 0.86;
+            letter-spacing: -0.055em;
+            opacity: 0;
+          }
+          .ctc-separator {
+            width: 700px;
+            height: 34px;
+            margin-top: 44px;
+            display: grid;
+            grid-template-columns: 1fr 24px 1fr;
+            align-items: center;
+            gap: 22px;
+          }
+          .ctc-separator-line {
+            display: block;
+            width: 100%;
+            height: 4px;
+            background: var(--accentColor, #eb5200);
+          }
+          .ctc-separator-line-left { transform-origin: right center; }
+          .ctc-separator-line-right { transform-origin: left center; }
+          /* The SAAGA badge, where an orange diamond used to be. It carries its
+             own colour, so no background and — unlike the diamond — no 45deg
+             resting rotation: a tilted logo is a broken logo. */
+          .ctc-separator-mark {
+            width: 24px;
+            height: 24px;
+            display: block;
+          }
+          .ctc-topic {
+            max-width: 1280px;
+            margin-top: 34px;
+            color: var(--textColor, #111111);
+            font-size: 72px;
+            font-weight: 600;
+            line-height: 1.08;
+            letter-spacing: -0.02em;
+            opacity: 0;
+          }
+        </style>
+
+        <!-- A silent track, not decoration. `render` rejects an output with no
+             audio stream, and the long form is assembled by concatenating these
+             segments — the concat demuxer needs every segment to carry the same
+             streams, so a card without audio would break the join. -->
+        <audio data-hf-id="hf-cptaud" id="chapter-title-card-audio" data-start="0" data-duration="3" data-track-index="8" src="assets/silence.mp3" data-volume="0"></audio>
+
+        <section data-hf-id="hf-cpt1" id="chapter-title-card-scene" class="ctc-scene clip" data-start="0" data-duration="3" data-track-index="0">
+          <div data-hf-id="hf-cpt2" id="chapter-title-card-bg" class="ctc-bg"></div>
+          <img data-hf-id="hf-cpt3" id="chapter-title-card-pattern" class="ctc-pattern" src="assets/pattern-rings.svg" alt="">
+          <div data-layout-allow-overflow="true" data-hf-id="hf-cpt4" id="chapter-title-card-content" class="ctc-content">
+            <div data-hf-id="hf-cpt5" id="chapter-title-card-label" class="ctc-label" data-var-text="chapterLabel">Chapter</div>
+            <div data-hf-id="hf-cpt6" id="chapter-title-card-number" class="ctc-number" data-var-text="chapterNumber">01</div>
+            <div data-hf-id="hf-cpt7" id="chapter-title-card-separator" class="ctc-separator" aria-hidden="true">
+              <span data-hf-id="hf-cpt8" id="chapter-title-card-line-left" class="ctc-separator-line ctc-separator-line-left"></span>
+              <img data-hf-id="hf-cpt9" id="chapter-title-card-separator-mark" class="ctc-separator-mark" src="assets/badge.svg" alt="">
+              <span data-hf-id="hf-cpta" id="chapter-title-card-line-right" class="ctc-separator-line ctc-separator-line-right"></span>
+            </div>
+            <div data-hf-id="hf-cptb" id="chapter-title-card-topic" class="ctc-topic" data-var-text="chapterTopic">The New Workflow</div>
+          </div>
+        </section>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            var vars = (window.__hyperframes && window.__hyperframes.getVariables)
+              ? window.__hyperframes.getVariables() : {};
+
+            /* Every timed element takes the card's length, or its hardcoded
+               duration ends the clip early and the frame goes blank. */
+            var D = Number(vars.durationSeconds);
+            if (!isFinite(D) || D < 1 || D > 15) { D = 3; }
+            ['chapter-title-card-scene', 'chapter-title-card-audio'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) { el.setAttribute('data-duration', String(D)); }
+            });
+
+            /* Pin the card in place. No horizontal travel — a leftover exit
+               slide used to shove the whole plate off-centre. */
+            tl.set('#chapter-title-card-content', { x: 0 }, 0);
+            tl.set('#chapter-title-card-pattern', { x: 0 }, 0);
+
+            /* Composed from frame one, for the card that opens the video.
+               Every element below starts hidden and is revealed on a beat, so
+               frame 0 is the background and nothing else — and frame 0 is what a
+               social platform grabs for its preview. A viewer scrolling past
+               would see a blank orange plate where the video's title should be.
+
+               So the opening card sets the same end state at time 0 instead of
+               tweening to it. Only the first card wants this: a chapter card is
+               already on screen mid-video, where the reveal is the point. */
+            var HOLD = Number(vars.holdFromStart) === 1;
+
+            if (HOLD) {
+              /* The end state of every tween below, applied at once. The text
+                 elements are `opacity: 0` in CSS and slide up from an offset;
+                 the lines scale out from nothing; the badge pops from nothing. */
+              tl.set(
+                [
+                  '#chapter-title-card-label',
+                  '#chapter-title-card-number',
+                  '#chapter-title-card-topic',
+                ],
+                { autoAlpha: 1, y: 0 },
+                0
+              );
+              tl.set(
+                ['#chapter-title-card-line-left', '#chapter-title-card-line-right'],
+                { scaleX: 1 },
+                0
+              );
+              tl.set('#chapter-title-card-separator-mark', { autoAlpha: 1, scale: 1 }, 0);
+            } else {
+            /* Waterfall arrival: binary reveals avoid a soft dissolve. The
+                label and number arrive as a tight hierarchy, then the separator
+                physically opens the space that the topic rises into. */
+            tl.set('#chapter-title-card-label', { autoAlpha: 1 }, 0.2);
+            tl.fromTo(
+              '#chapter-title-card-label',
+              { y: 48 },
+              { y: 0, duration: 0.15, ease: 'power4.out' },
+              0.2
+            );
+            tl.set('#chapter-title-card-number', { autoAlpha: 1 }, 0.3);
+            tl.fromTo(
+              '#chapter-title-card-number',
+              { y: 80 },
+              { y: 0, duration: 0.19, ease: 'power4.out' },
+              0.3
+            );
+            tl.fromTo(
+              '#chapter-title-card-line-left',
+              { scaleX: 0 },
+              { scaleX: 1, duration: 0.48, ease: 'power4.out' },
+              0.58
+            );
+            tl.fromTo(
+              '#chapter-title-card-line-right',
+              { scaleX: 0 },
+              { scaleX: 1, duration: 0.48, ease: 'power4.out' },
+              0.58
+            );
+            /* Pops in on the same beat the lines finish opening. No rotation:
+               the diamond this replaced spun to 45deg because that *was* the
+               shape, and a logo doing it would just look tilted. */
+            tl.fromTo(
+              '#chapter-title-card-separator-mark',
+              { autoAlpha: 0, scale: 0 },
+              { autoAlpha: 1, scale: 1, duration: 0.42, ease: 'back.out(1.5)' },
+              0.62
+            );
+            tl.set('#chapter-title-card-topic', { autoAlpha: 1 }, 1.28);
+            tl.fromTo(
+              '#chapter-title-card-topic',
+              { y: 48 },
+              { y: 0, duration: 0.18, ease: 'power4.out' },
+              1.28
+            );
+            }
+
+            /* No exit. The card arrives, completes, and holds composed until it
+               cuts to the chapter body.
+
+               There used to be a three-phase leftward nudge here (content to
+               x:-270, pattern to x:-180, from 2.32s) justified as carrying
+               momentum into the following chapter. It could not do that: each
+               card is rendered as its own composition and joined to the next
+               segment by ffmpeg (see write_horizontal_segments), so what follows
+               the slide is a hard cut to an unrelated file, not a continuation.
+
+               It was also mistimed. Those beats were absolute constants while the
+               card's length is a variable, so a card longer than ~2.9s sat 270px
+               off-centre for the whole remainder, and a shorter one cut away
+               mid-slide. Holding the finished card is both the requested look and
+               the only one that is correct at every duration. */
+
+            tl.seek(0);
+            window.__timelines['chapter-title-card'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

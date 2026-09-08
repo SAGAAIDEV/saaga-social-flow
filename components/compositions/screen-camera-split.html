@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;screenSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Screen Render Video&quot;,&quot;default&quot;:&quot;assets/placeholder-screen.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;speakerName&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Speaker Name&quot;,&quot;default&quot;:&quot;Andrew Melnychuk&quot;,&quot;maxLength&quot;:60},
+    {&quot;id&quot;:&quot;cameraPosition&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Framing (CSS object-position)&quot;,&quot;default&quot;:&quot;center&quot;},
+    {&quot;id&quot;:&quot;audioSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Audio&quot;,&quot;default&quot;:&quot;assets/placeholder-audio.mp3&quot;},
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-w7f7" id="root" data-composition-id="screen-camera-split" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+        <style>
+          /* Brand font. Vendored as woff2 under assets/fonts so renders are
+             deterministic and do not depend on a system-installed copy. */
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700; font-style: normal; font-display: block;
+          }
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background: #ffffff;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          /* Figma paint order: background -> camera -> screen -> name label.
+             The screen render sits on top and covers the camera's left edge, so the
+             camera reads as a flush column from x=1402.56 to the frame edge.
+
+             In Figma the camera art starts at y=254.74, but that asset is a cutout
+             portrait whose own backdrop is the same #fdeee6 as the background rect —
+             so the column reads as continuous from y=0 (verified: no seam at y=255).
+             A real camera movie has no such backdrop, so the camera fills the full
+             column height here. Its 10px top corner radii are dropped for the same
+             reason: in Figma both corners are occluded/off-canvas and never render. */
+          .screen-camera-split-bg {
+            position: absolute;
+            inset: 0;
+            background: #fdeee6;
+            z-index: 0;
+          }
+          /* Runs a few px under the screen render so the two never leave a
+             sub-pixel seam; the screen's right edge (1402.56) is the visible join. */
+          .screen-camera-split-camera-wrap {
+            position: absolute;
+            left: 1398px;
+            top: 0;
+            width: 522px;
+            height: 1080px;
+            overflow: hidden;
+            z-index: 1;
+          }
+          .screen-camera-split-camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: var(--cameraPosition, center);
+          }
+          .screen-camera-split-screen {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1402.562px;
+            height: 1080px;
+            object-fit: cover;
+            z-index: 2;
+          }
+          .screen-camera-split-name {
+            position: absolute;
+            left: 1403px;
+            top: 1003px;
+            width: 517px;
+            height: 77px;
+            box-sizing: border-box;
+            background: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 30px;
+            overflow: hidden;   /* carousel window: items clip as they roll through */
+            z-index: 3;
+          }
+          /* Identity strip: speaker name alternates with the animated logo lockup.
+             Both layers stack in the same bar and cross-fade. */
+          .scs-layer {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+          }
+          .scs-layer-logo { opacity: 0; }
+          .scs-badge { width: 44px; height: 44px; flex: none; display: block; }
+          .scs-wordmark { height: 24px; width: auto; flex: none; display: block; }
+          .screen-camera-split-name span {
+            font-weight: 600;
+            font-size: 28px;
+            line-height: 35.837px;
+            color: #eb5201;
+            white-space: nowrap;
+          }
+        </style>
+
+        <div data-hf-id="hf-zsfz" id="screen-camera-split-bg" class="screen-camera-split-bg clip" data-start="0" data-duration="10" data-track-index="0"></div>
+
+        <div data-hf-id="hf-8eg5" id="screen-camera-split-camera-wrap" class="screen-camera-split-camera-wrap">
+          <video data-hf-id="hf-9m35" id="screen-camera-split-camera-video" class="screen-camera-split-camera-video clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+        </div>
+
+        <video data-hf-id="hf-zljt" id="screen-camera-split-screen-video" class="screen-camera-split-screen clip" data-start="0" data-duration="10" data-track-index="2" data-var-src="screenSrc" src="assets/placeholder-screen.mp4" muted playsinline></video>
+
+        <!-- Audio is always its own element. The authored src is what render-time
+             extraction reads — audioSrc overrides it, but it must stay a real file. -->
+        <audio data-hf-id="hf-scsaud" id="screen-camera-split-audio" data-start="0" data-duration="10" data-track-index="9" data-var-src="audioSrc" src="assets/placeholder-audio.mp3" data-volume="1"></audio>
+
+        <div data-hf-id="hf-2cbk" id="screen-camera-split-name" class="screen-camera-split-name clip" data-start="0" data-duration="10" data-track-index="3">
+          <span class="scs-layer" data-hf-id="hf-8ppv" id="screen-camera-split-name-text" data-var-text="speakerName">Andrew Melnychuk</span>
+          <div data-hf-id="hf-or50" id="screen-camera-split-idty-logo" class="scs-layer scs-layer-logo">
+            <svg data-layout-allow-overflow="true" data-hf-id="hf-ch3i" class="scs-badge" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path data-hf-id="hf-n9n1" id="scs-badge-small" d="M17.3813 5.15839C17.3813 4.32731 16.7021 3.65359 15.8643 3.65359C15.0265 3.65359 14.3473 4.32731 14.3473 5.15839C14.3473 5.98947 15.0265 6.66319 15.8643 6.66319V7.66639C14.4679 7.66639 13.3359 6.54352 13.3359 5.15839C13.3359 3.77326 14.4679 2.65039 15.8643 2.65039C17.2607 2.65039 18.3926 3.77326 18.3926 5.15839C18.3926 6.54352 17.2607 7.66639 15.8643 7.66639V6.66319C16.7021 6.66319 17.3813 5.98947 17.3813 5.15839Z" fill="#EB5200" />
+              <path data-hf-id="hf-ipnw" id="scs-badge-medium" d="M18.2403 7.66715C18.2402 4.77701 15.8897 2.4341 12.9902 2.4341C10.0907 2.43413 7.74013 4.77703 7.74011 7.66715C7.74011 10.5573 10.0906 12.9002 12.9902 12.9002V13.9066C9.53303 13.9065 6.73047 11.1131 6.73047 7.66715C6.7305 4.22123 9.53305 1.42776 12.9902 1.42773C16.4473 1.42773 19.2499 4.22121 19.2499 7.66715C19.2499 11.1131 16.4474 13.9066 12.9902 13.9066V12.9002C15.8897 12.9002 18.2403 10.5573 18.2403 7.66715Z" fill="#EB5200" />
+              <g data-hf-id="hf-oexd" id="scs-badge-orbit"><path data-hf-id="hf-jtxe" id="scs-badge-dashed" d="M9.30367 17.8518C8.66786 18.0393 7.99516 18.1406 7.29883 18.1406L7.11552 18.1381C6.48432 18.1221 5.87361 18.023 5.29374 17.852L4.95071 16.6603C5.67332 16.9634 6.46656 17.1312 7.29883 17.1312C8.13104 17.1312 8.92413 16.9634 9.6467 16.6603L9.30367 17.8518ZM1.9077 13.8655C2.48148 14.9583 3.37583 15.8551 4.46541 16.4306L4.83006 17.6975C2.89711 16.9781 1.36203 15.4383 0.644687 13.4998L1.9077 13.8655ZM13.9525 13.4998C13.2351 15.4384 11.7001 16.9781 9.7671 17.6975L10.1318 16.4309C11.2214 15.8553 12.1156 14.9583 12.6895 13.8655L13.9525 13.4998ZM1.67893 8.66926C1.37659 9.39401 1.2096 10.1896 1.2096 11.0244C1.20961 11.859 1.37669 12.6544 1.67893 13.3791L0.490619 13.035C0.320109 12.4535 0.221327 11.8411 0.205336 11.208L0.203125 11.0244C0.203125 10.3259 0.303838 9.65105 0.490865 9.01327L1.67893 8.66926ZM14.1065 9.01327C14.2936 9.65106 14.3945 10.3259 14.3945 11.0244L14.3921 11.208C14.3761 11.8411 14.2771 12.4534 14.1065 13.035L12.9185 13.3791C13.2207 12.6544 13.3881 11.859 13.3881 11.0244C13.3881 10.1896 13.2206 9.39404 12.9182 8.66926L14.1065 9.01327ZM4.46541 5.61794C3.37594 6.19339 2.48175 7.0902 1.90794 8.1828L0.644441 8.54875C1.36182 6.61012 2.89725 5.07021 4.83031 4.35079L4.46541 5.61794ZM9.7671 4.35104C11.7 5.07046 13.2353 6.61003 13.9527 8.5485L12.6895 8.1828C12.1156 7.09011 11.2214 6.19313 10.1318 5.6177L9.7671 4.35104ZM7.48189 3.91042C8.11315 3.92647 8.72375 4.02576 9.30367 4.19677L9.6467 5.38827C8.92416 5.08516 8.13101 4.91761 7.29883 4.91759C6.46651 4.91759 5.67311 5.08509 4.95047 5.38827L5.29349 4.19653C5.92938 4.009 6.60241 3.9082 7.29883 3.9082L7.48189 3.91042Z" fill="#EB5200" /></g>
+              <path data-hf-id="hf-efg4" id="scs-badge-main" d="M10.0726 0C15.6356 5.3992e-05 20.1453 4.50977 20.1453 10.0728C20.1453 15.6358 15.6356 20.1455 10.0726 20.1456C4.50968 20.1456 0 15.6358 0 10.0728C8.11183e-08 4.50974 4.50968 8.11292e-08 10.0726 0ZM10.0726 1.00728C5.06597 1.00728 1.00726 5.06604 1.00726 10.0728C1.00726 15.0795 5.06597 19.1383 10.0726 19.1383C15.0793 19.1382 19.138 15.0795 19.138 10.0728C19.138 5.06607 15.0793 1.00733 10.0726 1.00728Z" fill="#EB5200" />
+            </svg>
+            <img data-hf-id="hf-hqnp" class="scs-wordmark" src="assets/saaga-solve-wordmark.svg" alt="">
+          </div>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            var vars = (window.__hyperframes && window.__hyperframes.getVariables)
+              ? window.__hyperframes.getVariables() : {};
+
+            /* Every timed element takes the chapter's length. Miss one and that clip
+               ends early, blanking part of the frame partway through. */
+            var D = Number(vars.durationSeconds);
+            if (!isFinite(D) || D < 1 || D > 900) { D = 10; }
+            ['screen-camera-split-bg', 'screen-camera-split-camera-video',
+             'screen-camera-split-screen-video', 'screen-camera-split-name',
+             'screen-camera-split-audio'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) { el.setAttribute('data-duration', String(D)); }
+            });
+
+            /* No transform on the media regions: they are flush to the frame edges,
+               so any translate/scale would expose the background behind them. */
+            tl.fromTo(
+              '#screen-camera-split-name-text',
+              { autoAlpha: 0, y: 8 },
+              { autoAlpha: 1, y: 0, duration: 0.5, ease: 'power2.out' },
+              0.2
+            );
+
+            /* Badge rings: badge.svg drives these with CSS `animation: ... infinite`,
+               which is wall-clock and cannot be seeked. Re-expressed as finite GSAP
+               tweens on the paused timeline so every frame is reproducible.
+               svgOrigin values are the transform-origins from badge.svg's stylesheet. */
+            tl.to('#scs-badge-small',  { rotation:  360, duration: 4, ease: 'none', repeat: 14, svgOrigin: '10.07 10.07' }, 0);
+            tl.to('#scs-badge-medium', { rotation: -360, duration: 4, ease: 'none', repeat: 14, svgOrigin: '10.07 10.07' }, 0);
+            tl.to('#scs-badge-orbit',  { rotation:  360, duration: 8, ease: 'none', repeat:  7, svgOrigin: '10.07 10.07' }, 0);
+            tl.to('#scs-badge-dashed', { rotation: -360, duration: 5, ease: 'none', repeat: 11, svgOrigin: '7.3 11'     }, 0);
+
+            /* Alternation reads as a vertical carousel: every item travels DOWNWARD.
+               The outgoing item falls out of the bar while the incoming one drops in
+               from above, so the pair moves as one continuous reel.
+
+               Exactly a 5s loop. Both the in- and out-roll for an item sit INSIDE the
+               cycle (item drops in at t=0, rolls out before t=5) so the repeat seam is
+               invisible and nothing is mid-flight when the cycle wraps. Finite repeat —
+               no infinite tween, so every frame is reproducible under seek. */
+            var NAME = '#screen-camera-split-name-text';
+            var LOGO = '#screen-camera-split-idty-logo';
+            var ROLL = 46;                       /* travel in px; > half the 77px bar so items fully clear */
+            var IN   = { duration: 0.55, ease: 'power3.out' };
+            var OUT  = { duration: 0.40, ease: 'power2.in' };
+
+            var idty = gsap.timeline({ repeat: 19 });   /* 19 repeats = 100s of cover */
+            idty.set(NAME, { autoAlpha: 0, y: -ROLL }, 0)
+                .set(LOGO, { autoAlpha: 0, y: -ROLL }, 0)
+                .to(NAME, Object.assign({ y: 0,    autoAlpha: 1 }, IN),  0.00)   /* name drops in   */
+                .to(NAME, Object.assign({ y: ROLL, autoAlpha: 0 }, OUT), 2.30)   /* name rolls out  */
+                .to(LOGO, Object.assign({ y: 0,    autoAlpha: 1 }, IN),  2.40)   /* logo drops in   */
+                .to(LOGO, Object.assign({ y: ROLL, autoAlpha: 0 }, OUT), 4.60);  /* logo rolls out  */
+            /* cycle length = 4.60 + 0.40 = exactly 5.00s */
+            tl.add(idty, 0);
+            window.__timelines['screen-camera-split'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

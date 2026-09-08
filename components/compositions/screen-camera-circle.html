@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;screenSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Screen Render Video&quot;,&quot;default&quot;:&quot;assets/placeholder-screen.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraPosition&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Framing (CSS object-position)&quot;,&quot;default&quot;:&quot;center top&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-7nor" id="root" data-composition-id="screen-camera-circle" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+        <style>
+          /* Brand font. Vendored as woff2 under assets/fonts so renders are
+             deterministic and do not depend on a system-installed copy. */
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700; font-style: normal; font-display: block;
+          }
+          /* Figma "CircleDemo" (1:7533) — full-bleed screen render with a circular
+             camera bubble floating bottom-right. No name label in this layout.
+
+             Figma draws the ring as an SVG ellipse stroke (Ellipse 19, 370x370) over a
+             circular mask; a CSS border-radius:50% + border reproduces it exactly and
+             keeps the block self-contained. Figma's camera art overflows the circle
+             (306.8x420.4) and is clipped by the mask — overflow:hidden does the same. */
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background: #ffffff;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          .circle-demo-bg {
+            position: absolute;
+            inset: 0;
+            background: #fdeee6;
+            z-index: 0;
+          }
+          .circle-demo-screen {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            object-fit: cover;
+            object-position: top;
+            z-index: 1;
+          }
+          .circle-demo-bubble {
+            position: absolute;
+            left: 1492.54px;
+            top: 671.37px;
+            width: 370px;
+            height: 370px;
+            box-sizing: border-box;
+            background: #fdeee6;
+            border: 4px solid #eb5201;
+            border-radius: 50%;
+            overflow: hidden;
+            z-index: 2;
+          }
+          .circle-demo-camera {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: var(--cameraPosition, center top);
+          }
+        </style>
+
+        <div data-hf-id="hf-eu6z" id="circle-demo-bg" class="circle-demo-bg clip" data-start="0" data-duration="10" data-track-index="0"></div>
+
+        <video data-hf-id="hf-uc7f" id="circle-demo-screen-video" class="circle-demo-screen clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="screenSrc" src="assets/placeholder-screen.mp4" muted playsinline></video>
+
+        <div data-hf-id="hf-fbru" id="circle-demo-bubble" class="circle-demo-bubble">
+          <video data-hf-id="hf-l24u" id="circle-demo-camera-video" class="circle-demo-camera clip" data-start="0" data-duration="10" data-track-index="2" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            tl.fromTo(
+              '#circle-demo-bubble',
+              { autoAlpha: 0, scale: 0.9 },
+              { autoAlpha: 1, scale: 1, duration: 0.6, ease: 'power3.out', transformOrigin: '50% 50%' },
+              0
+            );
+            window.__timelines['screen-camera-circle'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

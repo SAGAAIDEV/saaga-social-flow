@@ -1,0 +1,230 @@
+{
+  "schema": 1,
+  "id": "saaga-video-components",
+  "version": "1.0.0",
+  "profiles": {
+    "edit-horizontal": [
+      "screen-camera-split",
+      "chapter-title-card",
+      "screen-camera-circle",
+      "talking-head-horizontal"
+    ],
+    "edit-vertical": [
+      "screen-camera-vertical",
+      "talking-head-vertical"
+    ]
+  },
+  "blocks": [
+    {
+      "id": "chapter-title-card",
+      "title": "Chapter Title Card",
+      "source": "compositions/chapter-title-card.html",
+      "role": "chapter-card",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [],
+      "variables": [
+        "chapterLabel",
+        "chapterNumber",
+        "chapterTopic",
+        "accentColor",
+        "backgroundColor",
+        "textColor"
+      ],
+      "tags": [
+        "chapter",
+        "title-card",
+        "kinetic-type",
+        "transition"
+      ],
+      "assets": [
+        "assets/pattern-rings.svg",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2",
+        "assets/silence.mp3"
+      ]
+    },
+    {
+      "id": "screen-camera-circle",
+      "title": "Screen + Camera Circle",
+      "source": "compositions/screen-camera-circle.html",
+      "role": "chapter-layout",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [
+        "camera",
+        "screen"
+      ],
+      "variables": [
+        "screenSrc",
+        "cameraSrc",
+        "cameraPosition"
+      ],
+      "tags": [
+        "screen",
+        "camera",
+        "picture-in-picture"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-screen.mp4",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    },
+    {
+      "id": "screen-camera-rectangle",
+      "title": "Screen + Camera Rectangle",
+      "source": "compositions/screen-camera-rectangle.html",
+      "role": "chapter-layout",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [
+        "camera",
+        "screen"
+      ],
+      "variables": [
+        "screenSrc",
+        "cameraSrc",
+        "speakerName",
+        "cameraPosition"
+      ],
+      "tags": [
+        "screen",
+        "camera",
+        "picture-in-picture"
+      ],
+      "assets": [
+        "assets/pattern-card-rings.svg",
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-screen.mp4",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    },
+    {
+      "id": "screen-camera-split",
+      "title": "Screen + Camera Split",
+      "source": "compositions/screen-camera-split.html",
+      "role": "chapter-layout",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [
+        "camera",
+        "screen"
+      ],
+      "variables": [
+        "screenSrc",
+        "cameraSrc",
+        "speakerName",
+        "cameraPosition"
+      ],
+      "tags": [
+        "screen",
+        "camera",
+        "split"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-screen.mp4",
+        "assets/saaga-solve-wordmark.svg",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2",
+        "assets/placeholder-audio.mp3"
+      ]
+    },
+    {
+      "id": "screen-camera-vertical",
+      "title": "Screen + Camera Vertical",
+      "source": "compositions/screen-camera-vertical.html",
+      "role": "chapter-layout",
+      "orientation": "portrait",
+      "width": 1080,
+      "height": 1920,
+      "media": [
+        "camera",
+        "screen"
+      ],
+      "variables": [
+        "screenSrc",
+        "cameraSrc",
+        "cameraPosition"
+      ],
+      "tags": [
+        "screen",
+        "camera",
+        "short"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-audio.mp3",
+        "assets/placeholder-screen.mp4",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    },
+    {
+      "id": "talking-head-horizontal",
+      "title": "Talking Head Horizontal",
+      "source": "compositions/talking-head-horizontal.html",
+      "role": "chapter-layout",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [
+        "camera"
+      ],
+      "variables": [
+        "cameraSrc",
+        "cameraPosition"
+      ],
+      "tags": [
+        "camera",
+        "talking-head",
+        "longform"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-audio.mp3",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    },
+    {
+      "id": "talking-head-vertical",
+      "title": "Talking Head Vertical",
+      "source": "compositions/talking-head-vertical.html",
+      "role": "chapter-layout",
+      "orientation": "portrait",
+      "width": 1080,
+      "height": 1920,
+      "media": [
+        "camera"
+      ],
+      "variables": [
+        "cameraSrc",
+        "cameraPosition"
+      ],
+      "tags": [
+        "camera",
+        "talking-head",
+        "short"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-audio.mp3",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    }
+  ]
+}

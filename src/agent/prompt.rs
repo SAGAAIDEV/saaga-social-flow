@@ -72,13 +72,11 @@ pub struct Resolved {
 /// Kept together rather than deferred so the read side resolving a version has a
 /// writer that can actually produce one.
 impl Resolved {
-    #[allow(dead_code)]
     pub fn is_builtin(&self) -> bool {
         self.version == Some(0)
     }
 
     /// How to name this version in a report: "v2", or "unversioned (a1b2…)".
-    #[allow(dead_code)]
     pub fn label(&self) -> String {
         match self.version {
             Some(n) => format!("v{n}"),
@@ -266,7 +264,11 @@ fn overlay_version(
         .max()
 }
 
-fn builtin_version(builtin: &str) -> Resolved {
+/// The builtin as a [`Resolved`]: v0, hashed like any overlay. Public so a
+/// stage that finds the overlay unfit for a run — see
+/// [`crate::blog::generate::stale_preamble`] — can fall back to it and still
+/// record what actually ran.
+pub fn builtin_version(builtin: &str) -> Resolved {
     Resolved {
         text: builtin.to_string(),
         version: Some(0),

@@ -269,9 +269,16 @@ pub fn run_record_session(
     let (publish_tx, publish_rx) = std::sync::mpsc::channel();
     let (substack_tx, substack_rx) = std::sync::mpsc::channel();
     let (blog_tx, blog_rx) = std::sync::mpsc::channel();
-    // The Post tab starts where Notes is but owns its choice from then on, so
-    // one catalog fetch covers both at launch.
-    let posts_pick = notes_pick.mirror();
+    // The Post tab owns its choice, so a saved one is restored rather than
+    // overwritten. Only a machine that has never picked one falls back to
+    // mirroring Notes — which is also the cheap path, reusing the catalog
+    // already fetched instead of asking for a second one.
+    let posts_pick = match (&cfg.posts_model, &cfg.posts_provider) {
+        (None, None) => notes_pick.mirror(),
+        (model, provider) => {
+            crate::notes::Picker::restore(provider.clone(), model.clone())
+        }
+    };
     let mut app = App {
         session,
         notes_tx,
@@ -279,6 +286,7 @@ pub fn run_record_session(
         render_tx,
         render_rx,
         render_busy: false,
+        pipeline: false,
         posts_tx,
         posts_rx,
         substack_tx,

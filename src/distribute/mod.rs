@@ -10,6 +10,7 @@ use crate::session::Session;
 
 pub mod progress;
 mod s3;
+pub(crate) use s3::screencast_home;
 pub mod schema;
 
 pub use progress::Progress;
@@ -180,7 +181,7 @@ fn collect_assets(render_dir: &Path, drafts: &Path, root: &Path) -> Result<Vec<A
     Ok(assets)
 }
 
-/// The candidate the Thumbnail tab last activated, if it is still on disk.
+/// The candidate the AI experiments last activated, if it is still on disk.
 ///
 /// It keeps its content-addressed filename, so activating a different candidate
 /// publishes a different URL rather than overwriting the old one — a post that
@@ -281,7 +282,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Writes a candidate and activates it, the way the Thumbnail tab does.
+    /// Writes a candidate and activates it, the way the AI experiments do.
     fn activated_thumbnail(root: &Path, id: &str) {
         let file = format!("thumbnails/candidates/{id}.jpg");
         let path = root.join(&file);

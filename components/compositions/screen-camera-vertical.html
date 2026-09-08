@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;screenSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Screen Render Video&quot;,&quot;default&quot;:&quot;assets/placeholder-screen.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraPosition&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Framing (CSS object-position)&quot;,&quot;default&quot;:&quot;center&quot;},
+    {&quot;id&quot;:&quot;chapterLabel&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Label&quot;,&quot;default&quot;:&quot;Chapter&quot;,&quot;maxLength&quot;:24},
+    {&quot;id&quot;:&quot;chapterNumber&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Number&quot;,&quot;default&quot;:&quot;01&quot;,&quot;maxLength&quot;:4},
+    {&quot;id&quot;:&quot;chapterTopic&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Topic&quot;,&quot;default&quot;:&quot;The New Workflow&quot;,&quot;maxLength&quot;:80},
+    {&quot;id&quot;:&quot;openerSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Opener Length&quot;,&quot;default&quot;:2.6,&quot;min&quot;:1.2,&quot;max&quot;:6,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;},
+    {&quot;id&quot;:&quot;audioSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Audio&quot;,&quot;default&quot;:&quot;assets/placeholder-audio.mp3&quot;},
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-hegn" id="root" data-composition-id="screen-camera-vertical" data-start="0" data-width="1080" data-height="1920" data-duration="10">
+        <style>
+          /* Brand font. Vendored as woff2 under assets/fonts so renders are
+             deterministic and do not depend on a system-installed copy. */
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700; font-style: normal; font-display: block;
+          }
+          /* Figma "VerticalDemo" (1:7541) — screen render stacked above a camera panel.
+
+             Figma authors this at 375x812 (19.5:9). This block targets 1080x1920 (9:16)
+             for Shorts/Reels/TikTok, so vertical positions are remapped as a PERCENTAGE
+             of height rather than scaled by the 2.88x width factor — otherwise the layout
+             would run 418px past the bottom of the canvas. The screen/panel split stays at
+             Figma's 65.696% (533.455 / 812). Horizontal values scale by 2.88 directly.
+
+             The output uses the requested exact 2/3 screen + 1/3 camera split. The
+             original Figma frame is within 1% of that ratio (65.696% / 34.304%).
+
+             DEPARTURE FROM FIGMA: the camera fills the lower third edge to edge rather
+             than sitting as an inset card on the peach panel (Figma's left 72.64/375,
+             width 247.93/375). Two reasons, one of them measurable:
+
+             * Crop. The camera source is 1920x1080. Covering the 714x620 card scaled it
+               by 620/1080 = 0.574 to 1102px wide and centre-cropped to 714 — 35% of the
+               captured width discarded. Covering the full 1080x636 panel scales by
+               0.589 to 1131px and crops 51px, 4.5%. Same footage, a third more of it.
+             * The seam does the work. What reads as designed is the 4px orange rule
+               against the screen above, not the peach margins around the camera. The
+               rule stays; the surround was costing more than it earned.
+
+             The panel keeps its peach background (visible only if the camera fails to
+             load) and its overflow crop.
+
+             There is no identity bar. Figma put a white 80px strip across the camera's
+             bottom edge, cycling the speaker's name against the SAAGA SOLVE lockup; it
+             was removed by request so the camera reaches the frame's bottom edge. The
+             4px orange rule is now the layout's only brand element, which is also why
+             this block no longer declares speakerName — nothing in it renders a name. */
+          #root {
+            position: relative;
+            width: 1080px;
+            height: 1920px;
+            overflow: hidden;
+            background: #ffffff;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          .vert-demo-bg {
+            position: absolute;
+            inset: 0;
+            background: #fdeee6;
+            z-index: 0;
+          }
+          .vert-demo-screen {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1080px;
+            height: 1280px;
+            object-fit: cover;
+            z-index: 1;
+          }
+          /* Peach panel: Figma Rectangle 113, 4px orange top border. */
+          .vert-demo-panel {
+            position: absolute;
+            left: 0;
+            top: 1280px;
+            width: 1080px;
+            height: 640px;
+            box-sizing: border-box;
+            background: #fdeee6;
+            border-top: 4px solid #eb5201;
+            overflow: hidden;
+            z-index: 2;
+          }
+          /* Full-bleed inside the panel's padding box: 1080x636, the panel's 640 less
+             its 4px top rule. Sized by inset rather than fixed px so the rule's width
+             and the camera's height can never drift apart.
+
+             Note on framing: covering 1080x636 from 16:9 leaves 51px of horizontal
+             overflow and none vertical, so cameraPosition's X shifts the frame by at
+             most 25px and its Y is inert. Face framing is close to a no-op here by
+             design — the crop is small enough that the speaker is in frame regardless. */
+          .vert-demo-camera {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: var(--cameraPosition, center);
+          }
+          /* Chapter opener — the title-card vocabulary (label / number / rule /
+             topic, waterfall arrival) restated as a caption-scale plate over the
+             footage. Untimed on purpose: the framework owns .clip visibility, so
+             an opener that has to animate out cannot be a clip. It sits above
+             every layer and clears itself before the chapter proper begins.
+
+             The defocus behind it is NOT this plate's doing — it is the canonical
+             `effects.blur` shader on the media elements, resolving to identity as
+             the plate leaves. See the timeline. */
+          .ch-open {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 72px;
+            box-sizing: border-box;
+            z-index: 5;
+          }
+          /* No plate: the title sits directly on the footage. What makes it
+             legible is the treatment underneath — a heavier defocus plus an
+             exposure dip, both on the canonical shader and both resolving to
+             identity as the title leaves. A DOM scrim would have been the wrong
+             tool: media treatments belong on the shader path, not in overlays. */
+          .ch-open-plate {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 940px;
+            padding: 0 40px;
+            text-align: center;
+          }
+          .ch-open-label {
+            color: #ff8a4d;
+            font-size: 40px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+          }
+          .ch-open-number {
+            margin-top: 14px;
+            color: #ffffff;
+            font-size: 260px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 0.86;
+            letter-spacing: -0.055em;
+          }
+          .ch-open-rule {
+            width: 100%;
+            max-width: 620px;
+            height: 28px;
+            margin: 34px auto 0;
+            display: grid;
+            grid-template-columns: 1fr 16px 1fr;
+            align-items: center;
+            gap: 20px;
+          }
+          .ch-open-rule-line {
+            display: block;
+            width: 100%;
+            height: 4px;
+            background: #ff8a4d;
+          }
+          /* No CSS `transform` here — the 45deg rest state is declared inside the
+             fromTo instead, or lint flags gsap_css_transform_conflict. */
+          .ch-open-rule-mark {
+            display: block;
+            transform: rotate(45deg);
+            width: 16px;
+            height: 16px;
+            background: #ff8a4d;
+          }
+          .ch-open-topic {
+            margin-top: 30px;
+            color: #ffffff;
+            font-size: 58px;
+            font-weight: 600;
+            line-height: 1.1;
+            letter-spacing: -0.02em;
+          }
+        </style>
+
+        <div data-hf-id="hf-0z5j" id="vert-demo-bg" class="vert-demo-bg clip" data-start="0" data-duration="10" data-track-index="0"></div>
+
+        <video style="clip-path: inset(0px); --hf-color-grading-blur: 0.8; --hf-color-grading-exposure: -0.7" data-color-grading='{"adjust":{"exposure":-0.7},"effects":{"blur":0.8}}' data-hf-id="hf-brxp" id="vert-demo-screen-video" class="vert-demo-screen clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="screenSrc" src="assets/placeholder-screen.mp4" muted playsinline></video>
+
+        <div data-hf-id="hf-46s2" id="vert-demo-panel" class="vert-demo-panel">
+          <!-- Fills the panel exactly, so nothing overflows and no allow-overflow
+               marker is needed here any more — the camera used to run 4px past the
+               panel's bottom to match Figma's crop. -->
+          <video style="--hf-color-grading-blur: 0.8; --hf-color-grading-exposure: -0.7" data-color-grading='{"adjust":{"exposure":-0.7},"effects":{"blur":0.8}}' data-hf-id="hf-7aog" id="vert-demo-camera-video" class="vert-demo-camera clip" data-start="0" data-duration="10" data-track-index="2" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+        </div>
+
+        <!-- Audio is always its own element. The authored src must stay a real
+             file for render-time extraction (lint: media_variable_src_no_fallback);
+             audioSrc does override it. Without this the render carries no audio
+             stream, which the screencast render stage rejects. -->
+        <audio data-hf-id="hf-vaud" id="vert-demo-audio" data-start="0" data-duration="10" data-track-index="9" data-var-src="audioSrc" src="assets/placeholder-audio.mp3" data-volume="1"></audio>
+
+        <div data-hf-id="hf-vopen" id="vert-demo-opener" class="ch-open">
+          <div data-layout-allow-overflow="true" data-hf-id="hf-vopl" id="vert-demo-opener-plate" class="ch-open-plate">
+            <div data-hf-id="hf-voplb" id="vert-demo-opener-label" class="ch-open-label" data-var-text="chapterLabel">Chapter</div>
+            <div data-hf-id="hf-vopnm" id="vert-demo-opener-number" class="ch-open-number" data-var-text="chapterNumber">01</div>
+            <div data-hf-id="hf-voprl" id="vert-demo-opener-rule" class="ch-open-rule" aria-hidden="true">
+              <span data-hf-id="hf-voprll" id="vert-demo-opener-rule-left" class="ch-open-rule-line ch-open-rule-left"></span>
+              <span data-hf-id="hf-voprm" id="vert-demo-opener-rule-mark" class="ch-open-rule-mark"></span>
+              <span data-hf-id="hf-voprlr" id="vert-demo-opener-rule-right" class="ch-open-rule-line ch-open-rule-right"></span>
+            </div>
+            <div data-hf-id="hf-voptp" id="vert-demo-opener-topic" class="ch-open-topic" data-var-text="chapterTopic">The New Workflow</div>
+          </div>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            gsap.set("#vert-demo-screen-video", { x: -2, y: -3 });
+            var tl = gsap.timeline({ paused: true });
+            var vars = (window.__hyperframes && window.__hyperframes.getVariables)
+              ? window.__hyperframes.getVariables() : {};
+
+            /* Chapter length. Every timed element takes it, or that element's
+               hardcoded duration ends its clip early and part of the frame goes
+               blank partway through a longer chapter. Resolves per instance from
+               the host slot's data-variable-values. */
+            var D = Number(vars.durationSeconds);
+            if (!isFinite(D) || D < 1 || D > 900) { D = 10; }
+            ['vert-demo-bg', 'vert-demo-screen-video', 'vert-demo-camera-video',
+             'vert-demo-audio'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) { el.setAttribute('data-duration', String(D)); }
+            });
+
+            /* Media regions are flush to the frame edges, so they are never
+               transformed — any translate/scale would expose the backdrop. */
+
+            /* ---- Chapter opener -------------------------------------------
+               The waterfall arrival is lifted from chapter-title-card so the two
+               formats speak the same language: label and number land as a tight
+               hierarchy, the rule physically opens the space the topic rises
+               into. Only the scale changes for the 1080-wide plate.
+
+               The exit is the point of the whole thing. The plate lifts away
+               while `effects.blur` tweens to identity (0), so the footage pulls
+               into focus on the same beat rather than cutting sharp. Blur is the
+               canonical shader property, not a CSS filter — animating
+               --hf-color-grading-blur is the contract the capability documents,
+               and returning it to 0 leaves the chapter's real pixels untouched. */
+            var OPEN = Number(vars.openerSeconds);
+            if (!isFinite(OPEN) || OPEN < 1.2 || OPEN > 6) { OPEN = 2.6; }
+
+            /* The title is NOT animated on. It is fully composed in frame one —
+               plate, label, number, rule and topic all at rest — holds for the
+               opener, then leaves. Nothing here sets an entrance state, so the
+               CSS is the first frame and a seek to 0 shows the finished title.
+
+               openerSeconds therefore means "how long the title holds", and the
+               exit plus the blur ramp are clamped to finish inside the chapter so
+               a short one is never left mid-fade or permanently defocused. */
+            var HOLD = Math.max(0.2, Math.min(OPEN, D));
+            var EXIT_DUR = Math.min(0.42, Math.max(0.15, D * 0.2));
+            var RAMP = 0.85;
+            var EXIT = Math.min(HOLD, Math.max(0, D - EXIT_DUR));
+            var ramp = Math.max(0.2, Math.min(RAMP, D - EXIT));
+
+            tl.to('#vert-demo-opener-plate', { y: -64, autoAlpha: 0, duration: EXIT_DUR, ease: 'power3.in' }, EXIT);
+            tl.to('#vert-demo-screen-video', { '--hf-color-grading-blur': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+            tl.to('#vert-demo-screen-video', { '--hf-color-grading-exposure': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+            tl.to('#vert-demo-camera-video', { '--hf-color-grading-blur': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+            tl.to('#vert-demo-camera-video', { '--hf-color-grading-exposure': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+
+            window.__timelines['screen-camera-vertical'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

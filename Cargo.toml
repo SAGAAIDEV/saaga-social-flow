@@ -98,6 +98,10 @@ objc2-web-kit = { version = "0.3", features = [
     # See src/card/raster.rs.
     "WKNavigationDelegate",
     "WKSnapshotConfiguration",
+    # `callAsyncJavaScript` — how the rasteriser waits for the photograph to
+    # decode before it photographs the card. Both are that method's cfg gates.
+    "WKContentWorld",
+    "WKFrameInfo",
 ] }
 # Jinja2 for Rust, by Jinja's own author. The webview panes are rendered here
 # rather than in JavaScript, so `{% macro %}` is what makes a checkbox row or a

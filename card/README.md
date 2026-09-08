@@ -1,8 +1,8 @@
 # Thumbnail cards
 
-One photo and one design produce the whole artwork set: **Generate artwork set** on
-the Thumbnail tab draws all three destinations from the same saved card and activates
-them together.
+One photo and one design produce the whole artwork set: **Render video and thumbnails**
+draws all three destinations from the same saved card and activates them together, and
+**Redraw artwork** on the Video details pane does the same by hand.
 
 | Destination | Size | Composed on |
 |---|---|---|
@@ -15,7 +15,10 @@ The OG image is the horizontal thumbnail at another resolution, not a second des
 22px comes off the top and bottom of a card padded by 64, which costs nothing and
 avoids bars down both sides of a link preview.
 
-Landscape cards place the photo beside the headline; portrait cards place it above.
+Both cards read words first, then the presenter: the landscape card puts the headline
+on the left and the photo on the right, the portrait card puts the headline on top and
+the photo beneath it — which also keeps the presenter out from under a portrait
+player's top-edge controls and crop.
 Without a photo, text uses the full frame. Focus controls the horizontal photo crop —
 it has roughly half the travel in portrait, where the photo box is much closer to the
 camera's own aspect. Keep headlines concise; secondary copy is limited to three lines.

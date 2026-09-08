@@ -19,13 +19,17 @@
 //! window drawing a thumbnail must not turn up in a recording even in the moment
 //! it is off screen, because "off every screen" is a position, not a promise.
 //!
-//! ## Why it waits for the navigation
+//! ## Why it waits for the navigation, and then for the photograph
 //!
 //! Snapshotting before `didFinish` reliably yields a blank card — the page is
 //! loaded asynchronously and the photograph is a `file://` image that has to be
-//! read and decoded. `afterScreenUpdates` then forces one more update pass
-//! before the pixels are taken, which is what covers the gap between "the DOM is
-//! ready" and "it has been drawn".
+//! read. But `didFinish` is not enough either: WebKit decodes a large image off
+//! the main thread and paints *nothing* where it goes until that finishes, and
+//! `afterScreenUpdates` only forces one more paint, not the decode. The first
+//! card drawn from a freshly captured photo came back with an empty photo
+//! column while the two drawn after it — same file, now in the image cache —
+//! were fine. So after the navigation the page is asked to `decode()` every
+//! image it holds, and the snapshot is taken when that promise settles.
 //!
 //! ## Panics here abort the process
 //!
@@ -40,13 +44,13 @@ use anyhow::{Context, Result};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
-use objc2::{define_class, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSBackingStoreType, NSImage, NSWindow, NSWindowSharingType, NSWindowStyleMask,
 };
-use objc2_foundation::{NSError, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSError, NSNumber, NSPoint, NSRect, NSSize, NSString, NSURL};
 use objc2_web_kit::{
-    WKNavigation, WKNavigationDelegate, WKSnapshotConfiguration, WKWebView,
+    WKContentWorld, WKNavigation, WKNavigationDelegate, WKSnapshotConfiguration, WKWebView,
     WKWebViewConfiguration,
 };
 
@@ -96,7 +100,7 @@ define_class!(
             let Some(job) = slot.take() else {
                 return;
             };
-            snapshot(webview, job);
+            await_images_then_snapshot(webview, job);
         }
 
         #[unsafe(method(webView:didFailNavigation:withError:))]
@@ -140,6 +144,66 @@ impl SnapshotDelegate {
                 .tx
                 .send(RasterEvent::Failed(format!("the card page failed to load: {message}")));
         }
+    }
+}
+
+/// Runs in the page once it has navigated, as the body of an async function:
+/// resolves when every image has decoded — or after a ceiling, so a decode that
+/// never settles cannot hold the card forever — and answers with how many
+/// images are still not showing a picture. Zero is the only good answer.
+const AWAIT_IMAGES_JS: &str = r#"
+    const images = Array.from(document.images);
+    const decoded = Promise.all(images.map(img => img.decode().catch(() => undefined)));
+    const ceiling = new Promise(resolve => setTimeout(resolve, 8000));
+    await Promise.race([decoded, ceiling]);
+    return images.filter(img => !(img.complete && img.naturalWidth > 0)).length;
+"#;
+
+/// Asks the page to finish decoding its images, then takes the picture.
+///
+/// The photograph is the whole reason the card exists, so a page that reports
+/// an image it could not show fails the job rather than photographing a blank
+/// column — the failure that used to reach the thumbnail unremarked.
+fn await_images_then_snapshot(webview: &WKWebView, job: Job) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        let _ = job.tx.send(RasterEvent::Failed(
+            "the navigation callback arrived off the main thread".into(),
+        ));
+        return;
+    };
+    // The completion block is `Fn`, so the one-shot job travels in a cell it
+    // can be taken out of exactly once.
+    let slot = RefCell::new(Some(job));
+    let webview_for_block = webview.retain();
+    let handler = RcBlock::new(move |result: *mut AnyObject, error: *mut NSError| {
+        let Some(job) = slot.borrow_mut().take() else { return };
+        if !error.is_null() {
+            let message = unsafe { (*error).localizedDescription() }.to_string();
+            let _ = job.tx.send(RasterEvent::Failed(format!(
+                "the card page could not report its images: {message}"
+            )));
+            return;
+        }
+        let missing = unsafe { result.as_ref() }
+            .and_then(|value| value.downcast_ref::<NSNumber>())
+            .map(|n| n.integerValue())
+            .unwrap_or(0);
+        if missing > 0 {
+            let _ = job.tx.send(RasterEvent::Failed(format!(
+                "the photograph did not load into the card page ({missing} image(s) blank)"
+            )));
+            return;
+        }
+        snapshot(&webview_for_block, job);
+    });
+    unsafe {
+        webview.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
+            &NSString::from_str(AWAIT_IMAGES_JS),
+            None,
+            None,
+            &WKContentWorld::pageWorld(mtm),
+            Some(&handler),
+        );
     }
 }
 

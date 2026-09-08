@@ -295,7 +295,7 @@ pub fn concat_videos(inputs: &[PathBuf], dest: &Path) -> Result<()> {
 /// the concat demuxer trims the audio's priming to start it at zero and leaves
 /// the video a fraction of a frame behind it. The mp4 muxer records that lead as
 /// an *empty edit* (`media time: -1`), which means "display nothing here", and
-/// every player that honours edit lists — QuickTime, Safari, the Review tab's
+/// every player that honours edit lists — QuickTime, Safari, the Video details pane's
 /// WKWebView, and the thumbnailers the social platforms run — draws it black.
 ///
 /// It is invisible to the obvious checks, which is why it survived: `blackdetect`

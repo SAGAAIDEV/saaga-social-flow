@@ -80,12 +80,12 @@ struct Live {
     posts_form: crate::posts::PostsForm,
     schedule_form: crate::schedule::ScheduleForm,
     reflect_pane: ui::WebPane,
-    thumbnail_pane: ui::WebPane,
-    review_pane: ui::WebPane,
     edit_pane: Option<ui::WebPane>,
     substack_pane: Option<ui::WebPane>,
     blog_pane: ui::WebPane,
     publish_pane: ui::WebPane,
+    /// The recording page's right-hand pane: notes and copy, the artwork set,
+    /// and the rendered clips — see `update_video_view`.
     video_brief_pane: ui::WebPane,
     settings_pane: ui::WebPane,
     layout: ui::Layout,
@@ -101,6 +101,15 @@ pub struct App {
     /// `render/vN` in place, so a second press would have two threads composing
     /// into the same folders.
     render_busy: bool,
+    /// True from the render button being pressed until everything that press
+    /// is on the hook for has run or failed: the render, the title and
+    /// description, the artwork set, and the YouTube upload.
+    ///
+    /// Each of those is its own worker with its own terminal event, so the
+    /// chain is a flag read where each one lands rather than a call stack. It
+    /// is cleared the moment anything fails, so a hand-pressed retry of one
+    /// stage starts that stage alone and drags nothing after it.
+    pipeline: bool,
     posts_tx: mpsc::Sender<crate::posts::PostsEvent>,
     posts_rx: Receiver<crate::posts::PostsEvent>,
     substack_tx: mpsc::Sender<crate::substack::SubstackEvent>,
@@ -335,8 +344,6 @@ impl App {
             posts_form: attached.posts_form,
             schedule_form: attached.schedule_form,
             reflect_pane: attached.reflect_pane,
-            thumbnail_pane: attached.thumbnail_pane,
-            review_pane: attached.review_pane,
             edit_pane: attached.edit_pane,
             substack_pane: attached.substack_pane,
             blog_pane: attached.blog_pane,
@@ -495,7 +502,7 @@ impl App {
             Action::CaptureFigure => self.capture_figure(),
             Action::WriteBlurbs => self.write_blurbs(),
             Action::GenerateThumbnails => self.run_thumbnails(),
-            Action::DrawCard => self.draw_card(),
+            Action::DrawCard => { self.draw_card(); }
             Action::ApplyRewrites => self.run_apply_rewrites(),
             Action::CollectAllAnalytics => self.run_analytics_collect_all(),
             Action::NewVersion => self.new_version(),
@@ -831,7 +838,6 @@ impl App {
     /// before it runs, then wrote that copy into the new version as though it had
     /// been generated there.
     fn refresh_version_views(&mut self) {
-        self.update_video_brief("Render video writes the title and description from the transcript and these notes.");
         if let Some(live) = self.live.as_ref() {
             if let Some(html) = crate::notes::existing_html(&self.session) {
                 live.notes.load(&html);
@@ -854,7 +860,7 @@ impl App {
             }
         }
         self.update_render_summary();
-        self.update_review_view();
+        self.update_video_view();
         self.update_substack_view();
         self.update_blog_view();
         self.update_distribute_summary();
@@ -883,7 +889,6 @@ impl App {
         self.last_report = None;
         self.refresh_analytics_view();
         self.update_reflect_view();
-        self.update_thumbnail_view();
     }
 
     fn switch_version(&mut self, n: u32) {
@@ -964,6 +969,14 @@ impl App {
         );
     }
 
+    /// The one press. Photo, cut, title and description, artwork, YouTube.
+    ///
+    /// The photograph is taken first, while whoever pressed the button is
+    /// still in front of the camera: the artwork set is drawn over it once the
+    /// copy is written, and a render with nothing to draw over would finish
+    /// with the YouTube and blog gates shut over a missing picture. So a
+    /// render *requires* a still — it takes one, and refuses to start only
+    /// when it cannot and there is none from before to fall back on.
     fn run_render(&mut self) {
         // The button is switched off in both these cases, but a hotkey and a
         // queued click both reach here without passing the button.
@@ -976,17 +989,128 @@ impl App {
             self.set_render_status(reason);
             return;
         }
+        let photo = match self.take_still() {
+            Ok(message) => message,
+            Err(err) if crate::card::photo(&self.session.root).is_some() => {
+                format!("{err} — drawing over the photo from before")
+            }
+            Err(err) => {
+                let reason = format!("Not rendering: {err}. The artwork needs your photo — is the camera running?");
+                self.set_render_status(&reason);
+                self.set_thumbnail_status(&reason);
+                return;
+            }
+        };
+        self.update_video_view();
         self.finish_open_chapter();
         println!("stream-recorder: cutting disfluencies and rendering…");
         self.render_busy = true;
-        self.set_render_status("Cutting disfluencies…");
+        self.pipeline = true;
+        // Both bars back to the start: the second is what this press owes next.
+        self.set_render_progress(0.0);
+        self.set_thumbnail_progress(Some(0.0));
+        self.set_render_status(&format!("{photo}. Cutting disfluencies…"));
+        self.set_thumbnail_status(&format!("{photo}. Rendering — the title, artwork and upload follow."));
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
         self.sync_controls();
+    }
+
+    /// The render is done and the copy is settled: draw the artwork, or skip
+    /// straight to the upload when the set on disk is already right.
+    ///
+    /// Called from wherever the copy step ends — a fresh generation landing,
+    /// a hand edit being kept, or nothing to write — so every exit from that
+    /// step takes the same next one.
+    pub(super) fn continue_pipeline_after_copy(&mut self) {
+        if !self.pipeline {
+            return;
+        }
+        if crate::card::assets::ready(&self.session.root).is_ok() {
+            self.set_thumbnail_progress(Some(1.0));
+            self.pipeline_status("Artwork already matches this photo and copy.");
+            self.finish_pipeline_with_upload();
+            return;
+        }
+        self.set_thumbnail_progress(Some(0.0));
+        self.pipeline_status("Copy written — drawing the artwork set…");
+        // `draw_card` reports its own refusal — no title, no photo — into the
+        // status line; the chain simply does not go on from there.
+        if !self.draw_card() {
+            self.pipeline = false;
+        }
+    }
+
+    /// The artwork set is committed: the last thing the press owes is the
+    /// YouTube upload, and only when it is safe to make one unasked.
+    ///
+    /// Only a project that has never been uploaded goes up on its own. A
+    /// re-render of a video that is already on YouTube would otherwise mint a
+    /// second copy on the channel every time a cut was tightened, and that is
+    /// a decision for the YouTube tab's button, not the render's. Likewise a
+    /// shut gate or an unconnected account ends the chain with the reason
+    /// rather than a failure: the render and the artwork are done and good.
+    pub(super) fn finish_pipeline_with_upload(&mut self) {
+        if !self.pipeline {
+            return;
+        }
+        self.pipeline = false;
+        let uploads = crate::publish::load(&self.session);
+        if let Some(prior) = uploads.last() {
+            self.pipeline_status(&format!(
+                "Artwork ready. Already on YouTube at {} — to publish this render as a new video, press Upload on the YouTube tab.",
+                prior.url
+            ));
+            return;
+        }
+        if crate::publish::connected_channel().is_none() {
+            self.pipeline_status(
+                "Artwork ready. YouTube is not connected — press Connect… on the YouTube tab, then Upload.",
+            );
+            return;
+        }
+        match self.stages().publish {
+            crate::stage::Gate::Ready => {
+                self.pipeline_status(&format!(
+                    "Artwork ready — uploading to YouTube as {}…",
+                    self.youtube_privacy.label()
+                ));
+                self.run_youtube_upload();
+            }
+            crate::stage::Gate::Busy => {
+                self.pipeline_status("Artwork ready. A YouTube upload is already running.");
+            }
+            crate::stage::Gate::Missing(reason) => {
+                self.pipeline_status(&format!("Artwork ready. YouTube upload skipped: {reason}"));
+            }
+        }
+    }
+
+    /// The chain narrates in both places it is watched: under the render
+    /// button on the left, and above the pane on the right that fills in as
+    /// it goes.
+    fn pipeline_status(&self, msg: &str) {
+        self.show_render_progress(msg);
+        self.set_thumbnail_status(msg);
     }
 
     fn set_render_status(&self, text: &str) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_render_status(text);
+        }
+    }
+
+    /// The Video bar under the render button, 0.0 to 1.0.
+    fn set_render_progress(&self, fraction: f64) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_render_progress(fraction);
+        }
+    }
+
+    /// The Thumbnails bar. `None` runs it indeterminate — see
+    /// [`ui::ControlTarget::set_thumbnail_progress`].
+    fn set_thumbnail_progress(&self, fraction: Option<f64>) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_thumbnail_progress(fraction);
         }
     }
 
@@ -1482,11 +1606,26 @@ impl App {
     /// about. Taken at the same instant so the pair actually belongs together —
     /// capturing them separately would let the screen drift onto a different
     /// slide from the expression that was caught with it.
+    /// The Retake photo button: take a still and show it.
     fn capture_frame(&mut self) {
-        let Some(live) = self.live.as_ref() else { return };
+        match self.take_still() {
+            Ok(message) => self.set_thumbnail_status(&format!("{message}. Redraw artwork to use it.")),
+            Err(err) => self.set_thumbnail_status(&err),
+        }
+        self.update_video_view();
+    }
+
+    /// Grabs the newest camera frame — and the screen, when the layout has one —
+    /// into the project's stills. Returns what was taken, or why nothing was.
+    ///
+    /// Shared by the button and the render, so both write the same files the
+    /// same way; the render is the one that then goes on to draw over them.
+    fn take_still(&mut self) -> Result<String, String> {
+        let Some(live) = self.live.as_ref() else {
+            return Err("No window to take a photo from".into());
+        };
         let Some(frame) = live.preview.latest_camera_frame() else {
-            self.set_thumbnail_status("No camera frame yet — is the camera running?");
-            return;
+            return Err("No camera frame yet".into());
         };
         let camera = crate::thumbnail::still::write(&self.session.root, frame.pixels.get());
         // The tap the compositor reads, so this is the screen exactly as the
@@ -1500,20 +1639,19 @@ impl App {
                 crate::thumbnail::still::write_screen(&self.session.root, frame.pixels.get())
             });
 
-        let message = match (camera, screen) {
-            (Err(err), _) => format!("Capture failed: {err:#}"),
-            (Ok(path), None) => format!("Captured {}", file_name(&path)),
-            (Ok(path), Some(Ok(shot))) => format!(
-                "Captured {} and the screen ({})",
+        match (camera, screen) {
+            (Err(err), _) => Err(format!("Could not save the photo: {err:#}")),
+            (Ok(path), None) => Ok(format!("Took your photo ({})", file_name(&path))),
+            (Ok(path), Some(Ok(shot))) => Ok(format!(
+                "Took your photo ({}) and the screen ({})",
                 file_name(&path),
                 file_name(&shot)
-            ),
-            (Ok(path), Some(Err(err))) => {
-                format!("Captured {} — the screen grab failed: {err:#}", file_name(&path))
-            }
-        };
-        self.set_thumbnail_status(&message);
-        self.update_thumbnail_view();
+            )),
+            (Ok(path), Some(Err(err))) => Ok(format!(
+                "Took your photo ({}) — the screen grab failed: {err:#}",
+                file_name(&path)
+            )),
+        }
     }
 
     fn run_thumbnails(&mut self) {
@@ -1584,7 +1722,7 @@ impl App {
             }),
             Err(err) => self.set_thumbnail_status(&format!("Could not save the brief: {err:#}")),
         }
-        self.update_thumbnail_view();
+        self.update_video_view();
     }
 
     /// Records the choice without repainting.
@@ -1595,7 +1733,7 @@ impl App {
     fn select_thumbnail(&mut self, id: &str) {
         if let Err(err) = crate::thumbnail::activate(&self.session, id) {
             self.set_thumbnail_status(&format!("Could not select: {err:#}"));
-            self.update_thumbnail_view();
+            self.update_video_view();
             return;
         }
         self.set_thumbnail_status(&format!("{id} is now the thumbnail."));
@@ -1612,7 +1750,7 @@ impl App {
         // the active cap — needs the pane corrected from disk.
         if let Err(err) = crate::thumbnail::references::set_active(&root, name, value) {
             self.set_thumbnail_status(&format!("{err:#}"));
-            self.update_thumbnail_view();
+            self.update_video_view();
         }
     }
 
@@ -1635,7 +1773,7 @@ impl App {
             Ok(()) => self.set_thumbnail_status(&format!("Drawing with {label}.")),
             Err(err) => self.set_thumbnail_status(&format!("Could not save the model: {err:#}")),
         }
-        self.update_thumbnail_view();
+        self.update_video_view();
     }
 
     fn add_reference(&mut self, name: &str, data: &str) {
@@ -1678,7 +1816,7 @@ impl App {
             Err(err) => {
                 self.set_thumbnail_status(&format!("{err:#}"));
                 // The tile is already gone from the pane; put it back.
-                self.update_thumbnail_view();
+                self.update_video_view();
             }
         }
     }
@@ -1758,7 +1896,7 @@ impl App {
             match event {
                 crate::thumbnail::ThumbnailEvent::Status(msg) => self.set_thumbnail_status(&msg),
                 crate::thumbnail::ThumbnailEvent::PortraitSaved { root } => {
-                    if root == self.session.root { self.set_thumbnail_status("Photo ready. Enter a title and generate artwork."); repaint = true; }
+                    if root == self.session.root { self.set_thumbnail_status("Photo ready. Press Redraw artwork to draw with it."); repaint = true; }
                 }
                 crate::thumbnail::ThumbnailEvent::Prepared { name, bytes } => {
                     self.store_reference(&name, &bytes);
@@ -1785,22 +1923,60 @@ impl App {
             }
         }
         if repaint {
-            self.update_thumbnail_view();
+            self.update_video_view();
         }
     }
 
-    /// Repaints the Review tab from whatever is in the render folder.
+    /// Repaints the recording page's right-hand pane: the notes and the copy
+    /// the render wrote, the artwork set drawn from it, and the rendered clips.
     ///
-    /// Cheap — a handful of `stat` calls and a template — so it runs wherever the
-    /// render summary does rather than needing a button of its own.
-    fn update_review_view(&self) {
+    /// One view because one press produces all three and they are read
+    /// together — the copy above the picture it is printed on, above the video
+    /// it describes. Cheap: a few `stat` calls, three hashes and a template, so
+    /// it runs wherever any of its parts change. It reloads the page, though,
+    /// so nothing calls it per keystroke or per progress line.
+    fn update_video_view(&self) {
         let Some(live) = self.live.as_ref() else { return };
-        let pane = crate::review::build(&self.session.render_dir());
-        live.review_pane.show_local(
-            &ui::render::page("review.html", &pane),
+        // The style library is the one thing on the page outside the project.
+        // With no home to find it under, the project stands in and the
+        // references simply read as empty — the rest of the pane still draws.
+        let library = crate::thumbnail::references::library_root()
+            .unwrap_or_else(|_| self.session.root.clone());
+        let art = crate::thumbnail::pane::build(
             &self.session.root,
+            &library,
+            crate::config::load().thumbnail.brief,
+        );
+        let review = crate::review::build(&self.session.render_dir());
+        let busy = self
+            .video_copy_job
+            .as_ref()
+            .is_some_and(|job| job.session.root == self.session.root);
+        // Both trees have to be readable, and the API takes one directory — so
+        // scope it to the shallowest folder holding both, which for the default
+        // library is `~/.stream-recorder` and never the whole disk.
+        let access = crate::ui::common_ancestor(&self.session.root, &library);
+        live.video_brief_pane.show_local(
+            &ui::render::page("video.html", minijinja::context! {
+                brief => crate::video_brief::load(&self.session),
+                root => self.session.root.to_string_lossy(),
+                busy => busy,
+                model => self.notes_pick.model(),
+                art => art,
+                review => review,
+                // The last stage of the render chain, so the pane's pipeline
+                // strip can show the whole run without a trip to the YouTube tab.
+                youtube => crate::publish::load(&self.session).last().map(|upload| upload.url.clone()),
+                // The figures snipped during the take, each with what was said
+                // over it. Same view the Blog tab embeds — see there for `scale`.
+                figures => crate::figure::pane::build(
+                    &self.session.root,
+                    self.geometry.map(|geometry| geometry.scale()),
+                ),
+            }),
             &self.session.root,
-            ".review.html",
+            &access,
+            ".video.html",
         );
     }
 
@@ -1924,6 +2100,7 @@ impl App {
             return;
         }
         self.render_busy = true;
+        self.set_render_progress(0.0);
         self.set_edit_status(&format!("Cutting chapter {chapter:02}…"));
         crate::edit::spawn_recut(self.session.clone(), vec![chapter], self.render_tx.clone());
         self.sync_controls();
@@ -1956,26 +2133,6 @@ impl App {
     ///
     /// [`file_name`] is beside it because a status line naming a path wants the
     /// leaf, never the whole thing.
-    fn update_thumbnail_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
-        let Ok(library) = crate::thumbnail::references::library_root() else { return };
-        let pane = crate::thumbnail::pane::build(
-            &self.session.root,
-            &library,
-            crate::config::load().thumbnail.brief,
-        );
-        // Both trees have to be readable, and the API takes one directory — so
-        // scope it to the shallowest folder holding both, which for the default
-        // library is `~/.stream-recorder` and never the whole disk.
-        let access = crate::ui::common_ancestor(&self.session.root, &library);
-        live.thumbnail_pane.show_local(
-            &ui::render::page("thumbnail.html", &pane),
-            &self.session.root,
-            &access,
-            ".thumbnail.html",
-        );
-    }
-
     fn run_reflect(&mut self) {
         if self.reflect_busy {
             self.set_reflect_status("A reflection is already running…");
@@ -2299,6 +2456,11 @@ impl App {
                     // and the link is the more useful thing to leave on screen.
                     self.update_publish_summary();
                     self.set_publish_status(&format!("Live at {}{thumb}", upload.url));
+                    // The upload is what the blog gate waits for, and the
+                    // render chain is what usually started it: both places
+                    // should read as finished without a tab switch.
+                    self.update_blog_view();
+                    self.pipeline_status(&format!("On YouTube at {}{thumb}. The blog is ready when you are.", upload.url));
                     self.sync_controls();
                 }
                 crate::publish::PublishEvent::Connected => {
@@ -2326,6 +2488,9 @@ impl App {
                 crate::publish::PublishEvent::Failed(msg) => {
                     self.publish_busy = false;
                     self.set_publish_status(&msg);
+                    // An upload the render started fails where the render is watched.
+                    self.set_thumbnail_status(&msg);
+                    self.set_render_status(&msg);
                     self.sync_controls();
                 }
             }
@@ -2360,7 +2525,22 @@ impl App {
     }
 
     fn select_posts_model(&mut self, idx: usize) {
-        self.posts_pick.choose_model(idx);
+        if self.posts_pick.choose_model(idx) {
+            self.save_posts_choice();
+        }
+    }
+
+    /// Write the Post tab's model and provider down.
+    ///
+    /// The twin of [`Self::save_notes_choice`], and absent until now — which is
+    /// why the Post tab forgot its model on every launch.
+    fn save_posts_choice(&self) {
+        let mut cfg = crate::config::load();
+        cfg.posts_model = Some(self.posts_pick.model().to_string());
+        cfg.posts_provider = self.posts_pick.provider().map(str::to_string);
+        if let Err(e) = crate::config::save(&cfg) {
+            eprintln!("stream-recorder: could not save the post model choice: {e:#}");
+        }
     }
 
     /// Picks the Notes tab's provider, then re-fills its model popup.
@@ -2390,6 +2570,9 @@ impl App {
             live.control_target
                 .set_posts_models(self.posts_pick.menu(), self.posts_pick.menu_index());
         }
+        // Changing the provider also repairs the model against the new catalog,
+        // so both halves have to be written, not just the provider.
+        self.save_posts_choice();
     }
 
     /// Keeps the audience/tone instructions between runs.
@@ -2755,18 +2938,21 @@ impl App {
         for event in events {
             match event {
                 crate::edit::RenderEvent::Status(msg) => self.show_render_progress(&msg),
+                crate::edit::RenderEvent::Progress(fraction) => self.set_render_progress(fraction),
                 crate::edit::RenderEvent::Ready(dir) => {
                     self.render_busy = false;
-                    self.show_render_progress(&format!("Render ready — open Review. Files: {}", dir.display()));
+                    self.set_render_progress(1.0);
+                    self.show_render_progress(&format!("Render ready — clips are under Video details. Files: {}", dir.display()));
                     // Every chapter has transcribed by now, which is what the
-                    // title and description are written from.
+                    // title and description are written from. The artwork and
+                    // the upload follow from wherever that step ends.
                     self.write_copy_after_render();
                     self.update_render_summary();
                     // The cut moved, so the Edit tab's per-chapter figures did too.
                     self.update_edit_view();
-                    self.update_review_view();
-        self.update_substack_view();
-        self.update_blog_view();
+                    self.update_video_view();
+                    self.update_substack_view();
+                    self.update_blog_view();
                     self.update_distribute_summary();
                     self.update_publish_summary();
                     self.update_schedule_summary();
@@ -2774,7 +2960,10 @@ impl App {
                 }
                 crate::edit::RenderEvent::Failed(msg) => {
                     self.render_busy = false;
+                    // Nothing downstream runs over a failed render.
+                    self.pipeline = false;
                     self.show_render_progress(&msg);
+                    self.set_thumbnail_status(&msg);
                     self.sync_controls();
                 }
             }
@@ -2971,20 +3160,18 @@ impl ApplicationHandler for App {
                 self.install_preview();
                 self.report_clock_drift();
                 self.update_render_summary();
-        self.update_review_view();
-        self.update_substack_view();
-        self.update_blog_view();
+                self.update_video_view();
+                self.update_substack_view();
+                self.update_blog_view();
                 self.update_distribute_summary();
                 self.update_publish_summary();
                 self.update_schedule_summary();
-                // Both panes are painted only by whatever last wrote them, so a
-                // launch left them blank — the chosen thumbnail was on disk the
-                // whole time, and the tab just never asked for it. Analytics is
-                // not here because its first idle tick repaints it anyway.
+                // Painted only by whatever last wrote it, so a launch left it
+                // blank — the report was on disk the whole time, and the tab
+                // just never asked for it. Analytics is not here because its
+                // first idle tick repaints it anyway.
                 self.update_reflect_view();
-                self.update_video_brief("Render video writes the title and description from the transcript and these notes.");
-                self.update_thumbnail_view();
-                    }
+            }
             Err(e) => {
                 eprintln!("stream-recorder: {e:#}");
                 event_loop.exit();

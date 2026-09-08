@@ -50,6 +50,25 @@
   </p>
 </div>
 
+<div class="card">
+  <div class="sec-head"><h2>Models</h2></div>
+  <p class="help">
+    What each stage will actually run, from your saved config. One place to see them,
+    because they are chosen in three different tabs and the answer to "which model wrote
+    this" was previously spread across all three.
+  </p>
+  {% for m in models %}
+  <div class="field">
+    <div class="name">
+      <label>{{ m.stage }}</label>
+      <span class="tag ok">{{ m.model }}</span>
+      <span class="tag">{{ m.provider }}</span>
+    </div>
+    <p class="help">{{ m.detail }} Change it in {{ m.where_to_change }}.</p>
+  </div>
+  {% endfor %}
+</div>
+
 <form id="settings">
 {% for section in sections %}
   <div class="card">

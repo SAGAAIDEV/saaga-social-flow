@@ -345,6 +345,8 @@ impl App {
         }
         if repaint {
             self.update_blog_view();
+            // The recording page lists them too, with what was said over each.
+            self.update_video_view();
             self.sync_controls();
         }
     }

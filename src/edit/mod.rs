@@ -37,10 +37,39 @@ const CHAPTER_FILES: &[&str] = &["-horizontal", "-vertical"];
 
 pub enum RenderEvent {
     Status(String),
+    /// How far along the job is, 0.0 to 1.0 — see [`within`] for how the phases
+    /// share the bar. A fraction rather than a step count because the steps are
+    /// not the same size and their number is not known up front: the cut learns
+    /// how many chapters there are, and the render how many compositions.
+    Progress(f64),
     Ready(PathBuf),
     /// Distinct from a `Status` carrying the same words: the app has to know the
     /// thread is gone so it can re-enable the button.
     Failed(String),
+}
+
+/// The share of the bar each phase of a render owns, in order.
+///
+/// Proportions, not measurements. The renders are the long part — a headless
+/// browser per composition — and the cut is ffmpeg over each chapter, so the
+/// weights lean that way. A wrong guess costs a bar that lingers and then
+/// jumps, never a wrong render; what the wait needs is a bar that moves in the
+/// right order at roughly the right speed, and says when it is nearly done.
+const CUT: (f64, f64) = (0.02, 0.30);
+/// Where the bar stands once the compositions are prepared.
+const COMPOSED: f64 = 0.35;
+/// The compositions, one step per render. What is already current counts as
+/// done from the start, so a one-chapter re-cut opens most of the way along.
+const RENDER: (f64, f64) = (0.35, 0.95);
+
+/// `done` of `total` steps through `span`, as a position on the whole bar. A
+/// phase with nothing to do is complete.
+fn within(span: (f64, f64), done: usize, total: usize) -> f64 {
+    let (from, to) = span;
+    if total == 0 {
+        return to;
+    }
+    from + (to - from) * (done.min(total) as f64 / total as f64)
 }
 
 pub fn spawn_render(session: Session, tx: Sender<RenderEvent>) {
@@ -66,7 +95,11 @@ pub fn spawn_render(session: Session, tx: Sender<RenderEvent>) {
     }
 }
 
-pub fn run_cut(session: &Session, status: &dyn Fn(&str)) -> Result<PathBuf> {
+pub fn run_cut(
+    session: &Session,
+    status: &dyn Fn(&str),
+    progress: &(dyn Fn(f64) + Sync),
+) -> Result<PathBuf> {
     let edit_root = session.edit_dir();
     // Hand-edited chapters are collected before anything waits. Their spans are
     // absolute milliseconds, so they need no words at all — and a chapter whose
@@ -76,6 +109,7 @@ pub fn run_cut(session: &Session, status: &dyn Fn(&str)) -> Result<PathBuf> {
         status("Waiting for chapter transcripts…");
     }
     let transcribed = wait_for_words(&session.dir, &by_hand, status)?;
+    progress(CUT.0);
 
     let mut chapters: Vec<(u32, Option<ChapterTranscript>)> = transcribed
         .into_iter()
@@ -91,11 +125,12 @@ pub fn run_cut(session: &Session, status: &dyn Fn(&str)) -> Result<PathBuf> {
     std::fs::create_dir_all(&edit_root)
         .with_context(|| format!("creating {}", edit_root.display()))?;
     let mut cut_count = 0usize;
-    for (n, transcript) in &chapters {
+    for (i, (n, transcript)) in chapters.iter().enumerate() {
         status(&format!("Cutting chapter {n:02}…"));
         if edit_chapter(&session.dir, &edit_root, *n, transcript.as_ref())? {
             cut_count += 1;
         }
+        progress(within(CUT, i + 1, chapters.len()));
     }
     if cut_count == 0 {
         bail!(
@@ -142,19 +177,24 @@ fn run_recut(session: &Session, chapters: &[u32], tx: &Sender<RenderEvent>) -> R
     let status = |msg: &str| {
         let _ = tx.send(RenderEvent::Status(msg.to_string()));
     };
+    let progress = |fraction: f64| {
+        let _ = tx.send(RenderEvent::Progress(fraction));
+    };
     if chapters.is_empty() {
         bail!("no chapters to re-cut");
     }
+    progress(CUT.0);
     let edit_root = session.edit_dir();
     std::fs::create_dir_all(&edit_root)
         .with_context(|| format!("creating {}", edit_root.display()))?;
     let mut cut_count = 0usize;
-    for n in chapters {
+    for (i, n) in chapters.iter().enumerate() {
         status(&format!("Cutting chapter {n:02}…"));
         let transcript = load_transcript(&session.dir, *n);
         if edit_chapter(&session.dir, &edit_root, *n, transcript.as_ref())? {
             cut_count += 1;
         }
+        progress(within(CUT, i + 1, chapters.len()));
     }
     if cut_count == 0 {
         bail!(
@@ -162,7 +202,7 @@ fn run_recut(session: &Session, chapters: &[u32], tx: &Sender<RenderEvent>) -> R
             session.dir.display()
         );
     }
-    compose_and_render(session, &edit_root, &status)
+    compose_and_render(session, &edit_root, &status, &progress)
 }
 
 /// Chapters carrying a hand edit, whatever their transcript did.
@@ -180,8 +220,12 @@ pub fn run_render(session: &Session, tx: &Sender<RenderEvent>) -> Result<PathBuf
     let status = |msg: &str| {
         let _ = tx.send(RenderEvent::Status(msg.to_string()));
     };
-    run_cut(session, &status)?;
-    compose_and_render(session, &session.edit_dir(), &status)
+    let progress = |fraction: f64| {
+        let _ = tx.send(RenderEvent::Progress(fraction));
+    };
+    progress(0.0);
+    run_cut(session, &status, &progress)?;
+    compose_and_render(session, &session.edit_dir(), &status, &progress)
 }
 
 /// The second half of a render: whatever is in `edit/vN` becomes compositions and then
@@ -191,6 +235,7 @@ fn compose_and_render(
     session: &Session,
     edit_root: &Path,
     status: &dyn Fn(&str),
+    progress: &(dyn Fn(f64) + Sync),
 ) -> Result<PathBuf> {
     let numbers = existing_cut_numbers(edit_root);
     if numbers.is_empty() {
@@ -218,11 +263,14 @@ fn compose_and_render(
     if plan.is_empty() {
         bail!("no horizontal or vertical cuts to compose");
     }
+    progress(COMPOSED);
     // Only the title cards and the verticals are drawn; the chapter bodies go into the
     // longform as they were cut. Saying so keeps the count honest against the log.
     let total = plan.render_count();
     status(&format!("Rendering {total} HyperFrames composition(s)…"));
-    let render_out = render::render_plan(&plan, &session.render_dir())?;
+    let render_out = render::render_plan(&plan, &session.render_dir(), status, &|done, of| {
+        progress(within(RENDER, done, of))
+    })?;
     Ok(render_out)
 }
 
@@ -696,3 +744,33 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    /// The bar only ever moves forward through a run: every phase's span starts
+    /// where the one before it ended or later, and a phase walks its own span
+    /// from start to end.
+    #[test]
+    fn the_phases_share_the_bar_in_order() {
+        assert!(0.0 < CUT.0 && CUT.0 < CUT.1);
+        assert!(CUT.1 <= COMPOSED && COMPOSED <= RENDER.0);
+        assert!(RENDER.0 < RENDER.1 && RENDER.1 < 1.0, "the app's Ready is what fills it");
+
+        assert_eq!(within(RENDER, 0, 4), RENDER.0);
+        assert_eq!(within(RENDER, 4, 4), RENDER.1);
+        let half = within(RENDER, 2, 4);
+        assert!(half > RENDER.0 && half < RENDER.1);
+        assert!(within(CUT, 1, 3) < within(CUT, 2, 3));
+    }
+
+    /// Nothing to do is done: a plan with every render already current reports
+    /// the end of the phase rather than dividing by zero, and a count past the
+    /// total does not overshoot into the next phase.
+    #[test]
+    fn an_empty_phase_is_complete_and_a_full_one_does_not_overshoot() {
+        assert_eq!(within(RENDER, 0, 0), RENDER.1);
+        assert_eq!(within(CUT, 9, 3), CUT.1);
+    }
+}

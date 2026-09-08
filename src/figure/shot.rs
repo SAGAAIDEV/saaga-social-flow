@@ -82,7 +82,7 @@ fn finish(
         )
     })?;
 
-    // One shape, one size, one format — see `encode`.
+    // Lossless, at its own size under the ceiling — see `encode`.
     let bytes = encode::encode_cg(image)?;
     // Measured from the bytes rather than taken from the request: the size the
     // ledger records has to be the file's own.

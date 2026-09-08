@@ -49,11 +49,21 @@ cargo run
 ### New machine
 
 ```bash
+./scripts/setup.sh            # toolchain, component library, renderer
 aws sso login --profile dev
-cargo run -- credentials      # shows what resolved, and from where
+cargo run -- doctor           # render dependencies
+cargo run -- credentials      # API keys, and where each came from
 ```
 
-That is the whole setup. The team's shared API keys live in `dev.sops.env`,
+`setup.sh` is idempotent — re-run it whenever something has drifted. It reports
+what is missing rather than installing Rust or Node for you, since those are
+toolchain choices with real opinions attached.
+
+The app also checks itself at launch and prints a line if something a render
+needs is missing. It stays quiet when the machine is ready, and never blocks
+recording: a missing renderer should not stop you capturing a take.
+
+Credentials need no handover. The team's shared API keys live in `dev.sops.env`,
 committed to this repo with every value encrypted under the saaga dev KMS key —
 the same arrangement `saaga`, `strapi-cms` and the other repos use. The app
 decrypts it at startup, so there is no key to be handed to you and nothing to
@@ -93,6 +103,21 @@ Where that local file lives:
 | running an installed release | `~/.stream-recorder/.env` (created on first save) |
 
 Precedence, first wins: **shell export → local `.env` → `dev.sops.env`**.
+
+### The component library
+
+The HyperFrames compositions and assets a render draws from are vendored in
+`components/` — 1.3 MB, committed. They used to be read from
+`../screencast/components`, inside a **private personal** repo, so a new
+clone built fine and then failed at render time on a path nobody outside one
+account could populate.
+
+`cargo run -- doctor` verifies the library, the renderer, and the S3 uploader.
+
+The uploader is the one piece still outside this repo: `distribute` shells out
+to a Python module in a `screencast` checkout. Everything up to and including
+the render works without it; point `SCREENCAST_HOME` at a checkout if you have
+one.
 
 YouTube is the one credential that stays personal in all cases — the OAuth
 client is shared, but each person signs in as themselves with **Connect** on the

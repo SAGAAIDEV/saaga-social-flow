@@ -114,7 +114,15 @@ impl Stages {
         // The blog needs the YouTube URL, not the render: the article is built
         // around an embed, and there is no embed before the upload.
         let uploaded = !crate::publish::load(session).is_empty();
-        let has_thumbnail = crate::card::assets::ready(&session.root).is_ok();
+        // The reason, not a flag: a set that is on disk but stale reads the
+        // same as one that was never drawn if all the gate can say is "no".
+        // The render button draws the set, so that is where a blocked stage
+        // points — there is no separate tab to go and press.
+        let artwork = crate::card::assets::ready(&session.root)
+            .map(|_| ())
+            .map_err(|err| format!("Artwork is not ready: {err:#} — press Render video and thumbnails"));
+        let artwork_reason = artwork.as_ref().err().map(String::as_str).unwrap_or("");
+        let has_thumbnail = (artwork.is_ok(), artwork_reason);
         // Reads the same config the pane does, so the button and the dropdown
         // never disagree. A file read, like the thumbnail check above it.
         let has_author =
@@ -152,7 +160,7 @@ impl Stages {
                 busy.publish,
                 &[
                     (longform, "No longform rendered yet — run Render first"),
-                    (has_thumbnail, "Generate artwork on Thumbnails first"),
+                    has_thumbnail,
                     (crate::publish::metadata::load(session).validate().is_ok(), "Save a valid title and description on the YouTube tab"),
                 ],
             ),
@@ -160,7 +168,7 @@ impl Stages {
                 busy.blog,
                 &[
                     (uploaded, "Not on YouTube yet — upload it on the YouTube tab first"),
-                    (has_thumbnail, "Generate artwork on Thumbnails first"),
+                    has_thumbnail,
                     (
                         env_set("STRAPI_API_URL") && env_set("STRAPI_API_TOKEN"),
                         "STRAPI_API_URL / STRAPI_API_TOKEN unset — add them to stream-recorder/.env",
@@ -282,9 +290,18 @@ mod tests {
         let stages = Stages::read(&session(&root), Busy::default());
         // YouTube precedes social posts but requires its complete artwork set.
         assert!(!root.join("posts/posts.json").exists());
-        assert!(stages.publish.missing().unwrap().contains("artwork"));
+        assert!(stages.publish.missing().unwrap().contains("Artwork is not ready"));
+        assert!(stages.publish.missing().unwrap().contains("Render video and thumbnails"));
         crate::card::assets::fixture(&root);
         assert!(Stages::read(&session(&root), Busy::default()).publish.is_ready());
+        // A stale set is refused with the reason it went stale, rather than
+        // reading the same as a set that was never drawn — the case that had
+        // the blog saying "generate artwork" over artwork that was right there.
+        let mut design = crate::card::load(&root);
+        design.title = "A different title".into();
+        crate::card::save(&root, &design).unwrap();
+        let reason = Stages::read(&session(&root), Busy::default()).publish.missing().unwrap().to_string();
+        assert!(reason.contains("Design changed"), "{reason}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
