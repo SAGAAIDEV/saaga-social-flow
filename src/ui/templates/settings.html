@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .field { margin: 10px 0 14px; }
+  .field .name { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .field label { font-weight: 600; }
+  .field input {
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+    background: #0e1116; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit;
+  }
+  .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* A stored secret is never sent to this page, so the box starts empty with the
+     tail in the placeholder — typing replaces it, leaving it alone keeps it. */
+  .field input::placeholder { color: var(--dim); }
+  .field .help { color: var(--dim); margin: 4px 0 0; font-size: 12px; }
+  .field .help a { color: var(--accent); }
+  .sec-head { display: flex; align-items: center; gap: 10px; margin: 22px 0 2px; }
+  .sec-head h2 { margin: 0; }
+  .result { margin: 6px 0 0; font-size: 12px; }
+  .result.ok { color: var(--ok); }
+  .result.bad { color: var(--bad); }
+  .banner { border-left: 3px solid var(--warn); padding: 8px 12px; }
+  .banner.done { border-left-color: var(--ok); }
+  .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dim); }
+  .spin { color: var(--dim); }
+</style>
+
+<h1>Settings</h1>
+<p class="sub">
+  API keys for this machine. Saving writes them to your <code class="path">.env</code> and applies
+  them straight away — no restart.
+</p>
+
+<div class="card banner {% if missing | length == 0 %}done{% endif %}">
+  {% if missing | length == 0 %}
+    <strong>All required keys are set.</strong>
+    Every stage of the workflow has what it needs.
+  {% else %}
+    <strong>{{ missing | length }} required {% if missing | length == 1 %}key is{% else %}keys are{% endif %} still empty:</strong>
+    {{ missing | join(", ") }}.
+    The stages that use them stay blocked until they are filled in.
+  {% endif %}
+  <p class="help" style="margin-top:6px">
+    Editing <span class="path">{{ env_path }}</span>
+  </p>
+</div>
+
+<form id="settings">
+{% for section in sections %}
+  <div class="card">
+    <div class="sec-head">
+      <h2>{{ section.title }}</h2>
+      {% if section.complete %}
+        <span class="tag ok">ready</span>
+      {% else %}
+        <span class="tag warn">incomplete</span>
+      {% endif %}
+      <span class="grow"></span>
+      <button type="button" data-test="{{ section.slug }}">Test</button>
+    </div>
+    <p class="help">{{ section.detail }}</p>
+    <p class="result" id="result-{{ section.slug }}"></p>
+
+    {% for field in section.fields %}
+    <div class="field">
+      <div class="name">
+        <label for="f-{{ field.key }}">{{ field.label }}</label>
+        {% if field.set %}
+          <span class="tag ok">set</span>
+        {% elif field.need == "Required" %}
+          <span class="tag bad">required</span>
+        {% else %}
+          <span class="tag">optional</span>
+        {% endif %}
+        {% if field.shadowed %}
+          <span class="tag warn">overridden by your shell</span>
+        {% endif %}
+      </div>
+      <input
+        id="f-{{ field.key }}"
+        name="{{ field.key }}"
+        {% if field.secret %}type="password" autocomplete="off" spellcheck="false"{% else %}type="text"{% endif %}
+        {% if field.secret %}
+          value=""
+          placeholder="{% if field.set %}saved ({{ field.preview }}) — type to replace{% else %}not set{% endif %}"
+        {% else %}
+          value="{{ field.preview }}"
+          placeholder="not set"
+        {% endif %}
+      >
+      <p class="help">
+        {{ field.help }}
+        {% if field.url %}<a href="{{ field.url }}" target="_blank">Get one →</a>{% endif %}
+      </p>
+      {% if field.shadowed %}
+        <p class="help">
+          A different value for this is exported in the shell you launched from, and that one
+          wins for this session. Saving still updates the file.
+        </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+{% endfor %}
+
+  <div class="bar">
+    <button type="submit" class="primary">Save keys</button>
+    <span class="spin" id="saved">{{ saved }}</span>
+  </div>
+</form>
+
+<script>
+  // Only non-empty boxes are sent. A secret's box starts empty because the page
+  // is never given the stored value, so "unchanged" and "cleared" would
+  // otherwise be the same message — and pressing Save without touching anything
+  // would wipe every key in the file.
+  document.getElementById('settings').addEventListener('submit', function (event) {
+    event.preventDefault();
+    const fields = {};
+    for (const input of this.querySelectorAll('input[name]')) {
+      const value = input.value.trim();
+      if (value !== '') fields[input.name] = value;
+    }
+    document.getElementById('saved').textContent = 'Saving…';
+    send({type: 'saveSettings', fields: fields});
+  });
+
+  // Test checks what the app will actually use, which is the saved value —
+  // not what is sitting unsaved in a box. Testing the box instead would mean
+  // applying it to this session without writing the file, so a key could pass
+  // its test and then be gone on the next launch.
+  document.addEventListener('click', function (event) {
+    const button = event.target.closest('[data-test]');
+    if (!button) return;
+    const slug = button.dataset.test;
+    const result = document.getElementById('result-' + slug);
+    const card = button.closest('.card');
+    const edited = [...card.querySelectorAll('input[name]')].some(function (input) {
+      return input.value.trim() !== (input.defaultValue || '');
+    });
+    result.className = 'result';
+    if (edited) {
+      result.classList.add('bad');
+      result.textContent = 'Unsaved changes here — press Save keys first, then test.';
+      return;
+    }
+    result.textContent = 'Testing…';
+    send({type: 'testSettings', service: slug});
+  });
+</script>
+{% endblock %}

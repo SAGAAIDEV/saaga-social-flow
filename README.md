@@ -46,44 +46,56 @@ cargo run
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your API keys:
+Open the app and go to the **Settings** tab. Every key the app needs is listed
+there, grouped by what it unlocks, with a link to where you get one and a
+**Test** button that makes a real call to the service and reports what came
+back. Saving applies straight away — no restart.
 
-```bash
-cp .env.example .env
-```
+Settings writes an ordinary `.env` file and names the one it is editing at the
+top of the tab:
 
-### Required API Keys
+| where you are | file it edits |
+|---|---|
+| working in a checkout | that checkout's `.env` |
+| running an installed release | `~/.stream-recorder/.env` (created on first save) |
 
-1. **OpenRouter API Key** (LLM for thumbnail blurbs)
-   - Sign up: https://openrouter.ai/
-   - Generate token in Settings → API Keys
-   - Set `OPENROUTER_API_KEY=sk_...`
+Keys already exported in the shell you launched from win over the file for that
+session; the tab flags any field where that is happening, so an edit that looks
+lost is labelled rather than silent.
 
-2. **Buffer API Key** (social scheduling)
-   - Visit: https://publish.buffer.com/settings/api
-   - Generate access token
-   - Set `BUFFER_API_KEY=...`
+Prefer to edit by hand? `cp .env.example .env` still works — the tab reads and
+writes the same format, preserving comments and any unrelated keys in the file.
 
-3. **Strapi CMS** (blog publishing)
-   - Local: `STRAPI_API_URL=http://localhost:1337`
-   - Production: `STRAPI_API_URL=https://cms.saagasolve.com`
-   - Generate API token in Strapi Admin → Settings → API Tokens
-   - Set `STRAPI_API_TOKEN=...` and `BLOG_PUBLIC_BASE=http://localhost:3000`
+### Required keys
 
-### Optional Configuration
+| key | what stops without it | where to get one |
+|---|---|---|
+| `OPENROUTER_API_KEY` | thumbnails, figure blurbs, notes, social copy | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `BUFFER_API_KEY` | building and sending the social schedule | [Buffer → Settings → API](https://publish.buffer.com/settings/api) |
+| `S3_BUCKET` | uploading renders so Buffer has a video URL to attach | your AWS account |
+| `STRAPI_API_URL`, `STRAPI_API_TOKEN` | publishing the article to the CMS | Strapi Admin → Settings → API Tokens |
+| `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | uploading the render to YouTube | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) — OAuth client of type *Desktop app* |
 
-```bash
-# Logging level (off, error, warn, info, debug, trace)
-RUST_LOG=info
+One OpenRouter key covers every model, image models included: thumbnails route
+to `google/gemini-3.1-flash-image` **through OpenRouter**, so there is no
+separate Gemini key.
 
-# Twitter handle for Buffer context
-BUFFER_TWITTER_HANDLE=@your_handle
+AWS credentials are not among these — the S3 upload uses your AWS profile.
+YouTube is per-person: the client id and secret are shared, but each person
+signs in as themselves on the YouTube tab.
 
-# Path to Node.js for content workflow
-CONTENT_NODE_BIN=/usr/local/bin/node
-```
+### Optional
 
-See `.env.example` for complete reference.
+| key | effect when unset |
+|---|---|
+| `ASSEMBLYAI_API_KEY` | chapters still record; transcripts are skipped |
+| `BUFFER_ORG_ID` | resolved on first use — set it only if you belong to several Buffer workspaces |
+| `YOUTUBE_CHANNEL_ID` | uploads go to whichever account is signed in, instead of aborting on the wrong channel |
+| `BUFFER_TWITTER_HANDLE` | no handle in the context used to write posts |
+| `BLOG_PUBLIC_BASE` | figure links in blog content have no site to point at |
+| `RUST_LOG` | `info`. Set `debug` for device-switching logs |
+
+See `.env.example` for the complete reference.
 
 ## Usage
 
@@ -198,8 +210,12 @@ HTML/Jinja2 templates in `src/ui/templates/`:
 - Check `RUST_LOG=debug` for device switching logs
 
 ### Thumbnail Generation Fails
-- Ensure `GEMINI_API_KEY` is set
-- Check Strapi CMS connectivity: `STRAPI_URL` and `STRAPI_TOKEN`
+- Open **Settings** and press **Test** under Models — it reports whether the
+  OpenRouter key is live and what credit is left
+- Image generation goes through OpenRouter, so `OPENROUTER_API_KEY` is the key
+  to check; there is no separate Gemini key
+- For CMS problems press **Test** under Blog (Strapi), which checks
+  `STRAPI_API_URL` and `STRAPI_API_TOKEN` together
 
 ### Face Tracking Slow
 - Face detection runs on a background thread

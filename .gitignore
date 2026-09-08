@@ -28,3 +28,6 @@ debug/
 *.db
 *.db-shm
 *.db-wal
+
+# Process id files
+*.pid

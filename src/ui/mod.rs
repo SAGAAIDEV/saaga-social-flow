@@ -140,6 +140,13 @@ pub enum UiEvent {
     /// A checkbox in an HTML pane moved, carrying its new value.
     WebApprove { index: usize, value: bool },
     SaveBrief(std::collections::BTreeMap<String, String>),
+    /// The Settings form, carrying only the boxes that were filled in.
+    SaveSettings(std::collections::BTreeMap<String, String>),
+    /// Test one group of credentials, by `settings::Group::slug`.
+    TestSettings(String),
+    /// A finished credential test, posted from the worker thread that ran it.
+    /// Like [`UiEvent::FaceTrackReady`] this does not come from a control.
+    SettingsTested(crate::settings::check::Outcome),
     /// The card's boxes, whole. Separate from [`UiEvent::SaveBrief`] even though
     /// both carry a `title` and a `description`: the two words mean different
     /// things on each form — see [`crate::card::Card`] — and one message would
@@ -1427,7 +1434,31 @@ pub struct Attached {
     pub blog_pane: WebPane,
     pub publish_pane: WebPane,
     pub video_brief_pane: WebPane,
+    pub settings_pane: WebPane,
     pub layout: Layout,
+}
+
+/// The Settings pane, drawn from whatever the credentials look like right now.
+///
+/// One function so the first draw and every redraw after a save agree — a pane
+/// that rebuilt its own context at each call site is how a saved key goes on
+/// showing as unset.
+///
+/// `note` is the line under the Save button: what just happened, or nothing on
+/// a cold draw.
+pub fn settings_page(note: Option<&str>) -> String {
+    let path = crate::settings::env_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "~/.stream-recorder/.env".into());
+    render::page(
+        "settings.html",
+        minijinja::context! {
+            sections => crate::settings::sections(),
+            missing => crate::settings::missing_required(),
+            env_path => path,
+            saved => note.unwrap_or(""),
+        },
+    )
 }
 
 /// Build the record window's controls and tabs.
@@ -2575,12 +2606,40 @@ pub fn attach_controls(
     reflect_item.setLabel(&NSString::from_str("Reflect"));
     reflect_item.setView(Some(&reflect_view));
 
+    // ==========================================
+    // SETTINGS (API keys)
+    // ==========================================
+    // Deliberately outside `workflow::attach`: the five steps describe how a
+    // video gets made, and this is not one of them — it is the thing you open
+    // once on a new machine and then never again. Appending it here keeps the
+    // workflow contract in `workflow::STEPS` describing only the workflow,
+    // while still putting Settings last in the same row of tabs.
+    let settings_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&settings_view);
+    let settings_pane = WebPane::attach(&settings_view, mtm, tx.clone());
+    settings_pane.set_frame(NSRect::new(
+        NSPoint::new(PAD, PAD),
+        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
+    ));
+    settings_pane.fill_below();
+    settings_pane.show(&settings_page(None));
+
+    let settings_item = unsafe {
+        NSTabViewItem::initWithIdentifier(
+            NSTabViewItem::alloc(),
+            Some(&NSString::from_str("settings")),
+        )
+    };
+    settings_item.setLabel(&NSString::from_str("Settings"));
+    settings_item.setView(Some(&settings_view));
+
     workflow::attach(&tab_view, bounds, mtm, &[
         ("draft", &draft_item), ("review", &review_item),
         ("thumbnails", &thumbnail_item), ("youtube", &publish_item), ("blog", &blog_item),
         ("post", &post_item), ("distribute", &distribute_item), ("schedule", &schedule_item),
         ("analytics", &analytics_item), ("reflect", &reflect_item),
     ]);
+    tab_view.addTabViewItem(&settings_item);
 
     let layout = Layout {
         left: left.clone(),
@@ -2615,8 +2674,46 @@ pub fn attach_controls(
         blog_pane,
         publish_pane,
         video_brief_pane,
+        settings_pane,
         layout,
     })
+}
+
+#[cfg(test)]
+mod settings_pane_tests {
+    /// `render::page` turns a template failure into an error *page* rather than
+    /// an `Err`, so a broken loop or a renamed field would ship as a red panel
+    /// nobody sees until they open the tab. This is the check that a real
+    /// context renders.
+    #[test]
+    fn the_settings_pane_renders_every_section() {
+        let html = super::settings_page(Some("Saved."));
+        assert!(!html.contains("template error"), "{html}");
+        for group in crate::settings::Group::ALL {
+            assert!(html.contains(group.title()), "missing section {}", group.title());
+            assert!(
+                html.contains(&format!("result-{}", group.slug())),
+                "missing test-result slot for {}",
+                group.slug()
+            );
+        }
+        for field in crate::settings::FIELDS {
+            assert!(html.contains(field.key), "missing input for {}", field.key);
+        }
+        assert!(html.contains("Saved."), "the status note is not drawn");
+    }
+
+    /// The pane is handed to a webview, so a stored secret in the HTML is a
+    /// secret one `view-source` away. Only the four-character tail may appear.
+    #[test]
+    fn a_stored_secret_never_reaches_the_page() {
+        // SAFETY: single-threaded test, and the value is scoped to this process.
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-or-v1-topsecretvalue9999") };
+        let html = super::settings_page(None);
+        unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
+        assert!(!html.contains("topsecretvalue"), "the pane leaked a stored key");
+        assert!(html.contains("…9999"), "the tail hint is missing: {html}");
+    }
 }
 
 #[cfg(test)]

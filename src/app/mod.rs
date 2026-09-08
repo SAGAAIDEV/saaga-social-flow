@@ -87,6 +87,7 @@ struct Live {
     blog_pane: ui::WebPane,
     publish_pane: ui::WebPane,
     video_brief_pane: ui::WebPane,
+    settings_pane: ui::WebPane,
     layout: ui::Layout,
 }
 
@@ -341,6 +342,7 @@ impl App {
             blog_pane: attached.blog_pane,
             publish_pane: attached.publish_pane,
             video_brief_pane: attached.video_brief_pane,
+            settings_pane: attached.settings_pane,
             layout: attached.layout,
         })
     }
@@ -690,6 +692,9 @@ impl App {
             UiEvent::ValidateRewrite(index) => self.run_validate_rewrite(index),
             UiEvent::WebApprove { index, value } => self.set_rewrite_approval(index, value),
             UiEvent::SaveBrief(fields) => self.save_brief(fields),
+            UiEvent::SaveSettings(fields) => self.save_settings(fields),
+            UiEvent::TestSettings(service) => self.test_settings(&service),
+            UiEvent::SettingsTested(outcome) => self.settings_tested(&outcome),
             UiEvent::SaveCard(fields) => { self.save_card(&fields); },
             UiEvent::GenerateArtwork(fields) => { if self.save_card(&fields) { self.draw_card(); } },
             UiEvent::ImportPortrait(data) => {
@@ -1675,6 +1680,65 @@ impl App {
                 // The tile is already gone from the pane; put it back.
                 self.update_thumbnail_view();
             }
+        }
+    }
+
+    // ----------------------------------------------------------- settings
+
+    /// Write the Settings form and redraw the pane from what the file now says.
+    ///
+    /// Redrawing from `settings::sections()` rather than from `fields` on
+    /// purpose: the pane should show what the *app* will read, so a key that
+    /// did not stick — because the file was not writable, or because the shell
+    /// exports its own value — says so instead of echoing back what was typed.
+    fn save_settings(&mut self, fields: std::collections::BTreeMap<String, String>) {
+        let count = fields.len();
+        let note = match crate::settings::write(&fields) {
+            Ok(path) => {
+                if count == 0 {
+                    "Nothing to save — the boxes were all empty.".to_string()
+                } else {
+                    format!("Saved to {}.", path.display())
+                }
+            }
+            Err(err) => format!("Could not save: {err:#}"),
+        };
+        self.redraw_settings(Some(&note));
+        // A key arriving unblocks the stages gated on it — `stage::Stages::read`
+        // checks `S3_BUCKET`, `BUFFER_API_KEY` and the Strapi pair through
+        // `env_set`, and those buttons are drawn from a snapshot taken before
+        // this save. Without this the key is live but its button stays greyed
+        // out until something else happens to redraw.
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_stage_gates(&self.stages());
+        }
+    }
+
+    /// Run one group's credential check off the event loop.
+    ///
+    /// On a worker thread because every check is a network round trip, and the
+    /// pane is drawn by the same thread that would be blocked waiting for it.
+    fn test_settings(&mut self, service: &str) {
+        let Some(group) = crate::settings::Group::from_slug(service) else {
+            eprintln!("stream-recorder: settings pane asked to test unknown group {service:?}");
+            return;
+        };
+        let Some(tx) = self.live.as_ref().map(|live| live.ui_tx.clone()) else { return };
+        std::thread::spawn(move || {
+            let _ = tx.send(UiEvent::SettingsTested(crate::settings::check::run(group)));
+        });
+    }
+
+    /// Put one test's verdict next to its section without redrawing the pane —
+    /// a redraw here would throw away anything typed into the other boxes.
+    fn settings_tested(&mut self, outcome: &crate::settings::check::Outcome) {
+        let Some(live) = self.live.as_ref() else { return };
+        live.settings_pane.eval(&outcome.script());
+    }
+
+    fn redraw_settings(&self, note: Option<&str>) {
+        if let Some(live) = self.live.as_ref() {
+            live.settings_pane.show(&ui::settings_page(note));
         }
     }
 
