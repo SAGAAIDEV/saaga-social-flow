@@ -25,6 +25,11 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+      # The cut, the transcode and the waveform all shell out to ffmpeg, and
+      # their tests run the real binary. The runner image does not carry it.
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
       - name: Run tests
         run: cargo test --release
 
