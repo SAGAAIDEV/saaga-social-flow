@@ -1,12 +1,13 @@
-//! The procedural thumbnail: presenter on the left, words on the right, drawn
-//! the same way every time.
+//! The procedural thumbnail: presenter on the left, words on the right — or,
+//! on the portrait poster, words on top and the presenter beneath — drawn the
+//! same way every time.
 //!
 //! A second way to make the artifact [`crate::thumbnail`] makes, and deliberately
 //! nothing like it. That one describes a picture to an image model and gets back
 //! something nobody can predict or reproduce; this one lays out a photograph and
 //! two strings and gets back exactly what the last one looked like. Which is the
 //! right tool depends on the video, so both write into the *same* candidate
-//! ledger and both appear in the same list on the Thumbnail tab — choosing
+//! ledger and both appear in the same list on the Video details pane — choosing
 //! between them is one decision, made by looking at them side by side, not a
 //! choice of pipeline made before either exists.
 //!
@@ -123,6 +124,11 @@ impl Card {
     /// because moving it is the whole reason someone redraws a card whose words
     /// did not change.
     ///
+    /// The version prefix is bumped whenever the layout itself changes — the
+    /// words moving to the other side of the photo, say — because a set drawn
+    /// under the old layout is then the wrong picture for the same words, and
+    /// without the bump it would pass every freshness check and never be redrawn.
+    ///
     /// `format` is deliberately *not*. The set is always all three destinations
     /// and each one composes on its own artboard — see `assets::Kind` — so the
     /// field changes nothing about these pixels. Including it made the format
@@ -130,7 +136,7 @@ impl Card {
     /// only real effect is on the prompt sent to an image model.
     pub fn fingerprint(&self) -> String {
         format!(
-            "card-v3\n{}\n{}\n{}\n{}\n{:.4}",
+            "card-v4\n{}\n{}\n{}\n{}\n{:.4}",
             self.title.trim(),
             self.description.trim(),
             self.kicker.trim(),
@@ -199,7 +205,7 @@ pub fn page_path(root: &Path) -> PathBuf {
 
 /// The still a card is drawn over: the newest one captured.
 ///
-/// The same one the Thumbnail tab shows as "camera still", so what is on screen
+/// The same one the Video details pane shows as your photo, so what is on screen
 /// is what gets drawn. `None` is not an error — a card with no photograph is a
 /// title card, which is a legitimate thumbnail.
 pub fn photo(root: &Path) -> Option<PathBuf> {

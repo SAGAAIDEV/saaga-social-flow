@@ -58,7 +58,7 @@ pub struct CardView {
     pub themes: Vec<ModelChoice>,
     /// `0.50`, as the number box shows it.
     pub focus: String,
-    /// Whether Draw Card does anything, and why not when it does not.
+    /// Whether Redraw artwork does anything, and why not when it does not.
     pub can_draw: bool,
     pub hint: String,
 }
@@ -214,14 +214,15 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
 
 fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
     match (card.is_empty(), has_still) {
-        (true, _) => "Type a title, save, then draw.".to_string(),
+        (true, _) => "No title yet — the render writes one, or type one under Artwork design.".to_string(),
         // A set is a photograph with words beside it, so there is nothing to
         // draw without one. The button is disabled to match, rather than taking
         // the press and failing on it.
-        (false, false) => "Capture your photo first.".to_string(),
-        (false, true) => "Draws all three at once: the YouTube thumbnail, the portrait \
-             cut, and the link preview — which is the thumbnail at 1200×630. The format \
-             picker steers only the image models below."
+        (false, false) => "No photo yet — Retake photo, or choose one.".to_string(),
+        (false, true) => "The render draws these. Redraw only after retaking the photo or \
+             changing the design: the YouTube thumbnail, the portrait poster, and the \
+             link preview — which is the thumbnail at 1200×630. The AI format picker \
+             steers only the image models."
             .to_string(),
     }
 }

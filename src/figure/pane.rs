@@ -40,6 +40,12 @@ pub struct Row {
     /// `1280 × 720`, in pixels. Shown because a figure snipped too small
     /// publishes blurry and there is no way to tell from a thumbnail.
     pub size: String,
+    /// What the author said over the figure during the break, transcribed.
+    /// Empty until the words land, and empty for good with no aside.
+    pub said: String,
+    /// One line for the pane when `said` is empty: the words are still coming,
+    /// or there was no break to record them on. Empty once `said` is not.
+    pub said_note: String,
 }
 
 /// `scale` is the backing scale of the display the figures came from, for rows
@@ -62,6 +68,8 @@ pub fn build(root: &Path, scale: Option<f64>) -> FiguresView {
             caption: figure.caption.clone(),
             alt: figure.alt.clone(),
             written: figure.has_blurb(),
+            said: figure.said.trim().to_string(),
+            said_note: said_note(figure),
             size: match figure.pixel_size() {
                 // The file's own size, measured when it was written.
                 Some((w, h)) => format!("{w} × {h}"),
@@ -81,6 +89,20 @@ pub fn build(root: &Path, scale: Option<f64>) -> FiguresView {
         can_write: unwritten > 0,
         hint: hint(figures.len(), unwritten),
         }
+}
+
+/// Why there are no words yet, when there are none. The three states read
+/// differently on purpose: "still transcribing" is a wait, "no break" is a fact
+/// about how the figure was taken, and an empty transcript is a mic problem.
+fn said_note(figure: &super::Figure) -> String {
+    if figure.explained() {
+        return String::new();
+    }
+    match (&figure.audio, figure.transcribing) {
+        (_, true) => "Transcribing what you said…".to_string(),
+        (None, false) => "No explanation — snipped without a break.".to_string(),
+        (Some(_), false) => "Nothing was heard over this figure.".to_string(),
+    }
 }
 
 fn hint(captured: usize, unwritten: usize) -> String {
@@ -190,6 +212,32 @@ mod tests {
         assert_eq!(build(&root, Some(1.0)).rows[0].size, "640 × 360");
         // No display selected: 1x rather than a guess.
         assert_eq!(build(&root, None).rows[0].size, "640 × 360");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The words are the other half of a figure, so each row carries them —
+    /// and, until they arrive, says why not rather than showing a blank.
+    #[test]
+    fn a_row_carries_what_was_said_or_why_nothing_was() {
+        let root = scratch("said");
+        let one = capture(&root, 1);
+        append_capture(&root, &one).unwrap();
+        let quiet = build(&root, Some(2.0));
+        assert_eq!(quiet.rows[0].said, "");
+        assert!(quiet.rows[0].said_note.contains("without a break"), "{}", quiet.rows[0].said_note);
+
+        // The aside is on disk and its transcript has been written.
+        let audio = crate::figure::audio_path_for(&root, 1);
+        std::fs::write(&audio, b"m4a").unwrap();
+        crate::figure::append_aside(&root, &one.file, &audio).unwrap();
+        std::fs::write(
+            audio.with_extension("transcript.json"),
+            r#"{"status":"completed","text":"  This is the dashboard nobody read.  "}"#,
+        )
+        .unwrap();
+        let spoken = build(&root, Some(2.0));
+        assert_eq!(spoken.rows[0].said, "This is the dashboard nobody read.");
+        assert_eq!(spoken.rows[0].said_note, "");
         let _ = std::fs::remove_dir_all(&root);
     }
 

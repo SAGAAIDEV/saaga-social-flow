@@ -1,28 +1,48 @@
 # Desktop content workflow
 
-The recorder has five primary steps, declared in `src/ui/workflow.rs`:
+The recorder has four primary steps, declared in `src/ui/workflow.rs`:
 
-1. **Video recording** — record the session, render the video, and review the result.
-   Record and Review are sub-tabs of this step. **Render video** on Record runs
-   the cut-and-render pipeline, with progress beneath the recording controls, and
-   when it finishes it **writes the title and description** from the completed
-   transcript using the model selected under Speaking notes: a title of up to 60
-   characters and a one-sentence description of up to 140. There is no separate
-   Render tab and no generate button. On Record, **Video details** holds one small
-   input — notes to steer that copy (key idea, audience, takeaway), remembered per
-   project — and shows what the last render wrote. Notes only guide the emphasis
-   and never replace the transcript. The written copy is shared with thumbnails
-   and YouTube automatically; generate fresh artwork after it changes. Edit the
-   copy on the YouTube tab if the render's words are wrong — a later render keeps
-   an edit made there rather than rewriting it. Existing speaking-note controls
-   remain in the adjacent Speaking notes panel.
-2. **Thumbnails** — capture or import your photo, enter the title, then press
-   **Generate artwork set**. This creates horizontal, portrait and OG images together.
-3. **YouTube** — edit and save the title and description, choose visibility,
-   connect the channel, and upload the longform with the selected thumbnail.
-4. **Blog (Strapi)** — write and review the companion article, then send it to Strapi.
+1. **Video recording** — record the session, then press **Render video and
+   thumbnails**. That one press does the whole run, in this order:
+   1. Takes your photo from the camera (and the screen, when the layout has one).
+      A render requires a still: it refuses to start only when no frame can be
+      taken and there is none from before to fall back on.
+   2. Cuts and renders the longform and the vertical chapters, with progress
+      beneath the recording controls.
+   3. Writes the title and description from the completed transcript, using the
+      model selected under Speaking notes: a title of up to 60 characters and a
+      one-sentence description of up to 140. An edit made on the YouTube tab is
+      kept rather than rewritten.
+   4. Draws the artwork set — horizontal, portrait and OG — from the photo and
+      that copy. Skipped when the set on disk already matches both.
+   5. Uploads the longform to YouTube with the horizontal artwork, at the
+      visibility chosen on the YouTube tab — but only for a project that has
+      never been uploaded. A re-render of a video already on YouTube stops here
+      and says so; publishing it again as a new video is the YouTube tab's
+      button, so tightening a cut never mints a duplicate on the channel.
+
+   The chain stops at the first failure and the status line under the button
+   says which step. Everything the press produces lands in the **Video details**
+   pane on the right, top to bottom in the order it is produced: the notes that
+   steer the copy and the copy itself, the artwork set with the photo it was
+   drawn from, and the rendered clips to scrub before anything else goes out.
+   **Retake photo** and **Redraw artwork** are the corrections; the design
+   controls (kicker, theme, focus) and the optional AI image experiments are
+   folded away beneath them. Between the artwork and the clips, a **Figures**
+   card lists every figure snipped during the take with what was said over it,
+   transcribed, and the blurb written from that — the same figures the Blog tab
+   places into the article. A pipeline strip at the top of the pane shows which
+   of the five stages are done. Speaking notes keep their own panel beside it.
+   There is no Thumbnails tab and no Review sub-tab any more.
+2. **YouTube** — edit and save the title and description, choose visibility,
+   connect the channel, and upload (or re-upload) the longform by hand.
+3. **Blog (Strapi)** — write and review the companion article, then send it to Strapi.
+   Deliberately not part of the render's chain: the blog carries the portrait
+   poster and the OG image, and this is where they get checked first. When the
+   blog is blocked on artwork the reason is the specific one — a photo or design
+   changed since the set was drawn — rather than a generic "generate artwork".
    The existing CMS preview and publishing controls remain here.
-5. **Socials** — generate and edit platform copy; upload video media to create public
+4. **Socials** — generate and edit platform copy; upload video media to create public
    asset URLs; build the Buffer plan, review/approve it, and queue it. Analytics and
    Reflect are secondary tabs here.
 
@@ -83,13 +103,15 @@ those experiments do not replace the artwork used for publishing.
 | Artwork | Destination |
 |---|---|
 | 1280×720 horizontal | YouTube thumbnail; Strapi `thumbnail` |
-| 720×1280 portrait | Strapi `thumbnailVertical`; downloadable/social export |
+| 720×1280 portrait | Strapi `thumbnailVertical`; downloadable/social export. Words on top, photo underneath — the top of a portrait player is where the crop and the controls land. |
 | 1200×630 OG | Strapi `ogImage`; LinkedIn and Facebook image posts |
 
 The current set is recorded in `thumbnails/artwork.json`, with file hashes and measured
 JPEG dimensions. A failed generation leaves the previous complete set active. Editing
-the saved design or changing the photo requires regeneration before publishing. The
-blog and YouTube workflows require the complete set; image upload failures are surfaced.
+the saved design or changing the photo makes the set stale; the next render redraws it,
+and **Redraw artwork** on Video details does so by hand. The blog and YouTube workflows
+require a current set and name the reason when it is not; image upload failures are
+surfaced.
 YouTube can retry/update the thumbnail on an existing upload without duplicating the video.
 
 Upload media exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.

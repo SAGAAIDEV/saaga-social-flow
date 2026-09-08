@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{#
+  The recording page's right-hand pane: everything one press of Render video and
+  thumbnails produces, top to bottom in the order it is produced.
+
+  1. The title and description the render wrote, and the notes that steer them.
+  2. The artwork set drawn from your photo and that copy, with the design controls
+     folded away — they are for the rare redraw, not the every-video path.
+  3. The rendered clips, to scrub before anything is uploaded.
+
+  A pipeline strip at the top says which of the five stages are done, so the state
+  of a project is one glance rather than a scroll. It used to be three tabs.
+  Nothing here needs a tab of its own now that the render does the work: the
+  page's job is to show the result and offer the one or two corrections that are
+  ever needed.
+
+  Styled after shadcn/ui's dark zinc theme: bordered cards on the page ground,
+  one accent for the primary action, muted helper text, and rounded controls of
+  one height. The tokens below are that palette, scoped to this pane.
+#}
+{% block content %}
+<style>
+  :root {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #0c0c0f;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --input: #27272a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --accent: #1f1f23;
+    --ring: #d4d4d8;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --destructive: #ef4444;
+    --radius: 8px;
+  }
+  body { background: var(--background); color: var(--foreground); padding: 16px 16px 28px;
+         font-size: 13px; line-height: 1.5; }
+
+  /* ---- page header + pipeline strip ---------------------------------------- */
+  .page > * + * { margin-top: 16px; }
+  .hd h1 { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+  .hd p { margin: 0; color: var(--muted-foreground); }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .steps li {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px;
+    border: 1px solid var(--border); border-radius: 999px; font-size: 11.5px; font-weight: 500;
+    color: var(--muted-foreground); background: var(--card);
+  }
+  .steps li.done { color: var(--foreground); }
+  .steps .dot { width: 7px; height: 7px; border-radius: 999px; background: #3f3f46; flex: none; }
+  .steps li.done .dot { background: var(--success); }
+  .steps li.stale .dot { background: var(--warning); }
+  .steps li.stale { color: var(--foreground); }
+
+  /* ---- card ---------------------------------------------------------------- */
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+  .card-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+             padding: 16px 16px 0; }
+  .card-title { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -.01em;
+                text-transform: none; color: var(--foreground); }
+  .card-desc { margin: 2px 0 0; color: var(--muted-foreground); font-size: 12.5px; }
+  .card-bd { padding: 14px 16px 16px; }
+  .card-bd > * + * { margin-top: 14px; }
+  .card-ft { padding: 0 16px 16px; }
+
+  /* ---- badge / alert / empty ------------------------------------------------ */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; flex: none;
+    border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
+    border: 1px solid transparent; background: var(--primary); color: var(--primary-foreground);
+  }
+  .badge.secondary { background: var(--muted); color: var(--foreground); }
+  .badge.outline { background: transparent; border-color: var(--border); color: var(--muted-foreground); }
+  .badge.warn { background: transparent; border-color: rgba(245,158,11,.5); color: var(--warning); }
+  .alert { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .alert.warn { border-color: rgba(245,158,11,.5); }
+  .alert .alert-title { font-weight: 600; font-size: 12.5px; margin: 0 0 2px; color: var(--warning); }
+  .alert p { margin: 0; color: var(--muted-foreground); font-size: 12.5px; }
+  .empty {
+    border: 1px dashed var(--border); border-radius: var(--radius); padding: 18px 14px;
+    text-align: center; color: var(--muted-foreground); font-size: 12.5px;
+  }
+  .help { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12px; }
+  .label { display: block; font-size: 12.5px; font-weight: 500; margin: 0 0 6px; }
+  .section-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+                   color: var(--muted-foreground); margin: 0 0 8px; }
+
+  /* ---- controls ------------------------------------------------------------ */
+  button, .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 32px; padding: 0 12px; border-radius: 6px; font: 500 13px/1 inherit;
+    font-family: inherit; color: var(--foreground); background: transparent;
+    border: 1px solid var(--input); cursor: pointer; white-space: nowrap;
+    transition: background-color .12s, border-color .12s;
+  }
+  button:hover:not(:disabled), .btn:hover { background: var(--accent); border-color: var(--input); color: var(--foreground); }
+  button.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+  button.primary:hover:not(:disabled) { background: #e4e4e7; border-color: #e4e4e7; color: var(--primary-foreground); }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn input[type=file] { display: none; }
+  textarea, select, input[type=number] {
+    width: 100%; background: transparent; color: var(--foreground);
+    border: 1px solid var(--input); border-radius: 6px; padding: 7px 10px;
+    font: inherit; font-size: 13px; line-height: 1.45;
+  }
+  textarea { resize: vertical; min-height: 36px; }
+  select, input[type=number] { height: 32px; padding: 0 10px; }
+  select { appearance: none; -webkit-appearance: none;
+           background-image: linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+                             linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+           background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px;
+           background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+  textarea::placeholder { color: #71717a; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset:disabled { opacity: .6; }
+  .field + .field { margin-top: 12px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+  .grid-3 > .field { min-width: 0; margin: 0; }
+
+  /* ---- copy ---------------------------------------------------------------- */
+  .copy { border-left: 3px solid var(--primary); padding: 2px 0 2px 12px; }
+  .copy .t { font-size: 15px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
+  .copy .d { margin-top: 4px; color: var(--muted-foreground); }
+
+  /* ---- artwork ------------------------------------------------------------- */
+  /* Two columns: the landscape card and the link preview stack on the left, the
+     portrait poster takes both rows on the right. Every frame is the shape of
+     its destination, so a picture fills it edge to edge instead of floating in
+     a letterbox — and `minmax(0, …)` plus `min-width: 0` keep an image's
+     intrinsic width from pushing the whole pane wider than the window. */
+  .set { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .set figure { margin: 0; min-width: 0; }
+  .set figure.vertical { grid-row: span 2; }
+  .frame { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #000; }
+  .frame.horizontal { aspect-ratio: 16 / 9; }
+  .frame.vertical { aspect-ratio: 9 / 16; }
+  .frame.og { aspect-ratio: 1200 / 630; }
+  .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .set figcaption { padding: 6px 2px 0; font-size: 12px; }
+  .set figcaption .n { font-weight: 500; }
+  .set figcaption .m { color: var(--muted-foreground); font-size: 11.5px; }
+  .photos { display: flex; gap: 10px; align-items: flex-start; }
+  .photos figure { margin: 0; flex: 0 1 200px; min-width: 0; }
+  .photos .frame { aspect-ratio: 16 / 9; }
+  .photos figcaption { padding-top: 4px; font-size: 11.5px; color: var(--muted-foreground); }
+
+  /* ---- accordion (details) ------------------------------------------------- */
+  details.acc { border: 1px solid var(--border); border-radius: var(--radius); }
+  details.acc + details.acc { margin-top: 8px; }
+  details.acc summary {
+    list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; cursor: pointer; font-weight: 500; font-size: 13px; color: var(--foreground);
+    text-transform: none; letter-spacing: 0;
+  }
+  details.acc summary::-webkit-details-marker { display: none; }
+  details.acc summary .acc-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  details.acc summary .sub { color: var(--muted-foreground); font-weight: 400; font-size: 12px; }
+  details.acc summary::after { content: ""; width: 7px; height: 7px; flex: none; margin-left: auto;
+    border-right: 1.5px solid var(--muted-foreground); border-bottom: 1.5px solid var(--muted-foreground);
+    transform: rotate(45deg); transition: transform .15s; margin-top: -3px; }
+  details.acc[open] summary::after { transform: rotate(-135deg); margin-top: 3px; }
+  details.acc[open] summary { border-bottom: 1px solid var(--border); }
+  .acc-bd { padding: 14px; }
+  .acc-bd > * + * { margin-top: 14px; }
+
+  /* ---- AI experiments ------------------------------------------------------ */
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; align-items: start; }
+  .shot { position: relative; border: 2px solid var(--border); border-radius: 6px; height: auto; padding: 0;
+          overflow: hidden; cursor: pointer; background: #000; display: block; }
+  .shot:hover:not(:disabled) { background: #000; border-color: var(--muted-foreground); }
+  .shot img { display: block; width: 100%; height: auto; max-height: 300px; object-fit: contain; }
+  .shot.on { border-color: var(--success); }
+  .shot .who { position: absolute; left: 0; bottom: 0; right: 0; padding: 3px 6px;
+               background: rgba(0,0,0,.66); font-size: 11px; color: var(--foreground); text-align: left; }
+  .refs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .ref { position: relative; border: 2px solid var(--border); border-radius: 6px;
+         overflow: hidden; cursor: pointer; opacity: .5; }
+  .ref.on { border-color: var(--primary); opacity: 1; }
+  .ref img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .ref .x { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
+            line-height: 15px; text-align: center; border-radius: 4px;
+            background: rgba(0,0,0,.7); color: var(--muted-foreground); font-size: 12px; }
+  .ref .x:hover { color: var(--destructive); }
+  .drop { border: 1px dashed var(--border); border-radius: var(--radius); padding: 14px;
+          text-align: center; color: var(--muted-foreground); font-size: 12.5px; }
+  .drop.over { border-color: var(--ring); color: var(--foreground); }
+
+  /* ---- figures ------------------------------------------------------------- */
+  /* Rows, not a grid: the words are what is being read, and a grid sizes itself
+     for the pictures and leaves no room for them. */
+  .figs { display: flex; flex-direction: column; gap: 10px; }
+  .fig { display: flex; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius);
+         padding: 10px; background: var(--background); }
+  .fig .frame { flex: 0 0 112px; align-self: flex-start; }
+  .fig .frame img { width: 100%; height: auto; display: block; }
+  .fig .body { flex: 1; min-width: 0; }
+  .fig .fig-hd { display: flex; flex-direction: column; gap: 1px; }
+  .fig .fig-n { font-weight: 600; font-size: 12.5px; }
+  .fig .fig-m { color: var(--muted-foreground); font-size: 11.5px; }
+  .fig .said { margin: 6px 0 0; font-size: 13px; line-height: 1.5; word-break: break-word; }
+  .fig .said::before { content: "“"; color: var(--muted-foreground); }
+  .fig .said::after { content: "”"; color: var(--muted-foreground); }
+  .fig .note { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12px; font-style: italic; }
+  .fig .cap { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border);
+              font-size: 12px; color: var(--muted-foreground); }
+  .fig .cap b { color: var(--foreground); font-weight: 500; }
+
+  /* ---- review -------------------------------------------------------------- */
+  .clips { display: flex; flex-direction: column; gap: 12px; }
+  .clip { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; background: var(--background); }
+  .clip.portrait { max-width: 280px; }
+  .clip video { width: 100%; border-radius: 4px; background: #000; display: block; }
+  .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px;
+          color: var(--muted-foreground); }
+  .meta .name { color: var(--foreground); font-weight: 500; }
+</style>
+
+<div class="page">
+<header class="hd">
+  <h1>Video</h1>
+  <p>One press of <b>Render video and thumbnails</b> takes your photo, cuts the take, writes the
+    title and description, draws the artwork and uploads to YouTube. The blog is its own step,
+    so the artwork can be checked here first.</p>
+</header>
+
+{% set artwork_state = "none" %}
+{% if art.artwork and art.artwork_notice %}{% set artwork_state = "stale" %}
+{% elif art.artwork %}{% set artwork_state = "done" %}{% endif %}
+<ol class="steps" aria-label="What the render has produced">
+  <li class="{% if art.still %}done{% endif %}"><span class="dot"></span>Photo</li>
+  <li class="{% if review.clips %}done{% endif %}"><span class="dot"></span>Render</li>
+  <li class="{% if brief.title %}done{% endif %}"><span class="dot"></span>Copy</li>
+  <li class="{{ artwork_state }}"><span class="dot"></span>Artwork</li>
+  <li class="{% if youtube %}done{% endif %}"><span class="dot"></span>YouTube</li>
+</ol>
+
+<!-- 1. The copy -->
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Title &amp; description</h2>
+      <p class="card-desc">Written from the transcript by each render.</p>
+    </div>
+    {% if brief.title %}<span class="badge secondary">Written</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if brief.title %}
+    <div class="copy" id="copy"><div class="t">{{ brief.title }}</div>{% if brief.description %}<div class="d">{{ brief.description }}</div>{% endif %}</div>
+    <p class="help">To change it, edit it on the YouTube tab — a render keeps an edit made there.</p>
+    {% else %}
+    <div class="empty">Nothing written yet — the render writes both once every chapter has transcribed.</div>
+    {% endif %}
+    <form id="brief">
+      <input type="hidden" name="root" value="{{ root }}">
+      <fieldset {% if busy %}disabled{% endif %}>
+        <label class="label" for="video-notes">Notes for the next render</label>
+        <textarea id="video-notes" name="notes" rows="2" maxlength="20000"
+          placeholder="Key idea, audience, or takeaway to emphasize.">{{ brief.notes }}</textarea>
+        <p class="help">Steers the emphasis, never replaces the transcript. Remembered for this project.
+          Uses {{ model }} — change it under Speaking notes.</p>
+      </fieldset>
+    </form>
+  </div>
+</section>
+
+<!-- 2. The artwork -->
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Artwork</h2>
+      <p class="card-desc">Drawn from your photo and the copy above. YouTube, the blog and the social image posts all use this set.</p>
+    </div>
+    {% if artwork_state == "done" %}<span class="badge secondary">Ready</span>
+    {% elif artwork_state == "stale" %}<span class="badge warn">Stale</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if art.artwork_notice %}
+    <div class="alert warn">
+      <p class="alert-title">Needs a redraw</p>
+      <p>{{ art.artwork_notice }}</p>
+    </div>
+    {% endif %}
+
+    {% if art.artwork %}
+    <div class="set">
+    {% for asset in art.artwork %}
+      <figure class="{{ asset.id }}">
+        <div class="frame {{ asset.id }}"><img src="{{ asset.url }}" alt="{{ asset.label }}"></div>
+        <figcaption>
+          {% if asset.id == "horizontal" %}<div class="n">Landscape</div><div class="m">1280 × 720 · YouTube, blog thumbnail</div>
+          {% elif asset.id == "vertical" %}<div class="n">Portrait</div><div class="m">720 × 1280 · blog poster</div>
+          {% else %}<div class="n">Link preview</div><div class="m">1200 × 630 · OG image, social posts</div>{% endif %}
+        </figcaption>
+      </figure>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">No artwork yet. The render draws the landscape, portrait and link-preview images from your photo and the title.</div>
+    {% endif %}
+
+    <div>
+      <p class="section-title">Photo</p>
+      <div class="photos">
+        {% if art.still %}
+        <figure><div class="frame"><img src="{{ art.still.url }}" alt="your photo"></div>
+          <figcaption>Your photo, taken when Render was pressed</figcaption></figure>
+        {% else %}
+        <div class="empty" style="flex:1">No photo yet — the render takes one from the camera.</div>
+        {% endif %}
+        {% if art.screen %}
+        <figure><div class="frame"><img src="{{ art.screen.url }}" alt="screen at capture"></div>
+          <figcaption>Screen at that moment</figcaption></figure>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="actions">
+        {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
+        {{ ui.action("Retake photo", {"type": "captureFrame"}) }}
+        <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
+      </div>
+      <p class="help">{{ art.card.hint }}</p>
+    </div>
+
+    <details class="acc">
+      <summary><span class="acc-t"><span>Design</span><span class="sub">Kicker, theme, focus, and the words on the picture</span></span></summary>
+      <div class="acc-bd" data-form="card">
+        <div class="field">
+          <label class="label">Kicker</label>
+          <textarea data-field="kicker" rows="1"
+            placeholder="A small orange word above the title. Empty draws nothing.">{{ art.card.kicker }}</textarea>
+        </div>
+        <div class="field">
+          <label class="label">Artwork title</label>
+          <textarea data-field="title" rows="2"
+            placeholder="Filled from the video title by each render.">{{ art.card.title }}</textarea>
+          <p class="help">A line break here is a deliberate line break on the card.</p>
+        </div>
+        <div class="field">
+          <label class="label">Artwork description</label>
+          <textarea data-field="description" rows="3"
+            placeholder="Filled from the video description by each render.">{{ art.card.description }}</textarea>
+        </div>
+        <div class="grid-3">
+          <div class="field">
+            <label class="label">Theme</label>
+            <select data-field="theme">
+              {% for choice in art.card.themes %}
+              <option value="{{ choice.id }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <!-- The one control that cannot be judged from the boxes: the still is a
+                 wide frame and the photo column is nearly portrait, so most of the
+                 width is cropped and this picks which part survives. -->
+            <label class="label">Focus</label>
+            <input data-field="focus" type="number" min="0" max="1" step="0.02" value="{{ art.card.focus }}">
+          </div>
+          <div class="field">
+            <label class="label">AI format</label>
+            <select data-field="format" aria-label="Thumbnail format">
+              <option value="horizontal" {% if art.card.format == "horizontal" %}selected{% endif %}>Horizontal · 16:9</option>
+              <option value="vertical" {% if art.card.format == "vertical" %}selected{% endif %}>Vertical · 9:16</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          {{ ui.action("Save and redraw", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
+          {{ ui.action("Save design", {"type": "saveCard"}) }}
+        </div>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="acc-t"><span>AI image experiments</span><span class="sub">Nano Banana and other image models. Optional.</span></span></summary>
+      <div class="acc-bd">
+        {% if art.blocked %}<div class="empty">{{ art.blocked }}</div>{% endif %}
+        <p class="help" style="margin:0">These candidates do not replace the drawn artwork set used for publishing.</p>
+        <div class="actions">
+          {{ ui.action("Generate images", {"type": "generateThumbnails"}, disabled=not art.can_generate) }}
+          <select style="width:auto;min-width:160px" data-send-change='{{ {"type": "thumbnailModel"} | tojson }}'>
+            {% for model in art.models %}
+            <option value="{{ model.id }}" {% if model.selected %}selected{% endif %}>{{ model.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div data-form="brief">
+          <p class="section-title">Brief</p>
+          <div class="field">
+            <label class="label">Title</label>
+            <textarea data-field="title" rows="2"
+              placeholder="The words to put on the image, exactly as written.">{{ art.brief.title }}</textarea>
+          </div>
+          <div class="field">
+            <label class="label">Description</label>
+            <textarea data-field="description" rows="5"
+              placeholder="How to edit the picture. The camera still, the screen grab and your style references all go up with this.">{{ art.brief.description }}</textarea>
+            <p class="help">What the image model is told. Not drawn — described.</p>
+          </div>
+          <div class="actions">{{ ui.action("Save brief", {"type": "saveBrief"}) }}</div>
+        </div>
+
+        <div>
+          <p class="section-title">Candidates</p>
+          {% if not art.candidates %}
+            <div class="empty">None yet. Generate to draw some.</div>
+          {% else %}
+          <div class="shots">
+            {% for shot in art.candidates %}
+            <button type="button" aria-pressed="{{ 'true' if shot.selected else 'false' }}" class="shot {% if shot.selected %}on{% endif %}"
+                 data-send='{{ {"type": "selectThumbnail", "id": shot.id} | tojson }}'>
+              <img src="{{ shot.url }}" alt="{{ shot.label }}">
+              <div class="who">{{ shot.label }}{% if shot.selected %} · live{% endif %}</div>
+            </button>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div>
+          <p class="section-title">Style references</p>
+          <div class="drop" id="drop">Drop images here to add them to the style library</div>
+          {% if art.references %}
+          <div class="refs" style="margin-top:8px">
+            {% for ref in art.references %}
+            <div class="ref {% if ref.active %}on{% endif %}"
+                 data-send='{{ {"type": "toggleReference", "name": ref.name, "value": not ref.active} | tojson }}'>
+              <img src="{{ ref.url }}" alt="{{ ref.name }}">
+              <div class="x" title="remove"
+                   data-send='{{ {"type": "removeReference", "name": ref.name} | tojson }}'>×</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- 3. The figures snipped during the take, each with what was said over it -->
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Figures</h2>
+      <p class="card-desc">Snipped with ⌃⇧S during the take. What you said over each one is transcribed and becomes its blurb in the article.</p>
+    </div>
+    {% if figures.rows %}<span class="badge secondary">{{ figures.rows | length }}</span>
+    {% else %}<span class="badge outline">None</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if figures.rows %}
+    <div class="figs">
+      {% for figure in figures.rows %}
+      <div class="fig">
+        <div class="frame"><img src="{{ figure.url }}" alt="{{ figure.alt }}"></div>
+        <div class="body">
+          <div class="fig-hd">
+            <span class="fig-n">{{ figure.label | capitalize }}</span>
+            <span class="fig-m">{{ figure.moment }} · {{ figure.size }}</span>
+          </div>
+          {% if figure.said %}
+          <p class="said">{{ figure.said }}</p>
+          {% else %}
+          <p class="note">{{ figure.said_note }}</p>
+          {% endif %}
+          {% if figure.written %}
+          <p class="cap"><b>Blurb</b> {{ figure.caption }}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">{{ figures.hint }}</div>
+    {% endif %}
+    <div class="actions">
+      {{ ui.action("Capture figure  ⌃⇧S", {"type": "captureFigure"}) }}
+      {{ ui.action("Write blurbs", {"type": "writeBlurbs"}, disabled=not figures.can_write) }}
+    </div>
+    {% if figures.rows %}<p class="help">{{ figures.hint }}</p>{% endif %}
+  </div>
+</section>
+
+<!-- 4. The clips -->
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Rendered clips</h2>
+      <p class="card-desc">What YouTube and Upload media send. Scrub before you send it.</p>
+    </div>
+    {% if review.clips %}<span class="badge secondary">{{ review.clips | length }}</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if review.blocked %}
+      <div class="empty">{{ review.blocked }}</div>
+    {% else %}
+    <div class="clips">
+      {% for clip in review.clips %}
+      <div class="clip {{ clip.orientation }}">
+        <video src="{{ clip.url }}" controls preload="metadata" playsinline></video>
+        <div class="meta">
+          <span class="name">{{ clip.label }}</span>
+          <span data-duration-for="{{ clip.id }}">{{ "%.1f"|format(clip.megabytes) }} MB</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+</div>
+
+<script>
+  // Notes persist on each keystroke without reloading the pane or relying on a
+  // blur before switching tabs. Notes never touch the artwork or YouTube on
+  // their own, so nothing is applied.
+  const form = document.getElementById('brief');
+  form.addEventListener('input', () => send({type: 'saveVideoBrief',
+    fields: {root: form.elements.root.value, notes: form.elements.notes.value}, apply: false}));
+  form.addEventListener('submit', event => event.preventDefault());
+
+  document.getElementById('portrait-file').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() { send({type: 'importPortrait', data: String(reader.result)}); };
+    reader.readAsDataURL(file);
+  });
+
+  // Selection and toggles update the DOM here and Rust does not repaint, because
+  // a full re-render reloads the document and throws away the scroll position.
+  // The pane still holds no state: it optimistically reflects an action it just
+  // sent, and any real repaint overwrites it from disk.
+  document.addEventListener('click', function (event) {
+    const shot = event.target.closest('.shot[data-send]');
+    if (shot) {
+      document.querySelectorAll('.shot[data-send]').forEach(function (el) {
+        el.classList.remove('on');
+        el.setAttribute('aria-pressed', 'false');
+        const who = el.querySelector('.who');
+        if (who) who.textContent = who.textContent.replace(' · live', '');
+      });
+      shot.classList.add('on');
+      shot.setAttribute('aria-pressed', 'true');
+      const who = shot.querySelector('.who');
+      if (who && !who.textContent.includes('· live')) who.textContent += ' · live';
+      return;
+    }
+
+    // The × sits inside the tile, so check it before the toggle below.
+    const cross = event.target.closest('.x');
+    if (cross) {
+      const tile = cross.closest('.ref');
+      if (tile) tile.remove();
+      return;
+    }
+
+    const ref = event.target.closest('.ref');
+    if (ref) {
+      const now = !ref.classList.contains('on');
+      ref.classList.toggle('on', now);
+      // Flip the payload too, or the next click repeats this one.
+      const payload = JSON.parse(ref.dataset.send);
+      payload.value = !now;
+      ref.dataset.send = JSON.stringify(payload);
+    }
+  });
+
+  // Edits are gathered on save rather than posted per keystroke — one message,
+  // and the boxes keep focus while you type.
+  //
+  // Scoped to the enclosing [data-form]. Two forms on this page have fields
+  // called `title` and `description`, and a page-wide sweep would post the
+  // card's headline as the image model's brief. The Redraw button outside the
+  // design form posts the design form's fields too, so a redraw always carries
+  // whatever is in those boxes.
+  const FORMS = { saveBrief: 'brief', saveCard: 'card', generateArtwork: 'card' };
+  document.addEventListener('click', function (event) {
+    const el = event.target.closest('[data-send]');
+    if (!el) return;
+    const payload = JSON.parse(el.dataset.send);
+    const form = FORMS[payload.type];
+    if (!form) return;
+    const scope = document.querySelector('[data-form="' + form + '"]');
+    if (!scope) return;
+    const fields = {};
+    scope.querySelectorAll('[data-field]').forEach(function (box) {
+      fields[box.dataset.field] = box.value;
+    });
+    send({ type: payload.type, fields: fields });
+    event.stopImmediatePropagation();
+  }, true);
+
+  const drop = document.getElementById('drop');
+  if (drop) {
+    ['dragenter', 'dragover'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        // Without this the webview navigates to the dropped file.
+        e.preventDefault();
+        drop.classList.add('over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (name) {
+      drop.addEventListener(name, function () { drop.classList.remove('over'); });
+    });
+    drop.addEventListener('drop', function (e) {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files || []);
+      files.forEach(function (file) {
+        const reader = new FileReader();
+        reader.onload = function () {
+          // Strip the data: prefix — Rust wants the payload only.
+          const data = String(reader.result).split(',')[1] || '';
+          send({ type: 'addReference', name: file.name, data: data });
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+  }
+
+  // Duration comes from the file itself once the browser has read its header —
+  // cheaper and more honest than shelling out to ffprobe on every repaint.
+  document.querySelectorAll('.clip').forEach(function (card) {
+    const video = card.querySelector('video');
+    const meta = card.querySelector('[data-duration-for]');
+    if (!video || !meta) return;
+    const size = meta.textContent;
+    video.addEventListener('loadedmetadata', function () {
+      const total = Math.round(video.duration);
+      const mins = Math.floor(total / 60);
+      const secs = String(total % 60).padStart(2, '0');
+      meta.textContent = mins + ':' + secs + ' · ' + size;
+    });
+  });
+</script>
+{% endblock %}

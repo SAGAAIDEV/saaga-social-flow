@@ -286,6 +286,7 @@ pub fn run_record_session(
         render_tx,
         render_rx,
         render_busy: false,
+        pipeline: false,
         posts_tx,
         posts_rx,
         substack_tx,

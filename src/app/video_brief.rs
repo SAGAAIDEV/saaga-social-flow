@@ -18,7 +18,8 @@ use std::{
 };
 
 pub(super) struct CopyJob {
-    session: crate::session::Session,
+    /// The project the job was started in; a result is only shown there.
+    pub(super) session: crate::session::Session,
     brief: Brief,
     rx: Receiver<Result<Metadata, String>>,
     /// Started by a render finishing rather than by hand, so the render's own
@@ -34,20 +35,15 @@ impl App {
         }
         Some(fields.get("notes").cloned().unwrap_or_default())
     }
+    /// Says what the copy step is doing, and repaints the pane it writes into.
+    ///
+    /// The line is the native one above the pane rather than text in the page,
+    /// so a progress message never costs the notes box its focus; the repaint
+    /// is for the two states the page itself draws differently — the notes
+    /// locked while a generation runs, and the new copy when it lands.
     pub(super) fn update_video_brief(&self, status: &str) {
-        let Some(live) = &self.live else {
-            return;
-        };
-        let busy = self
-            .video_copy_job
-            .as_ref()
-            .is_some_and(|job| job.session.root == self.session.root);
-        live.video_brief_pane.show_local(
-            &crate::ui::render::page("video-brief.html", minijinja::context! {
-                brief => video_brief::load(&self.session), root => self.session.root.to_string_lossy(),
-                status => status, busy => busy, model => self.notes_pick.model(),
-            }), &self.session.root, &self.session.root, ".video-brief.html",
-        );
+        self.set_thumbnail_status(status);
+        self.update_video_view();
     }
     /// Remember the notes. `_apply` is kept for the event's shape; notes never
     /// reach thumbnails or YouTube on their own, so there is nothing to apply.
@@ -86,6 +82,10 @@ impl App {
     /// saves edits to the latter alone, so the two disagreeing means a person
     /// chose different words — and a re-render, which happens after every small
     /// cut, must not undo that.
+    ///
+    /// Every way out of here hands on to the render chain: a kept edit goes
+    /// straight to the artwork, a fresh generation goes there when it lands,
+    /// and a copy step that cannot start ends the chain with its reason.
     pub(super) fn write_copy_after_render(&mut self) {
         let brief = video_brief::load(&self.session);
         let published = crate::publish::metadata::load(&self.session);
@@ -93,20 +93,24 @@ impl App {
             self.update_video_brief(
                 "Kept the title and description edited on the YouTube tab; the render did not rewrite them.",
             );
+            self.continue_pipeline_after_copy();
             return;
         }
-        self.start_video_copy(true);
+        if !self.start_video_copy(true) {
+            self.pipeline = false;
+        }
     }
-    fn start_video_copy(&mut self, from_render: bool) {
+    /// Whether a generation is now running.
+    fn start_video_copy(&mut self, from_render: bool) -> bool {
         if self.video_copy_job.is_some() {
             self.update_video_brief("Copy generation is already running. Wait for it to finish.");
-            return;
+            return false;
         }
         let brief = video_brief::load(&self.session);
         let source = video_brief::Source::for_session(&self.session, &brief.notes);
         if let Err(err) = source.prompt() {
             self.update_video_brief(&format!("{err:#}"));
-            return;
+            return false;
         }
         let status = source.status();
         let model = self.notes_pick.model().to_string();
@@ -130,8 +134,12 @@ impl App {
                 if from_render {
                     self.set_render_status("Render ready — writing the title and description…");
                 }
+                true
             }
-            Err(err) => self.update_video_brief(&format!("Could not start generation: {err}")),
+            Err(err) => {
+                self.update_video_brief(&format!("Could not start generation: {err}"));
+                false
+            }
         }
     }
     pub(super) fn drain_video_copy(&mut self) {
@@ -146,6 +154,9 @@ impl App {
             }
         };
         let job = self.video_copy_job.take().expect("active job");
+        // Whether the copy reached the card and YouTube — which is what the
+        // artwork is drawn from, so it is what the chain waits on.
+        let mut written = false;
         let status = match result {
             Ok(metadata) => {
                 // Over the artwork limits is a note, not a failure — the copy is
@@ -158,8 +169,11 @@ impl App {
                     description: metadata.description,
                 };
                 match video_brief::sync(&job.session, &brief) {
-                    Ok(true) => note.unwrap_or_else(|| "Title and description written, and shared with thumbnails and YouTube. Generate a fresh artwork set in Thumbnails.".into()),
-                    Ok(false) => "Copy saved, but needs a valid title before it can update thumbnails and YouTube.".into(),
+                    Ok(true) => {
+                        written = true;
+                        note.unwrap_or_else(|| "Title and description written, and shared with the artwork and YouTube.".into())
+                    }
+                    Ok(false) => "Copy saved, but needs a valid title before it can update the artwork and YouTube.".into(),
                     Err(err) => format!("Could not save generated copy: {err:#}"),
                 }
             }
@@ -173,10 +187,17 @@ impl App {
             if job.from_render {
                 self.set_render_status(&format!("Render ready — {status}"));
             }
-            self.update_thumbnail_view();
             self.update_publish_summary();
             self.update_blog_view();
             self.sync_controls();
+            if job.from_render && written {
+                self.continue_pipeline_after_copy();
+            } else if job.from_render {
+                // No copy to draw, so nothing further runs; the status says why.
+                self.pipeline = false;
+            }
+        } else {
+            self.pipeline = false;
         }
     }
 }

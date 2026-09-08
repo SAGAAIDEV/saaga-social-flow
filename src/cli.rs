@@ -58,7 +58,7 @@ pub enum Command {
     },
     /// Draw one procedural thumbnail card to a JPEG and exit. No GUI window.
     ///
-    /// The same layout the Thumbnail tab draws — see `crate::card` — reachable
+    /// The same layout the render draws — see `crate::card` — reachable
     /// without a session, which is both how the rasteriser is verified and how a
     /// card gets made for a video recorded before any of this existed.
     Card {
@@ -83,7 +83,8 @@ pub enum Command {
         /// `dark` or `light`.
         #[arg(long, default_value = "dark")]
         theme: String,
-        /// A camera still to put on the left. Omitted draws a title card.
+        /// A camera still to put beside the words — right of them on the landscape
+        /// card, below them on the portrait one. Omitted draws a title card.
         #[arg(long)]
         still: Option<String>,
         /// Where across the still the subject sits, 0 to 1.

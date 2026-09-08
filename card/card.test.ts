@@ -17,6 +17,19 @@ describe("thumbnail formats", () => {
       }
     });
   }
+  /** Both cards read words first, then the presenter: top-down, or left-right. */
+  test("the text panel leads and the photo takes the far edge", () => {
+    const v = layout("vertical", true);
+    expect(v.panel.y).toBe(0);
+    expect(v.photo.y).toBe(v.panel.height);
+    expect(v.photo.y + v.photo.height).toBe(v.height);
+    expect(v.seam.y).toBe(v.photo.y);
+    const h = layout("horizontal", true);
+    expect(h.panel.x).toBe(0);
+    expect(h.photo.x).toBe(h.panel.width);
+    expect(h.photo.x + h.photo.width).toBe(h.width);
+    expect(h.seam.x).toBe(h.photo.x);
+  });
   test("legacy dimension-only callers get portrait composition", () => {
     expect(page({ title: "Portrait", description: "", width: 720, height: 1280 })).toContain('data-format="vertical"');
   });

@@ -4,7 +4,12 @@ import { titleSize, descriptionSize, titleGap, type Theme } from "./theme";
 
 export const FONT = 'font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",sans-serif;-webkit-font-smoothing:antialiased;';
 export function Photo(src: string, focus: number, rect: Rect): string {
-  return <img src={src} alt="" style={box(rect) + `object-fit:cover;object-position:${focus * 100}% 50%;`} />;
+  // `decoding="sync"`: WebKit decodes a large image off the main thread and
+  // paints nothing where it goes until that finishes, so a snapshot taken on
+  // the first paint of a fresh photograph came back with an empty column. The
+  // rasteriser also waits for the decode itself (see src/card/raster.rs); this
+  // is the page's own half of the same promise.
+  return <img src={src} alt="" decoding="sync" style={box(rect) + `object-fit:cover;object-position:${focus * 100}% 50%;`} />;
 }
 export function TextPanel(title: string, description: string, kicker: string, theme: Theme, rect: Rect): string {
   // Explicit breaks consume real lines as well as characters. Keep long words

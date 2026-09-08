@@ -22,14 +22,17 @@ use super::App;
 
 impl App {
     /// Render all destination formats from one frozen photo and design.
-    pub(super) fn draw_card(&mut self) {
+    ///
+    /// Returns whether a job started. The render chain reads it: a refusal
+    /// here — no title, no photo — is the end of that chain, not a step in it.
+    pub(super) fn draw_card(&mut self) -> bool {
         if self.card_pending.is_some() || self.card_raster.is_some() {
             self.set_thumbnail_status("Already generating artwork…");
-            return;
+            return false;
         }
         match card::assets::Job::new(&self.session.root, card::load(&self.session.root)) {
-            Ok(job) => { self.card_pending = Some(job); self.draw_next_asset(); }
-            Err(err) => self.set_thumbnail_status(&format!("{err:#}")),
+            Ok(job) => { self.card_pending = Some(job); self.draw_next_asset(); self.card_pending.is_some() }
+            Err(err) => { self.set_thumbnail_status(&format!("Artwork not drawn: {err:#}")); false }
         }
     }
 
@@ -54,25 +57,34 @@ impl App {
     pub(super) fn drain_card(&mut self) {
         let events = self.card_rx.try_iter().collect::<Vec<_>>();
         if events.is_empty() { return; }
+        // A set is three pictures, so most events here are one picture landing
+        // and the next starting. Only the commit — or a failure — is an outcome.
+        let mut committed = false;
+        let mut failed = false;
         for event in events {
             self.card_raster = None;
             let Some(mut job) = self.card_pending.take() else { continue };
             match event {
                 RasterEvent::Drawn { jpeg } => match job.accept(&jpeg) {
-                    Ok(false) => { self.card_pending = Some(job); self.draw_next_asset(); }
+                    Ok(false) => { self.card_pending = Some(job); self.draw_next_asset(); failed = self.card_pending.is_none(); }
                     Ok(true) => match job.commit() {
-                        Ok(()) => self.set_thumbnail_status("Artwork ready: horizontal, vertical and OG. YouTube, blog and social exports use this set."),
-                        Err(err) => self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")),
+                        Ok(()) => { committed = true; self.set_thumbnail_status("Artwork ready: horizontal, vertical and OG. YouTube, blog and social exports use this set."); }
+                        Err(err) => { failed = true; self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")); }
                     },
-                    Err(err) => self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")),
+                    Err(err) => { failed = true; self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")); }
                 },
-                RasterEvent::Failed(message) => self.set_thumbnail_status(&format!("Artwork failed: {message}")),
+                RasterEvent::Failed(message) => { failed = true; self.set_thumbnail_status(&format!("Artwork failed: {message}")); }
             }
         }
-        self.update_thumbnail_view();
+        self.update_video_view();
         self.update_publish_summary();
         self.update_blog_view();
         self.sync_controls();
+        if committed {
+            self.finish_pipeline_with_upload();
+        } else if failed {
+            self.pipeline = false;
+        }
     }
 
     /// Saves the edited card and redraws nothing.
@@ -111,10 +123,10 @@ impl App {
             }
         }
         let saved = match card::save(&root, &card) {
-            Ok(_) => { self.set_thumbnail_status("Design saved. Generate artwork to create all three formats."); true }
+            Ok(_) => { self.set_thumbnail_status("Design saved. Redraw artwork to draw it."); true }
             Err(err) => { self.set_thumbnail_status(&format!("Could not save the card: {err:#}")); false }
         };
-        self.update_thumbnail_view();
+        self.update_video_view();
         saved
     }
 }

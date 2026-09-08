@@ -13,7 +13,7 @@ pub(super) fn run(
 
     let stills = still::list(&session.root);
     let Some(still_path) = stills.first() else {
-        anyhow::bail!("no camera still yet — press Capture Frame first");
+        anyhow::bail!("no camera still yet — press Retake photo first");
     };
     let still_bytes = std::fs::read(still_path)
         .with_context(|| format!("reading {}", still_path.display()))?;

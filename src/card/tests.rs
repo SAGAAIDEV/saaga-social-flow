@@ -45,7 +45,7 @@ fn a_project_with_no_card_reads_as_empty() {
 }
 
 /// Same reason: a truncated or hand-mangled `card.json` must not take the
-/// Thumbnail tab down with it.
+/// Video details pane down with it.
 #[test]
 fn an_unreadable_card_reads_as_empty() {
     let root = scratch("garbage");

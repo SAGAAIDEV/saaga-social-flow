@@ -114,7 +114,7 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<Upload> {
         bail!("no longform rendered yet — run Render first");
     }
     // Validate all critical artwork before publishing any video.
-    let jpeg = chosen_thumbnail(session).context("Generate the complete artwork set on Thumbnails first")?;
+    let jpeg = chosen_thumbnail(session).context("the artwork set is missing or stale — press Render video and thumbnails first")?;
     let source_hash = hash_of_file(&video)?;
 
     // The ledger, not the API, is what stops a double upload: YouTube will

@@ -413,7 +413,7 @@ pub fn models() -> Vec<ModelChoice> {
             detail: "The image model the thumbnail stage draws with.",
             model: first.id.clone(),
             provider: "through OpenRouter".to_string(),
-            where_to_change: "the Thumbnails tab",
+            where_to_change: "the AI experiments under Video details",
         });
     }
     out

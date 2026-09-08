@@ -1,8 +1,9 @@
 //! Native AppKit controls inside the winit record window.
 //!
-//! Five primary steps: video recording, thumbnails, YouTube, Blog (Strapi),
-//! and Socials. Recording groups capture/render/review; Socials groups writing,
-//! media upload, Buffer scheduling, analytics and prompt review.
+//! Four primary steps: video recording, YouTube, Blog (Strapi), and Socials.
+//! Recording holds the capture controls on the left and, on the right, the
+//! title, artwork and rendered clips that one render produces; Socials groups
+//! writing, media upload, Buffer scheduling, analytics and prompt review.
 //! The navigation contract lives in [`workflow`].
 
 use std::cell::{Cell, RefCell};
@@ -1413,8 +1414,8 @@ fn make_button_group(
 
 /// Everything [`attach_controls`] hands back, named.
 ///
-/// A struct rather than a tuple because four of these fields are `WebPane` and two more
-/// are forms: in positional form, wiring the Edit pane where the Review pane belongs
+/// A struct rather than a tuple because several of these fields are `WebPane` and two more
+/// are forms: in positional form, wiring the Edit pane where the Blog pane belongs
 /// compiles cleanly and shows up as the wrong tab on screen. Names make that a
 /// compile error instead of a bug report.
 pub struct Attached {
@@ -1427,12 +1428,11 @@ pub struct Attached {
     pub posts_form: crate::posts::PostsForm,
     pub schedule_form: crate::schedule::ScheduleForm,
     pub reflect_pane: WebPane,
-    pub thumbnail_pane: WebPane,
-    pub review_pane: WebPane,
     pub edit_pane: Option<WebPane>,
     pub substack_pane: Option<WebPane>,
     pub blog_pane: WebPane,
     pub publish_pane: WebPane,
+    /// The recording page's right-hand pane: details, artwork and review.
     pub video_brief_pane: WebPane,
     pub settings_pane: WebPane,
     pub layout: Layout,
@@ -1555,8 +1555,25 @@ pub fn attach_controls(
         item.setView(Some(host));
         notebook_tabs.addTabViewItem(&item);
     }
+    // One native line above the pane for what the copy and artwork jobs are
+    // doing: progress arriving mid-run must not cost a whole-pane repaint,
+    // which would throw away the notes someone is typing and their scroll.
+    let host_bounds = brief_host.bounds();
+    let thumbnail_status = NSTextField::labelWithString(
+        &NSString::from_str("Record a video, then press Render video and thumbnails."), mtm,
+    );
+    thumbnail_status.setFrame(NSRect::new(
+        NSPoint::new(PAD, host_bounds.size.height - 30.0),
+        NSSize::new((host_bounds.size.width - PAD * 2.0).max(80.0), 20.0),
+    ));
+    pin_top(&thumbnail_status);
+    brief_host.addSubview(&thumbnail_status);
+    *target.ivars().thumbnail_status.borrow_mut() = Some(thumbnail_status);
     let video_brief_pane = WebPane::attach(&brief_host, mtm, tx.clone());
-    video_brief_pane.set_frame(brief_host.bounds());
+    video_brief_pane.set_frame(NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(host_bounds.size.width, (host_bounds.size.height - 34.0).max(60.0)),
+    ));
     video_brief_pane.fill_below();
     let right = speaking_host;
 
@@ -1792,7 +1809,7 @@ pub fn attach_controls(
         ("", sel!(onNewChapter:)),                    // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                 // 1 │ Record
         ("Stop", sel!(onStop:)),
-        ("Render video", sel!(onRunRender:)),
+        ("Render video and thumbnails", sel!(onRunRender:)),
         ("Notes", sel!(onNotes:)),                    // 4 ┐ Notes (right pane)
         ("Copy Transcript", sel!(onCopyTranscript:)), // 5 ┘
         ("New Project", sel!(onNewProject:)),         // 6 ┐
@@ -1820,7 +1837,10 @@ pub fn attach_controls(
     *target.ivars().regions_button.borrow_mut() = Some(built[REGIONS].clone());
 
     *target.ivars().render_button.borrow_mut() = Some(built[3].clone());
-    let render_status = NSTextField::labelWithString(&NSString::from_str("Record a video, then render it here."), mtm);
+    let render_status = NSTextField::labelWithString(
+        &NSString::from_str("Record a video, then render it. One press: photo, cut, title, artwork, YouTube."),
+        mtm,
+    );
     left.addSubview(&render_status);
     *target.ivars().render_status.borrow_mut() = Some(render_status.clone());
 
@@ -1854,30 +1874,6 @@ pub fn attach_controls(
     };
     draft_item.setLabel(&NSString::from_str("Record"));
     draft_item.setView(Some(&split));
-
-    let thumb_host = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    fill_parent(&thumb_host);
-    let thumbnail_status = NSTextField::labelWithString(
-        &NSString::from_str("Capture a frame, then draw a card or generate images."), mtm,
-    );
-    thumbnail_status.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0, bounds.size.height - 34.0),
-        NSSize::new(bounds.size.width - PAD * 4.0, 20.0),
-    ));
-    pin_top(&thumbnail_status);
-    thumb_host.addSubview(&thumbnail_status);
-    *target.ivars().thumbnail_status.borrow_mut() = Some(thumbnail_status);
-    let thumbnail_pane = WebPane::attach(&thumb_host, mtm, tx.clone());
-    thumbnail_pane.set_frame(NSRect::new(
-        NSPoint::new(PAD, PAD),
-        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
-    ));
-    thumbnail_pane.fill_below();
-    let thumbnail_item = unsafe {
-        NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str("thumbnails")))
-    };
-    thumbnail_item.setLabel(&NSString::from_str("Thumbnails"));
-    thumbnail_item.setView(Some(&thumb_host));
 
     // ==========================================
     // TAB 2: POST
@@ -2037,29 +2033,6 @@ pub fn attach_controls(
     };
     post_item.setLabel(&NSString::from_str("Generate posts"));
     post_item.setView(Some(&post_view));
-
-    // ==========================================
-    // TAB 3: REVIEW (watch the renders)
-    // ==========================================
-    // Deliberately in front of Distribute: this is the last place a bad render
-    // can be caught before it is on a social network.
-    let review_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    fill_parent(&review_view);
-    let review_pane = WebPane::attach(&review_view, mtm, tx.clone());
-    review_pane.set_frame(NSRect::new(
-        NSPoint::new(PAD, PAD),
-        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
-    ));
-    review_pane.fill_below();
-
-    let review_item = unsafe {
-        NSTabViewItem::initWithIdentifier(
-            NSTabViewItem::alloc(),
-            Some(&NSString::from_str("review")),
-        )
-    };
-    review_item.setLabel(&NSString::from_str("Review"));
-    review_item.setView(Some(&review_view));
 
     // ==========================================
     // TAB 4: DISTRIBUTE (AWS S3)
@@ -2636,8 +2609,7 @@ pub fn attach_controls(
     settings_item.setView(Some(&settings_view));
 
     workflow::attach(&tab_view, bounds, mtm, &[
-        ("draft", &draft_item), ("review", &review_item),
-        ("thumbnails", &thumbnail_item), ("youtube", &publish_item), ("blog", &blog_item),
+        ("draft", &draft_item), ("youtube", &publish_item), ("blog", &blog_item),
         ("post", &post_item), ("distribute", &distribute_item), ("schedule", &schedule_item),
         ("analytics", &analytics_item), ("reflect", &reflect_item),
     ]);
@@ -2669,8 +2641,6 @@ pub fn attach_controls(
         posts_form,
         schedule_form,
         reflect_pane,
-        thumbnail_pane,
-        review_pane,
         edit_pane: None,
         substack_pane: None,
         blog_pane,
