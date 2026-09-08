@@ -26,7 +26,6 @@ pub mod validate;
 
 pub use schema::{ReflectReport, Rewrite};
 
-
 pub enum ReflectEvent {
     Status(String),
     /// A fresh report and where it was written.
@@ -47,18 +46,21 @@ pub fn spawn_reflect(
     provider: Option<String>,
     tx: Sender<ReflectEvent>,
 ) {
-    if let Err(err) = thread::Builder::new()
-        .name("reflect".into())
-        .spawn(move || match run_reflect(&session, &model, provider.as_deref(), &tx) {
-            Ok((path, report)) => {
-                eprintln!("stream-recorder: reflection → {}", path.display());
-                let _ = tx.send(ReflectEvent::Ready(path, report));
-            }
-            Err(err) => {
-                eprintln!("stream-recorder: reflection failed: {err:#}");
-                let _ = tx.send(ReflectEvent::Failed(format!("Reflect failed: {err:#}")));
-            }
-        })
+    if let Err(err) =
+        thread::Builder::new()
+            .name("reflect".into())
+            .spawn(
+                move || match run_reflect(&session, &model, provider.as_deref(), &tx) {
+                    Ok((path, report)) => {
+                        eprintln!("stream-recorder: reflection → {}", path.display());
+                        let _ = tx.send(ReflectEvent::Ready(path, report));
+                    }
+                    Err(err) => {
+                        eprintln!("stream-recorder: reflection failed: {err:#}");
+                        let _ = tx.send(ReflectEvent::Failed(format!("Reflect failed: {err:#}")));
+                    }
+                },
+            )
     {
         eprintln!("stream-recorder: could not start reflect job: {err}");
     }
@@ -119,8 +121,8 @@ pub fn spawn_validate(
 ) {
     if let Err(err) = thread::Builder::new()
         .name("reflect-validate".into())
-        .spawn(move || {
-            match run_validate(&session, index, &model, provider.as_deref(), &tx) {
+        .spawn(
+            move || match run_validate(&session, index, &model, provider.as_deref(), &tx) {
                 Ok(detail) => {
                     let _ = tx.send(ReflectEvent::Validated(detail));
                 }
@@ -128,8 +130,8 @@ pub fn spawn_validate(
                     eprintln!("stream-recorder: validation failed: {err:#}");
                     let _ = tx.send(ReflectEvent::Failed(format!("Validate failed: {err:#}")));
                 }
-            }
-        })
+            },
+        )
     {
         eprintln!("stream-recorder: could not start validate job: {err}");
     }

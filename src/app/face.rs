@@ -117,10 +117,7 @@ impl App {
     }
 
     /// The worker finished.
-    pub(super) fn face_tracker_ready(
-        &mut self,
-        built: Result<Arc<FaceTracker>, String>,
-    ) {
+    pub(super) fn face_tracker_ready(&mut self, built: Result<Arc<FaceTracker>, String>) {
         self.face_loading = false;
         match built {
             Ok(tracker) => {

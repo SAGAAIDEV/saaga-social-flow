@@ -70,9 +70,11 @@ impl PostsExtraction {
     /// string, so a truncated response produced captions that looked valid all
     /// the way through to the Schedule tab. An empty caption is a failed
     /// generation, not a post.
-    fn into_manifest(self, version: Option<u32>, prompt: &crate::agent::prompt::Resolved)
-        -> PostsManifest
-    {
+    fn into_manifest(
+        self,
+        version: Option<u32>,
+        prompt: &crate::agent::prompt::Resolved,
+    ) -> PostsManifest {
         let items = self
             .items
             .into_iter()
@@ -117,6 +119,7 @@ pub struct VideoContext {
     pub transcript_text: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_posts(
     videos: &[VideoContext],
     project_title: &str,
@@ -142,11 +145,9 @@ pub fn generate_posts(
             version: None,
             hash: crate::agent::prompt::hash_of(text),
         },
-        None => crate::agent::prompt::resolve(
-            crate::agent::prompt::POSTS,
-            SYSTEM_PROMPT,
-            prompt_root,
-        ),
+        None => {
+            crate::agent::prompt::resolve(crate::agent::prompt::POSTS, SYSTEM_PROMPT, prompt_root)
+        }
     };
     let prompt = build_user_prompt(videos, project_title, custom_prompt);
 
@@ -380,7 +381,8 @@ mod tests {
 
     #[test]
     fn a_video_left_with_no_posts_is_dropped_entirely() {
-        let manifest = extraction(vec![extracted("twitter", "")]).into_manifest(Some(3), &resolved());
+        let manifest =
+            extraction(vec![extracted("twitter", "")]).into_manifest(Some(3), &resolved());
         assert!(manifest.items.is_empty());
     }
 
@@ -404,8 +406,8 @@ mod tests {
     fn prompt_overlay_replaces_the_builtin_system_prompt() {
         use crate::agent::prompt;
 
-        let dir = std::env::temp_dir()
-            .join(format!("stream-recorder-posts-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-posts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("prompts")).unwrap();
         std::fs::write(

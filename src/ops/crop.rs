@@ -196,10 +196,7 @@ impl Crop {
     /// frame, so it needs the frame's extent.
     pub fn source_rect(&self, source_height: f64) -> CGRect {
         let (x, y, w, h) = self.source;
-        CGRect::new(
-            CGPoint::new(x, source_height - y - h),
-            CGSize::new(w, h),
-        )
+        CGRect::new(CGPoint::new(x, source_height - y - h), CGSize::new(w, h))
     }
 }
 
@@ -267,7 +264,6 @@ impl VideoOp for Crop {
     }
 }
 
-
 /// Cover a source frame into a fixed slot — `object-fit: cover` plus scale.
 ///
 /// Unlike [`Crop`], the source rect is computed per frame from the live buffer
@@ -315,10 +311,15 @@ impl VideoOp for Cover {
                 .clone()
                 .context("the cover op needs a GPU render context and this session has none")?,
         );
-        self.pool = Some(Arc::new(
+        // Shared with the render callback on the capture queue; the pool is a
+        // CoreVideo handle this crate cannot mark `Send`, which is all the lint
+        // sees. An `Rc` would be wrong for exactly that reason.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let pool = Arc::new(
             Pool::create(self.output.w, self.output.h)
                 .context("creating the cover op's pixel buffer pool")?,
-        ));
+        );
+        self.pool = Some(pool);
         self.failed = 0;
         Ok(())
     }

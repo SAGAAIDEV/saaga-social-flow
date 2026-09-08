@@ -48,12 +48,23 @@ pub fn request_body(
     screen: Option<&[u8]>,
     references: &[Vec<u8>],
 ) -> Value {
-    request_body_for(model, prompt, still, screen, references, super::format::Format::Horizontal)
+    request_body_for(
+        model,
+        prompt,
+        still,
+        screen,
+        references,
+        super::format::Format::Horizontal,
+    )
 }
 
 pub fn request_body_for(
-    model: &str, prompt: &str, still: &[u8], screen: Option<&[u8]>,
-    references: &[Vec<u8>], format: super::format::Format,
+    model: &str,
+    prompt: &str,
+    still: &[u8],
+    screen: Option<&[u8]>,
+    references: &[Vec<u8>],
+    format: super::format::Format,
 ) -> Value {
     // Before the prompt, because the prompt is written as though the pictures are
     // already in the room: "make him look excited" has no referent until whatever
@@ -154,11 +165,14 @@ fn media_type(bytes: &[u8]) -> &'static str {
 /// Base64, written out rather than pulled in — one small encoder against a new
 /// dependency for the whole crate.
 pub fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         out.push(ALPHABET[(n >> 18 & 63) as usize] as char);
         out.push(ALPHABET[(n >> 12 & 63) as usize] as char);
@@ -259,10 +273,15 @@ pub fn generate(
     let response = ureq::post(ENDPOINT)
         .set("Authorization", &format!("Bearer {api_key}"))
         .set("Content-Type", "application/json")
-        .set("HTTP-Referer", "https://github.com/saaga-martech/stream-recorder")
+        .set(
+            "HTTP-Referer",
+            "https://github.com/saaga-martech/stream-recorder",
+        )
         .set("X-Title", "stream-recorder thumbnails")
         .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
-        .send_json(request_body_for(model, prompt, still, screen, references, format));
+        .send_json(request_body_for(
+            model, prompt, still, screen, references, format,
+        ));
 
     let body: Value = match response {
         Ok(response) => response.into_json().context("parsing the image response")?,
@@ -350,7 +369,11 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("data:image/jpeg;base64,"));
-        assert_eq!(content.len(), 4, "no reference preamble when there are none");
+        assert_eq!(
+            content.len(),
+            4,
+            "no reference preamble when there are none"
+        );
     }
 
     /// The prompt is written as though the pictures are already in the room, so
@@ -410,7 +433,10 @@ mod tests {
             .unwrap()
             .starts_with("data:image/png;base64,"));
         // Then the style references, still last and still labelled as style.
-        assert!(content[6]["text"].as_str().unwrap().contains("Style references"));
+        assert!(content[6]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Style references"));
         assert_eq!(content.len(), 8);
     }
 

@@ -18,12 +18,10 @@ mod picker;
 mod transcribe;
 mod view;
 
-pub use openrouter::{
-    default_model, load_providers, ModelMenuRow, AUTO_PROVIDER,
-};
-pub use picker::Picker;
-pub use deck::{load as load_notes, NotesData};
 pub(crate) use deck::Chapter;
+pub use deck::{load as load_notes, NotesData};
+pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
+pub use picker::Picker;
 pub use transcribe::spawn_chapter_transcript;
 pub use view::NotesPane;
 
@@ -241,29 +239,32 @@ pub fn spawn_notes(
     extra_prompt: Option<String>,
     tx: Sender<NotesEvent>,
 ) {
-    if let Err(err) = thread::Builder::new().name("notes-deck".into()).spawn(move || {
-        match build_notes(
-            &session,
-            &title,
-            &model,
-            provider.as_deref(),
-            extra_prompt.as_deref(),
-            &tx,
-        ) {
-            Ok(html) => {
-                eprintln!("stream-recorder: notes ready → {}", html.display());
-                let _ = tx.send(NotesEvent::Ready(html));
+    if let Err(err) = thread::Builder::new()
+        .name("notes-deck".into())
+        .spawn(move || {
+            match build_notes(
+                &session,
+                &title,
+                &model,
+                provider.as_deref(),
+                extra_prompt.as_deref(),
+                &tx,
+            ) {
+                Ok(html) => {
+                    eprintln!("stream-recorder: notes ready → {}", html.display());
+                    let _ = tx.send(NotesEvent::Ready(html));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: notes failed: {err:#}");
+                    let event = match err.downcast::<NoSpeech>() {
+                        Ok(why) => NotesEvent::NoSpeech(why),
+                        Err(err) => NotesEvent::Status(format!("Notes failed: {err:#}")),
+                    };
+                    let _ = tx.send(event);
+                }
             }
-            Err(err) => {
-                eprintln!("stream-recorder: notes failed: {err:#}");
-                let event = match err.downcast::<NoSpeech>() {
-                    Ok(why) => NotesEvent::NoSpeech(why),
-                    Err(err) => NotesEvent::Status(format!("Notes failed: {err:#}")),
-                };
-                let _ = tx.send(event);
-            }
-        }
-    }) {
+        })
+    {
         eprintln!("stream-recorder: could not start notes job: {err}");
     }
 }
@@ -449,7 +450,10 @@ mod tests {
         assert_eq!(why.chapters.len(), 2);
         assert_eq!(why.chapters[1], (2, "transcribed as empty".into()));
         let text = why.to_string();
-        assert!(text.contains("chapter 01: silent audio (peak -91.0 dBFS)"), "{text}");
+        assert!(
+            text.contains("chapter 01: silent audio (peak -91.0 dBFS)"),
+            "{text}"
+        );
         assert!(text.contains("chapter 02: transcribed as empty"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -19,8 +19,8 @@ use std::sync::Arc;
 use super::composite::Composite;
 use super::crop::Cover;
 use super::face_track::FaceTrack;
-use super::mouse_track::MouseTrack;
 use super::graph::{Graph, GraphBuilder};
+use super::mouse_track::MouseTrack;
 use super::passthrough::Passthrough;
 use super::preview::PreviewSpec;
 use super::sink::OutputSpec;
@@ -121,10 +121,7 @@ pub fn preview_graph(
     // Straight off the source: no cover, no composite, no screen.
     let camera = Layout::get(Pair::TalkingHead, Orientation::Horizontal).canvas;
     let camera = crate::region::PixelSize::rounded(camera.0, camera.1);
-    builder.preview(
-        source,
-        PreviewSpec::new(CAMERA_PREVIEW, camera.w, camera.h),
-    );
+    builder.preview(source, PreviewSpec::new(CAMERA_PREVIEW, camera.w, camera.h));
     // The camera port hangs off the *source*, above this, so a thumbnail still
     // is of the untracked, unpunched camera — the one view where the framing
     // decision should not have been applied yet.
@@ -179,7 +176,10 @@ pub fn preview_graph(
                 ),
             )
         } else {
-            builder.op(camera_in, Cover::for_canvas(op_name, layout.canvas, framing))
+            builder.op(
+                camera_in,
+                Cover::for_canvas(op_name, layout.canvas, framing),
+            )
         };
         let out = crate::region::PixelSize::rounded(layout.canvas.0, layout.canvas.1);
         builder.preview(node, PreviewSpec::new(name, out.w, out.h));
@@ -250,9 +250,7 @@ mod tests {
     /// pointer node needs to be constructed — no window server, no pointer.
     fn pointing_fixture() -> Pointing {
         Pointing {
-            tracker: Arc::new(PointerTracker::new(
-                &crate::config::MouseTracking::default(),
-            )),
+            tracker: Arc::new(PointerTracker::new(&crate::config::MouseTracking::default())),
             geometry: DisplayGeometry {
                 cg_origin: (0.0, 0.0),
                 points: (1728.0, 1117.0),
@@ -335,10 +333,7 @@ mod tests {
     #[test]
     fn the_preview_graph_has_horizontal_and_vertical_sinks() {
         let graph = preview_graph(Pair::TalkingHead, None, [None, None], None, None);
-        assert_eq!(
-            graph.op_names(),
-            vec!["cover-horizontal", "cover-vertical"]
-        );
+        assert_eq!(graph.op_names(), vec!["cover-horizontal", "cover-vertical"]);
         let names: Vec<String> = graph
             .preview_ports()
             .iter()

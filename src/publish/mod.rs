@@ -93,7 +93,9 @@ pub fn spawn_upload(session: Session, tx: Sender<PublishEvent>) {
             }
             Err(err) => {
                 eprintln!("stream-recorder: youtube upload failed: {err:#}");
-                let _ = tx.send(PublishEvent::Failed(format!("YouTube upload failed: {err:#}")));
+                let _ = tx.send(PublishEvent::Failed(format!(
+                    "YouTube upload failed: {err:#}"
+                )));
             }
         })
     {
@@ -114,7 +116,8 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<Upload> {
         bail!("no longform rendered yet — run Render first");
     }
     // Validate all critical artwork before publishing any video.
-    let jpeg = chosen_thumbnail(session).context("the artwork set is missing or stale — press Render video and thumbnails first")?;
+    let jpeg = chosen_thumbnail(session)
+        .context("the artwork set is missing or stale — press Render video and thumbnails first")?;
     let source_hash = hash_of_file(&video)?;
 
     // The ledger, not the API, is what stops a double upload: YouTube will
@@ -170,7 +173,8 @@ fn video_meta(session: &Session) -> Result<youtube::VideoMeta> {
 }
 
 fn chosen_thumbnail(session: &Session) -> Option<Vec<u8>> {
-    let path = crate::card::assets::selected(&session.root, crate::card::assets::Kind::Horizontal).ok()?;
+    let path =
+        crate::card::assets::selected(&session.root, crate::card::assets::Kind::Horizontal).ok()?;
     std::fs::read(path).ok()
 }
 
@@ -308,7 +312,10 @@ mod tests {
             privacy: youtube::Privacy::Public,
         };
         let body = meta.body();
-        assert_eq!(body["snippet"]["title"].as_str().unwrap().chars().count(), 100);
+        assert_eq!(
+            body["snippet"]["title"].as_str().unwrap().chars().count(),
+            100
+        );
         assert_eq!(body["status"]["privacyStatus"], "public");
         assert_eq!(body["snippet"]["categoryId"], "28");
     }

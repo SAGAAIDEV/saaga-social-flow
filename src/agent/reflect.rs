@@ -142,14 +142,20 @@ mod tests {
     /// other test green while quietly making that prompt un-improvable.
     #[test]
     fn the_substack_prompt_can_be_rewritten() {
-        let got = sanitised(reflection(vec![rewrite("substack.notes", "beats, not prose")]));
+        let got = sanitised(reflection(vec![rewrite(
+            "substack.notes",
+            "beats, not prose",
+        )]));
         assert_eq!(got.rewrite.len(), 1);
         assert_eq!(got.rewrite[0].prompt_id, "substack.notes");
     }
 
     #[test]
     fn the_blog_prompt_can_be_rewritten() {
-        let got = sanitised(reflection(vec![rewrite("blog.article", "prose, not beats")]));
+        let got = sanitised(reflection(vec![rewrite(
+            "blog.article",
+            "prose, not beats",
+        )]));
         assert_eq!(got.rewrite.len(), 1);
         assert_eq!(got.rewrite[0].prompt_id, "blog.article");
     }

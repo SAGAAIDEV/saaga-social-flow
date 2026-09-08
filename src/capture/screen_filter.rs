@@ -47,6 +47,15 @@ pub(super) fn content_filter(
     }
 }
 
+/// The display to capture, the windows to leave out of it, and its native
+/// pixel size — width, then height.
+pub(super) type FoundDisplay = (
+    Retained<SCDisplay>,
+    Retained<NSArray<SCWindow>>,
+    usize,
+    usize,
+);
+
 /// Resolve a `CGDirectDisplayID` to its `SCDisplay`, this process's windows,
 /// and the size to capture the whole display at.
 ///
@@ -54,9 +63,7 @@ pub(super) fn content_filter(
 /// those are in *points*, so configuring the stream with them captures a
 /// Retina display at half its real resolution, and screencast text is the
 /// first thing to suffer. `CGDisplayMode`'s pixel size is the native one.
-pub(super) fn find_display(
-    target: u32,
-) -> Result<(Retained<SCDisplay>, Retained<NSArray<SCWindow>>, usize, usize)> {
+pub(super) fn find_display(target: u32) -> Result<FoundDisplay> {
     let (display, own_windows) = fetch_content(target)?;
 
     // Core Graphics can decline to describe a display (it does for some
@@ -89,23 +96,29 @@ pub(super) fn fetch_content(
     type Found = (Retained<SCDisplay>, Retained<NSArray<SCWindow>>);
 
     let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
+    // The handler runs on ScreenCaptureKit's own queue, so this genuinely
+    // crosses threads; the payload is an Objective-C handle this crate cannot
+    // mark `Send`, which is what the lint objects to. An `Rc` would be wrong.
+    #[allow(clippy::arc_with_non_send_sync)]
     let slot: Arc<Mutex<Option<Found>>> = Arc::new(Mutex::new(None));
     let sink = slot.clone();
-    let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        if let Some(error) = unsafe { error.as_ref() } {
-            let _ = tx.send(Err(error.localizedDescription().to_string()));
-            return;
-        }
-        if let Some(content) = unsafe { content.as_ref() } {
-            let display = unsafe { content.displays() }
-                .iter()
-                .find(|d| unsafe { d.displayID() } == target);
-            if let Some(display) = display {
-                *sink.lock().unwrap() = Some((display, own_windows(content)));
+    let handler = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            if let Some(error) = unsafe { error.as_ref() } {
+                let _ = tx.send(Err(error.localizedDescription().to_string()));
+                return;
             }
-        }
-        let _ = tx.send(Ok(()));
-    });
+            if let Some(content) = unsafe { content.as_ref() } {
+                let display = unsafe { content.displays() }
+                    .iter()
+                    .find(|d| unsafe { d.displayID() } == target);
+                if let Some(display) = display {
+                    *sink.lock().unwrap() = Some((display, own_windows(content)));
+                }
+            }
+            let _ = tx.send(Ok(()));
+        },
+    );
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
     rx.recv_timeout(Duration::from_secs(10))
         .context("timed out asking ScreenCaptureKit for the display list")?

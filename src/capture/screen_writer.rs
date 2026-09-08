@@ -117,14 +117,11 @@ pub fn create_screen_writer(
 
     let url_string = NSString::from_str(&out_path.to_string_lossy());
     let url = NSURL::fileURLWithPath(&url_string);
-    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, &file_type) }
+    let writer = unsafe { AVAssetWriter::assetWriterWithURL_fileType_error(&url, file_type) }
         .map_err(|e| anyhow!("could not create the screen asset writer: {e:?}"))?;
 
     let input = unsafe {
-        AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
-            &video_type,
-            Some(settings),
-        )
+        AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(video_type, Some(settings))
     };
     unsafe { input.setExpectsMediaDataInRealTime(true) };
 
@@ -152,7 +149,10 @@ pub fn create_screen_writer(
         }
         writer.addInput(&input);
         if !writer.startWriting() {
-            bail!("startWriting failed for the screen file: {:?}", writer.error());
+            bail!(
+                "startWriting failed for the screen file: {:?}",
+                writer.error()
+            );
         }
     }
 
@@ -169,9 +169,7 @@ pub fn create_screen_writer(
 /// consumes natively — the same reasoning as `screen_stream`'s
 /// `setPixelFormat`. A pool in any other format would make every frame pay for
 /// a conversion the encoder did not ask for.
-fn pixel_buffer_attributes(
-    size: PixelSize,
-) -> Result<Retained<NSDictionary<NSString, AnyObject>>> {
+fn pixel_buffer_attributes(size: PixelSize) -> Result<Retained<NSDictionary<NSString, AnyObject>>> {
     let format = NSNumber::new_u32(u32::from_be_bytes(*b"420v"));
     let width = NSNumber::new_usize(size.w);
     let height = NSNumber::new_usize(size.h);

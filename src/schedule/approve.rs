@@ -53,7 +53,11 @@ mod tests {
     }
 
     fn plan(items: Vec<PlanItem>) -> SchedulePlan {
-        SchedulePlan { project: "vd-42".into(), version: Some(3), items }
+        SchedulePlan {
+            project: "vd-42".into(),
+            version: Some(3),
+            items,
+        }
     }
 
     fn approved(items: Vec<PlanItem>) -> SchedulePlan {
@@ -88,7 +92,10 @@ mod tests {
             item("longform", "twitter", "bbbb"),
         ]);
         carry_approvals(&mut replanned, &prior);
-        assert!(!replanned.items[0].approved, "changed copy comes back for review");
+        assert!(
+            !replanned.items[0].approved,
+            "changed copy comes back for review"
+        );
         assert!(replanned.items[1].approved, "untouched copy keeps its tick");
         assert_eq!(replanned.sendable().count(), 1);
     }
@@ -110,7 +117,10 @@ mod tests {
         ]);
         carry_approvals(&mut replanned, &prior);
         assert!(replanned.items[0].approved);
-        assert!(!replanned.items[1].approved, "same copy, different platform");
+        assert!(
+            !replanned.items[1].approved,
+            "same copy, different platform"
+        );
         assert!(!replanned.items[2].approved, "same copy, different video");
     }
 

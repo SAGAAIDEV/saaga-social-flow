@@ -149,7 +149,10 @@ mod tests {
         let mut glide = Glide::new(0.0, 0.4);
         let ended = run(&mut glide, 1.0, 90, FRAME);
         assert!(ended > 0.99, "three seconds of easing only reached {ended}");
-        assert!(glide.is_at(1.0), "arrived at {ended} but is_at says otherwise");
+        assert!(
+            glide.is_at(1.0),
+            "arrived at {ended} but is_at says otherwise"
+        );
         assert!(!glide.is_at(0.0), "claims to be at both ends at once");
     }
 

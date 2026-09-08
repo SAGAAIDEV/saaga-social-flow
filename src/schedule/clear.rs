@@ -166,11 +166,7 @@ pub fn run(session: &Session, scope: Scope, tx: &Sender<ScheduleEvent>) -> Resul
     status(format!("Deleting {} post(s) from Buffer…", targets.len()));
 
     for (index, post_id) in targets.iter().enumerate() {
-        status(format!(
-            "Deleting {} of {}…",
-            index + 1,
-            targets.len()
-        ));
+        status(format!("Deleting {} of {}…", index + 1, targets.len()));
         if let Err(err) = client.delete_post(post_id) {
             eprintln!("stream-recorder: could not delete {post_id}: {err:#}");
             outcome.failed.push(format!("{post_id}: {err:#}"));
@@ -249,7 +245,10 @@ mod tests {
 
     #[test]
     fn the_summary_names_every_count_that_is_not_zero() {
-        let clean = ClearOutcome { deleted: 16, ..ClearOutcome::default() };
+        let clean = ClearOutcome {
+            deleted: 16,
+            ..ClearOutcome::default()
+        };
         assert_eq!(clean.summary(), "Deleted 16 post(s)");
         let messy = ClearOutcome {
             deleted: 2,

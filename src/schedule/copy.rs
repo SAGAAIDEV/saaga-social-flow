@@ -43,7 +43,13 @@ pub fn render_text(content: &str, tags: &[String]) -> String {
         text.push_str("\n\n");
         let rendered = tags
             .iter()
-            .map(|t| if t.starts_with('#') { t.clone() } else { format!("#{t}") })
+            .map(|t| {
+                if t.starts_with('#') {
+                    t.clone()
+                } else {
+                    format!("#{t}")
+                }
+            })
             .collect::<Vec<_>>()
             .join(" ");
         text.push_str(&rendered);
@@ -77,7 +83,10 @@ mod tests {
 
     #[test]
     fn an_empty_title_is_not_a_missing_title() {
-        assert_ne!(copy_hash("body copy", Some("")), copy_hash("body copy", None));
+        assert_ne!(
+            copy_hash("body copy", Some("")),
+            copy_hash("body copy", None)
+        );
     }
 
     #[test]
@@ -89,7 +98,10 @@ mod tests {
     #[test]
     fn text_appends_tags_after_a_blank_line() {
         let tags = vec!["rust".to_string(), "#agents".to_string()];
-        assert_eq!(render_text("body copy", &tags), "body copy\n\n#rust #agents");
+        assert_eq!(
+            render_text("body copy", &tags),
+            "body copy\n\n#rust #agents"
+        );
     }
 
     #[test]

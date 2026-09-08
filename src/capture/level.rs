@@ -187,7 +187,10 @@ pub fn levels_dbfs(bytes: &[u8], layout: Layout) -> Levels {
         at += layout.stride;
     }
     if frames == 0 {
-        return Levels { rms_dbfs: SILENT_DBFS, peak_dbfs: SILENT_DBFS };
+        return Levels {
+            rms_dbfs: SILENT_DBFS,
+            peak_dbfs: SILENT_DBFS,
+        };
     }
     Levels {
         rms_dbfs: to_dbfs((sum / frames as f64).sqrt()),

@@ -257,12 +257,18 @@ mod tests {
         let mut draft = article();
         draft.blocks = vec![
             Block::Figure { n: 3 },
-            Block::Text { html: "<p>Body.</p>".into() },
+            Block::Text {
+                html: "<p>Body.</p>".into(),
+            },
             Block::Figure { n: 1 },
             Block::Figure { n: 3 },
         ];
         assert_eq!(draft.figures(), vec![3, 1]);
-        assert_eq!(article().figures(), Vec::<u32>::new(), "most articles have none");
+        assert_eq!(
+            article().figures(),
+            Vec::<u32>::new(),
+            "most articles have none"
+        );
     }
 
     fn article() -> Article {
@@ -273,8 +279,13 @@ mod tests {
             keywords: vec!["ai".into()],
             caption: "Four minutes on enforcement economics".into(),
             blocks: vec![
-                Block::Text { html: "<h2>Where it broke</h2><p>Body.</p>".into() },
-                Block::Quote { text: "It could not.".into(), highlight: "could not".into() },
+                Block::Text {
+                    html: "<h2>Where it broke</h2><p>Body.</p>".into(),
+                },
+                Block::Quote {
+                    text: "It could not.".into(),
+                    highlight: "could not".into(),
+                },
             ],
             ..Article::default()
         }
@@ -321,7 +332,10 @@ mod tests {
 
     #[test]
     fn slugs_are_lowercase_hyphenated_and_bare() {
-        assert_eq!(slugify("Why Watermarking Fails!", 80), "why-watermarking-fails");
+        assert_eq!(
+            slugify("Why Watermarking Fails!", 80),
+            "why-watermarking-fails"
+        );
         assert_eq!(slugify("  AI & the arms race  ", 80), "ai-the-arms-race");
         assert_eq!(slugify("Hello -- world", 80), "hello-world");
     }

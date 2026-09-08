@@ -22,12 +22,12 @@
 //! | [`screen_writer`] | the hand-built H.264 settings and the `AVAssetWriter` they configure |
 
 mod audio_delegate;
-pub mod av_delegate;
-pub mod device_picker;
-pub mod level;
 pub mod av;
+pub mod av_delegate;
 pub mod camera;
 pub mod composed;
+pub mod device_picker;
+pub mod level;
 pub mod mic;
 pub mod pause;
 pub mod screen;

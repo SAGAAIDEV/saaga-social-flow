@@ -128,9 +128,7 @@ impl Detector {
         // Eyes if the model gave them, box centre otherwise. Both eyes or
         // neither: one eye means a profile the box already describes better.
         let eye_y = match (face.keypoints.get(RIGHT_EYE), face.keypoints.get(LEFT_EYE)) {
-            (Some(right), Some(left)) => {
-                f64::from(right.point.y() + left.point.y()) / 2.0
-            }
+            (Some(right), Some(left)) => f64::from(right.point.y() + left.point.y()) / 2.0,
             _ => (f64::from(box_.top()) + f64::from(box_.bottom())) / 2.0 / height,
         };
 
@@ -192,9 +190,8 @@ mod tests {
         // Decode through Core Image and land it in a capture-shaped BGRA
         // buffer, so the detector is fed by exactly the path a camera frame
         // takes rather than by a shortcut that could hide a flip.
-        let url = objc2_foundation::NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(
-            &path,
-        ));
+        let url =
+            objc2_foundation::NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(&path));
         let image = unsafe { objc2_core_image::CIImage::imageWithContentsOfURL(&url) }
             .expect("Core Image could not decode the image");
         let extent = unsafe { image.extent() };

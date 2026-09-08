@@ -53,7 +53,6 @@ pub struct Router {
     marker_log: MarkerLog,
 }
 
-
 impl Router {
     /// Open `first_chapter` and install its writer, against a capture session
     /// that is already running.
@@ -65,6 +64,7 @@ impl Router {
     /// device was using before AppKit came up. Every chapter now begins the
     /// same way, from a user action, well clear of any device renegotiation.
     /// See the `app` module docs.
+    #[allow(clippy::too_many_arguments)]
     pub fn start_at(
         session_dir: &Path,
         avdelegate: &Retained<AvDelegate>,

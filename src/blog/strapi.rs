@@ -123,7 +123,10 @@ impl Strapi {
     /// real base is a mistake anywhere else.
     #[cfg(test)]
     pub fn for_test() -> Strapi {
-        Strapi { base: "http://127.0.0.1:0".into(), token: "test".into() }
+        Strapi {
+            base: "http://127.0.0.1:0".into(),
+            token: "test".into(),
+        }
     }
 
     fn bearer(&self) -> String {
@@ -305,7 +308,9 @@ impl Strapi {
             .timeout(UPLOAD_TIMEOUT)
             .send_bytes(&body);
         let parsed: serde_json::Value = match response {
-            Ok(response) => response.into_json().context("parsing the upload response")?,
+            Ok(response) => response
+                .into_json()
+                .context("parsing the upload response")?,
             Err(ureq::Error::Status(code, response)) => {
                 let detail = response.into_string().unwrap_or_default();
                 bail!("strapi refused the thumbnail ({code}): {}", detail.trim());
@@ -313,8 +318,7 @@ impl Strapi {
             Err(err) => return Err(err).context("uploading the thumbnail to strapi"),
         };
         // `/api/upload` answers with an array, one entry per file sent.
-        let (id, url) =
-            media_entry(&parsed).context("strapi accepted the file but named no id")?;
+        let (id, url) = media_entry(&parsed).context("strapi accepted the file but named no id")?;
         Ok(Uploaded {
             id,
             url: self.absolute(&url),
@@ -464,7 +468,9 @@ fn send_create(
     loop {
         match request.clone().send_json(payload.clone()) {
             Ok(response) => {
-                let body = response.into_json().context("parsing the create response")?;
+                let body = response
+                    .into_json()
+                    .context("parsing the create response")?;
                 return Ok((body, dropped));
             }
             Err(ureq::Error::Status(code, response)) => {
@@ -581,7 +587,13 @@ mod tests {
 
     #[test]
     fn the_multipart_body_names_both_fields_strapi_reads() {
-        let body = multipart("BOUND", "thumb.jpg", "image/jpeg", b"\xff\xd8jpeg", Some("A cover"));
+        let body = multipart(
+            "BOUND",
+            "thumb.jpg",
+            "image/jpeg",
+            b"\xff\xd8jpeg",
+            Some("A cover"),
+        );
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("name=\"fileInfo\""));
         assert!(text.contains(r#"{"alternativeText":"A cover"}"#));
@@ -634,10 +646,7 @@ mod tests {
     #[test]
     fn the_media_id_and_url_come_out_of_the_array_strapi_answers_with() {
         let body = serde_json::json!([{ "id": 42, "url": "/uploads/t.jpg" }]);
-        assert_eq!(
-            media_entry(&body),
-            Some((42, "/uploads/t.jpg".to_string()))
-        );
+        assert_eq!(media_entry(&body), Some((42, "/uploads/t.jpg".to_string())));
         assert_eq!(media_entry(&serde_json::json!([])), None);
         assert_eq!(media_entry(&serde_json::json!({ "id": 42 })), None);
         // The thumbnail only wants the id, so a missing URL is the figure

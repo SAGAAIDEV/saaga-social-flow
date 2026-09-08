@@ -238,7 +238,9 @@ mod tests {
     fn the_auto_provider_is_not_sent_as_a_route() {
         let auto = request_body("m", Some(crate::notes::AUTO_PROVIDER), "p", "c", b"x");
         assert!(auto.get("provider").is_none());
-        assert!(request_body("m", Some(""), "p", "c", b"x").get("provider").is_none());
+        assert!(request_body("m", Some(""), "p", "c", b"x")
+            .get("provider")
+            .is_none());
         let pinned = request_body("m", Some("google-vertex"), "p", "c", b"x");
         assert_eq!(pinned["provider"]["order"][0], "google-vertex");
     }
@@ -273,21 +275,45 @@ mod tests {
     /// ledger row would stop it ever being rewritten.
     #[test]
     fn an_empty_caption_is_not_usable() {
-        assert!(!Blurb { caption: "  ".into(), alt: "alt".into() }.is_usable());
-        assert!(Blurb { caption: "Something.".into(), alt: String::new() }.is_usable());
+        assert!(!Blurb {
+            caption: "  ".into(),
+            alt: "alt".into()
+        }
+        .is_usable());
+        assert!(Blurb {
+            caption: "Something.".into(),
+            alt: String::new()
+        }
+        .is_usable());
     }
     #[test]
     fn an_overlong_caption_is_clipped_at_a_word() {
         let long = "word ".repeat(80);
-        let blurb = Blurb { caption: long, alt: "a".repeat(300) }.clipped();
-        assert!(blurb.caption.chars().count() <= CAPTION_MAX + 1, "{}", blurb.caption);
+        let blurb = Blurb {
+            caption: long,
+            alt: "a".repeat(300),
+        }
+        .clipped();
+        assert!(
+            blurb.caption.chars().count() <= CAPTION_MAX + 1,
+            "{}",
+            blurb.caption
+        );
         assert!(blurb.caption.ends_with('…'));
-        assert!(!blurb.caption.contains("wor…"), "cut mid-word: {}", blurb.caption);
+        assert!(
+            !blurb.caption.contains("wor…"),
+            "cut mid-word: {}",
+            blurb.caption
+        );
         assert!(blurb.alt.chars().count() <= ALT_MAX + 1);
     }
     #[test]
     fn a_short_blurb_is_left_alone() {
-        let blurb = Blurb { caption: "  Short. ".into(), alt: " alt ".into() }.clipped();
+        let blurb = Blurb {
+            caption: "  Short. ".into(),
+            alt: " alt ".into(),
+        }
+        .clipped();
         assert_eq!(blurb.caption, "Short.");
         assert_eq!(blurb.alt, "alt");
     }

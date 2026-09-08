@@ -18,8 +18,8 @@ use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_av_foundation::{
-    AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoDataOutput,
-    AVFileTypeMPEG4, AVMediaTypeVideo,
+    AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoDataOutput, AVFileTypeMPEG4,
+    AVMediaTypeVideo,
 };
 
 use super::device_picker::{self, CaptureDevice};
@@ -33,7 +33,7 @@ pub type CameraDevice = CaptureDevice;
 pub fn list_camera_devices() -> Result<Vec<CameraDevice>> {
     let media_type =
         unsafe { AVMediaTypeVideo }.ok_or_else(|| anyhow!("AVMediaTypeVideo unavailable"))?;
-    device_picker::list_devices(&media_type)
+    device_picker::list_devices(media_type)
 }
 
 /// A running capture session against one camera, writing every captured
@@ -83,7 +83,7 @@ impl Connection {
         // refuses.
         let settings =
             unsafe { output.recommendedVideoSettingsForAssetWriterWithOutputFileType(file_type) };
-        let writer = MediaFileWriter::create(out_path, &file_type, &media_type, settings)?;
+        let writer = MediaFileWriter::create(out_path, file_type, media_type, settings)?;
         // Serial: video frames must be delivered (and appended) in order.
         let queue = DispatchQueue::new("stream-recorder.camera", DispatchQueueAttr::SERIAL);
         let delegate = VideoDelegate::new(writer.writer(), writer.input.clone());
@@ -128,7 +128,11 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
         bail!("no camera devices found");
     }
 
-    let chosen_uid = match device_picker::resolve_default(cfg.camera_device_uid.as_deref(), &devices, reselect) {
+    let chosen_uid = match device_picker::resolve_default(
+        cfg.camera_device_uid.as_deref(),
+        &devices,
+        reselect,
+    ) {
         Some(uid) => uid,
         None => {
             if let Some(saved) = &cfg.camera_device_uid {
@@ -153,9 +157,7 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
 
     println!("stream-recorder: requesting camera access...");
     if !permissions::ensure_video_access()? {
-        bail!(
-            "camera access denied — enable it in System Settings > Privacy & Security > Camera"
-        );
+        bail!("camera access denied — enable it in System Settings > Privacy & Security > Camera");
     }
 
     let out_dir = crate::session::output_dir()?;

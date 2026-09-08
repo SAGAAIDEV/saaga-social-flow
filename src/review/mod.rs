@@ -57,9 +57,12 @@ pub fn build(render_dir: &Path) -> Pane {
             ));
         }
     }
-    let blocked = clips
-        .is_empty()
-        .then(|| format!("Nothing rendered yet — run Render. ({})", render_dir.display()));
+    let blocked = clips.is_empty().then(|| {
+        format!(
+            "Nothing rendered yet — run Render. ({})",
+            render_dir.display()
+        )
+    });
     Pane { clips, blocked }
 }
 
@@ -75,7 +78,6 @@ fn clip(id: &str, label: &str, path: &Path, orientation: &str) -> Clip {
             .unwrap_or(0.0),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -124,7 +126,10 @@ mod tests {
     #[test]
     fn each_clip_carries_its_orientation_and_size() {
         let render = temp("shape");
-        write(render.join("horizontal/longform.mp4"), &vec![0u8; 2 * 1024 * 1024]);
+        write(
+            render.join("horizontal/longform.mp4"),
+            &vec![0u8; 2 * 1024 * 1024],
+        );
         write(render.join("vertical/chapter-01.mp4"), b"x");
 
         let pane = build(&render);

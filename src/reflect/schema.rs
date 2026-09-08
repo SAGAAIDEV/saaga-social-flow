@@ -182,7 +182,11 @@ mod tests {
             validation: validation.map(|ok| Validation {
                 ok,
                 checked_at: "2026-08-16T09:00:00Z".into(),
-                detail: if ok { "12 posts".into() } else { "no output".into() },
+                detail: if ok {
+                    "12 posts".into()
+                } else {
+                    "no output".into()
+                },
             }),
         }
     }
@@ -219,7 +223,10 @@ mod tests {
     fn status_names_the_blocking_condition() {
         assert_eq!(rewrite(true, None).status(), "not validated");
         assert_eq!(rewrite(true, Some(false)).status(), "FAILED validation");
-        assert_eq!(rewrite(false, Some(true)).status(), "validated — not approved");
+        assert_eq!(
+            rewrite(false, Some(true)).status(),
+            "validated — not approved"
+        );
         assert_eq!(rewrite(true, Some(true)).status(), "ready to apply");
         // A failed validation outranks the tick: it is the thing to fix.
         assert_eq!(rewrite(false, Some(false)).status(), "FAILED validation");
@@ -264,10 +271,8 @@ mod tests {
 
     #[test]
     fn a_report_round_trips_with_its_review_state() {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-reflect-{}-rt",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-reflect-{}-rt", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let saved = report(vec![rewrite(true, Some(true))]);
         save(&dir, &saved).unwrap();

@@ -33,7 +33,13 @@ const WAIT_EVERY: Duration = Duration::from_secs(2);
 const WAIT_FOR: Duration = Duration::from_secs(660);
 
 /// Caption figure `n` once its explanation has transcribed, on a worker thread.
-pub fn spawn(session: Session, n: u32, model: String, provider: Option<String>, tx: Sender<FigureEvent>) {
+pub fn spawn(
+    session: Session,
+    n: u32,
+    model: String,
+    provider: Option<String>,
+    tx: Sender<FigureEvent>,
+) {
     let _ = thread::Builder::new()
         .name(format!("figure-{n:02}-blurb"))
         .spawn(move || {
@@ -70,7 +76,8 @@ fn run(
     let _ = tx.send(FigureEvent::Status(format!(
         "Writing figure {n:02}'s blurb…"
     )));
-    let prompt = crate::agent::prompt::resolve(super::PROMPT_ID, super::SYSTEM_PROMPT, Some(&session.root));
+    let prompt =
+        crate::agent::prompt::resolve(super::PROMPT_ID, super::SYSTEM_PROMPT, Some(&session.root));
     let blurb = super::write_one(session, &figure, &prompt.text, model, provider)?;
     figure::append_blurb(&session.root, &figure.file, &blurb.caption, &blurb.alt)?;
     Ok(Some(figure))

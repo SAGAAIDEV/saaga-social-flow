@@ -3,7 +3,10 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "stream-recorder", about = "Record camera, screen, and mic to separate files off one shared clock")]
+#[command(
+    name = "stream-recorder",
+    about = "Record camera, screen, and mic to separate files off one shared clock"
+)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Option<Command>,

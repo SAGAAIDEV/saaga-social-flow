@@ -141,7 +141,10 @@ pub fn timeline(cuts: &[ChapterCut], card: f64, lead: f64) -> Timeline {
         chapters: marks,
         audio_duration: (runs_to * MS).round() / MS,
     });
-    Timeline { chapters, transcript }
+    Timeline {
+        chapters,
+        transcript,
+    }
 }
 
 /// Reads the timeline off the project.
@@ -261,7 +264,12 @@ mod tests {
     use super::*;
 
     fn word(text: &str, start: i64, end: i64) -> TranscriptWord {
-        TranscriptWord { text: text.into(), start, end, confidence: 0.9 }
+        TranscriptWord {
+            text: text.into(),
+            start,
+            end,
+            confidence: 0.9,
+        }
     }
 
     fn cut(n: u32, name: &str, seconds: f64, words: Vec<TranscriptWord>) -> ChapterCut {
@@ -369,7 +377,10 @@ mod tests {
     #[test]
     fn a_chapter_with_no_words_still_gets_a_marker() {
         let got = timeline(
-            &[cut(1, "One", 60.0, vec![]), cut(2, "Two", 30.0, vec![word("hi", 0, 10)])],
+            &[
+                cut(1, "One", 60.0, vec![]),
+                cut(2, "Two", 30.0, vec![word("hi", 0, 10)]),
+            ],
             3.0,
             3.0,
         );

@@ -48,7 +48,10 @@ pub fn load_rows(root: &Path) -> Result<Vec<ScheduleRow>> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => {
             return Err(err).with_context(|| {
-                format!("reading {} — refusing to queue without the ledger", path.display())
+                format!(
+                    "reading {} — refusing to queue without the ledger",
+                    path.display()
+                )
             })
         }
     };
@@ -242,7 +245,9 @@ mod tests {
     #[test]
     fn missing_ledger_loads_empty() {
         let dir = temp_dir("missing");
-        assert!(load_rows(&dir).expect("a missing ledger is not an error").is_empty());
+        assert!(load_rows(&dir)
+            .expect("a missing ledger is not an error")
+            .is_empty());
     }
 
     /// A ledger we cannot read must stop the queue, not degrade to "nothing was

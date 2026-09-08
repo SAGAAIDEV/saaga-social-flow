@@ -5,13 +5,13 @@
 use super::*;
 use crate::ops::frame::test_support::pixel_buffer;
 use crate::ops::passthrough::Passthrough;
+use crate::ops::sink::OutputSpec;
+use crate::ops::{Frame, VideoOp};
+use anyhow::Result;
 use objc2_core_media::CMTimeFlags;
 use objc2_core_video::kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use anyhow::Result;
-use crate::ops::sink::OutputSpec;
-use crate::ops::{Frame, VideoOp};
 
 /// Counts how many frames reached it.
 pub(crate) struct CountingOp {
@@ -194,7 +194,11 @@ fn drop_short_circuits_the_rest_of_the_chain() {
     graph.open(&host_ctx(StreamId::Screen)).expect("open");
 
     assert!(graph.run(a_frame(), time(1, 1000)).dropped_any);
-    assert_eq!(upstream.load(Ordering::Relaxed), 1, "upstream must have run");
+    assert_eq!(
+        upstream.load(Ordering::Relaxed),
+        1,
+        "upstream must have run"
+    );
     assert_eq!(
         downstream.load(Ordering::Relaxed),
         0,

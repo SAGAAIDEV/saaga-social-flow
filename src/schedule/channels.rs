@@ -99,12 +99,8 @@ pub fn handle_matches(channel: &Channel, handle: &str) -> bool {
 /// profile posts to the wrong audience with no warning anywhere.
 pub fn handle_note(platform: &str, picked: &Channel) -> Option<String> {
     let wanted = preferred_handle(platform)?;
-    (!handle_matches(picked, &wanted)).then(|| {
-        format!(
-            "wanted @{wanted}, fell back to @{}",
-            channel_label(picked)
-        )
-    })
+    (!handle_matches(picked, &wanted))
+        .then(|| format!("wanted @{wanted}, fell back to @{}", channel_label(picked)))
 }
 
 /// Lower sorts first: the named handle, then the LinkedIn brand page.
@@ -191,8 +187,18 @@ mod tests {
 
     fn both_twitter() -> Vec<Channel> {
         vec![
-            channel("6a4a9bbf40483446287252ef", "twitter", "profile", "AndrewOsee59559"),
-            channel("69266cd829ea336fd631d03a", "twitter", "profile", "amelnychukoseen"),
+            channel(
+                "6a4a9bbf40483446287252ef",
+                "twitter",
+                "profile",
+                "AndrewOsee59559",
+            ),
+            channel(
+                "69266cd829ea336fd631d03a",
+                "twitter",
+                "profile",
+                "amelnychukoseen",
+            ),
         ]
     }
 
@@ -205,7 +211,10 @@ mod tests {
             .expect("a twitter channel");
         assert_eq!(picked.id, "6a4a9bbf40483446287252ef");
         assert_eq!(channel_label(picked), "AndrewOsee59559");
-        assert!(channels[1].id < channels[0].id, "the other handle sorts first");
+        assert!(
+            channels[1].id < channels[0].id,
+            "the other handle sorts first"
+        );
     }
 
     #[test]
@@ -235,7 +244,10 @@ mod tests {
 
     #[test]
     fn only_twitter_names_a_preferred_handle() {
-        assert_eq!(preferred_handle("twitter").as_deref(), Some(DEFAULT_TWITTER_HANDLE));
+        assert_eq!(
+            preferred_handle("twitter").as_deref(),
+            Some(DEFAULT_TWITTER_HANDLE)
+        );
         assert_eq!(preferred_handle("linkedin"), None);
         assert_eq!(preferred_handle("youtube_shorts"), None);
     }

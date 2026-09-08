@@ -88,7 +88,7 @@ pub fn build(root: &Path, scale: Option<f64>) -> FiguresView {
         rows,
         can_write: unwritten > 0,
         hint: hint(figures.len(), unwritten),
-        }
+    }
 }
 
 /// Why there are no words yet, when there are none. The three states read
@@ -169,7 +169,12 @@ mod tests {
             file,
             chapter: Some(2),
             offset: Some(30.0 * n as f64),
-            rect: Snipped { x: 0.0, y: 0.0, w: 640.0, h: 360.0 },
+            rect: Snipped {
+                x: 0.0,
+                y: 0.0,
+                w: 640.0,
+                h: 360.0,
+            },
             // Unmeasured, so the size tests below exercise the estimate.
             width: 0,
             height: 0,
@@ -224,7 +229,11 @@ mod tests {
         append_capture(&root, &one).unwrap();
         let quiet = build(&root, Some(2.0));
         assert_eq!(quiet.rows[0].said, "");
-        assert!(quiet.rows[0].said_note.contains("without a break"), "{}", quiet.rows[0].said_note);
+        assert!(
+            quiet.rows[0].said_note.contains("without a break"),
+            "{}",
+            quiet.rows[0].said_note
+        );
 
         // The aside is on disk and its transcript has been written.
         let audio = crate::figure::audio_path_for(&root, 1);
@@ -254,7 +263,11 @@ mod tests {
         append_capture(&root, &one).unwrap();
         let pending = build(&root, Some(2.0));
         assert!(pending.can_write);
-        assert!(pending.hint.contains("1 still to write"), "{}", pending.hint);
+        assert!(
+            pending.hint.contains("1 still to write"),
+            "{}",
+            pending.hint
+        );
 
         append_blurb(&root, &one.file, "Done.", "alt").unwrap();
         let done = build(&root, Some(2.0));

@@ -91,10 +91,7 @@ impl Placement {
             1.0
         };
         Placement {
-            offset: (
-                finite_or(self.offset.0, 0.0),
-                finite_or(self.offset.1, 0.0),
-            ),
+            offset: (finite_or(self.offset.0, 0.0), finite_or(self.offset.1, 0.0)),
             zoom,
         }
     }

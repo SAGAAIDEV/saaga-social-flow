@@ -117,9 +117,7 @@ pub fn set_active(root: &Path, name: &str, active: bool) -> Result<()> {
     selection.active.retain(|item| item != name);
     if active {
         if selection.active.len() >= MAX_ACTIVE {
-            bail!(
-                "at most {MAX_ACTIVE} reference(s) can be active — switch one off first"
-            );
+            bail!("at most {MAX_ACTIVE} reference(s) can be active — switch one off first");
         }
         selection.active.push(name.to_string());
     }
@@ -191,7 +189,13 @@ fn sanitise(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let cleaned: String = base
         .chars()
-        .map(|c| if c.is_alphanumeric() || "-_. ".contains(c) { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || "-_. ".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let cleaned = cleaned.trim_matches(['.', ' ']).to_string();
     if cleaned.is_empty() {
@@ -235,10 +239,8 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-refs-{}-{tag}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-refs-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -253,7 +255,10 @@ mod tests {
         let library = load(&dir);
         let names: Vec<&str> = library.items.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["a.jpg", "b.PNG"]);
-        assert!(library.active().next().is_none(), "nothing is on by default");
+        assert!(
+            library.active().next().is_none(),
+            "nothing is on by default"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -334,7 +339,10 @@ mod tests {
         let huge = vec![0u8; MAX_BYTES + 1];
         let err = prepare("huge.jpg", &huge).unwrap_err();
         assert!(err.to_string().contains("capped at"));
-        assert!(prepare("empty.jpg", b"").unwrap_err().to_string().contains("empty"));
+        assert!(prepare("empty.jpg", b"")
+            .unwrap_err()
+            .to_string()
+            .contains("empty"));
     }
 
     #[test]

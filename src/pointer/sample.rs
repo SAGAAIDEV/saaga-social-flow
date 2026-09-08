@@ -82,10 +82,8 @@ pub fn global() -> Option<(f64, f64)> {
 pub fn on_display(geom: &DisplayGeometry) -> Option<(f64, f64)> {
     let (x, y) = global()?;
     let local = (x - geom.cg_origin.0, y - geom.cg_origin.1);
-    let inside = local.0 >= 0.0
-        && local.1 >= 0.0
-        && local.0 < geom.points.0
-        && local.1 < geom.points.1;
+    let inside =
+        local.0 >= 0.0 && local.1 >= 0.0 && local.0 < geom.points.0 && local.1 < geom.points.1;
     inside.then_some(local)
 }
 
@@ -131,7 +129,6 @@ pub fn zoom_held() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     /// Spike: is a held modifier combo readable off the main thread, cheaply,
     /// while another application has focus?

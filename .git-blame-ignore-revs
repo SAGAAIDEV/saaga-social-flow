@@ -1,0 +1,5 @@
+# Commits that only reformatted code. GitHub reads this file by name; locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format the crate with rustfmt
+9911e4b92895eec5fa488a81366df26fe9e47ace

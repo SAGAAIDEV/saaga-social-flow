@@ -281,9 +281,19 @@ fn resizing_follows_whichever_axis_the_drag_moved_further() {
     let anchor = Corner::BottomRight.at(&region);
     // A drag that is mostly vertical still grows the region, which it
     // would not if only the x delta were read.
-    let tall = region.resized(Corner::TopLeft, (anchor.0 - 1500.0, anchor.1 - 3000.0), 0.0, &geom);
+    let tall = region.resized(
+        Corner::TopLeft,
+        (anchor.0 - 1500.0, anchor.1 - 3000.0),
+        0.0,
+        &geom,
+    );
     assert!(tall.h > region.h, "a vertical drag did nothing");
-    let wide = region.resized(Corner::TopLeft, (anchor.0 - 3000.0, anchor.1 - 1500.0), 0.0, &geom);
+    let wide = region.resized(
+        Corner::TopLeft,
+        (anchor.0 - 3000.0, anchor.1 - 1500.0),
+        0.0,
+        &geom,
+    );
     assert!(wide.w > region.w, "a horizontal drag did nothing");
 }
 
@@ -359,7 +369,12 @@ fn an_axis_drag_is_clamped_like_any_other_and_never_resizes() {
 /// call.
 #[test]
 fn the_centre_is_the_middle_of_the_rect() {
-    let region = PointRect { x: 100.0, y: 200.0, w: 400.0, h: 300.0 };
+    let region = PointRect {
+        x: 100.0,
+        y: 200.0,
+        w: 400.0,
+        h: 300.0,
+    };
     assert_eq!(region.center(), (300.0, 350.0));
 }
 
@@ -368,21 +383,56 @@ fn the_centre_is_the_middle_of_the_rect() {
 /// is done, not still colliding.
 #[test]
 fn overlaps_is_half_open_on_both_axes() {
-    let a = PointRect { x: 10.0, y: 20.0, w: 100.0, h: 50.0 };
+    let a = PointRect {
+        x: 10.0,
+        y: 20.0,
+        w: 100.0,
+        h: 50.0,
+    };
     assert!(a.overlaps(&a));
-    assert!(a.overlaps(&PointRect { x: 105.0, y: 65.0, w: 20.0, h: 20.0 }));
+    assert!(a.overlaps(&PointRect {
+        x: 105.0,
+        y: 65.0,
+        w: 20.0,
+        h: 20.0
+    }));
     assert!(
-        !a.overlaps(&PointRect { x: 10.0, y: 70.0, w: 100.0, h: 50.0 }),
+        !a.overlaps(&PointRect {
+            x: 10.0,
+            y: 70.0,
+            w: 100.0,
+            h: 50.0
+        }),
         "a rect stacked directly below must not count as overlapping",
     );
-    assert!(!a.overlaps(&PointRect { x: 110.0, y: 20.0, w: 100.0, h: 50.0 }));
-    assert!(!a.overlaps(&PointRect { x: 200.0, y: 200.0, w: 10.0, h: 10.0 }));
+    assert!(!a.overlaps(&PointRect {
+        x: 110.0,
+        y: 20.0,
+        w: 100.0,
+        h: 50.0
+    }));
+    assert!(!a.overlaps(&PointRect {
+        x: 200.0,
+        y: 200.0,
+        w: 10.0,
+        h: 10.0
+    }));
 }
 
 #[test]
 fn union_covers_both_rects() {
-    let a = PointRect { x: 10.0, y: 20.0, w: 100.0, h: 50.0 };
-    let b = PointRect { x: 80.0, y: 10.0, w: 40.0, h: 80.0 };
+    let a = PointRect {
+        x: 10.0,
+        y: 20.0,
+        w: 100.0,
+        h: 50.0,
+    };
+    let b = PointRect {
+        x: 80.0,
+        y: 10.0,
+        w: 40.0,
+        h: 80.0,
+    };
     let u = a.union(&b);
     assert_eq!(u.x, 10.0);
     assert_eq!(u.y, 10.0);
@@ -392,8 +442,20 @@ fn union_covers_both_rects() {
 
 #[test]
 fn a_region_maps_into_the_union_buffer() {
-    let outer = PointRect { x: 100.0, y: 200.0, w: 400.0, h: 200.0 };
-    let inner = PointRect { x: 200.0, y: 200.0, w: 200.0, h: 200.0 };
-    let crop = inner.in_buffer(&outer, PixelSize { w: 800, h: 400 }).unwrap();
+    let outer = PointRect {
+        x: 100.0,
+        y: 200.0,
+        w: 400.0,
+        h: 200.0,
+    };
+    let inner = PointRect {
+        x: 200.0,
+        y: 200.0,
+        w: 200.0,
+        h: 200.0,
+    };
+    let crop = inner
+        .in_buffer(&outer, PixelSize { w: 800, h: 400 })
+        .unwrap();
     assert_eq!(crop, (200.0, 0.0, 400.0, 400.0));
 }

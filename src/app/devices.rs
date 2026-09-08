@@ -17,8 +17,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::app::App;
-use crate::capture::{screen_stream, screen_writer};
 use crate::capture::av;
+use crate::capture::{screen_stream, screen_writer};
 use crate::router::ScreenTrack;
 
 impl App {
@@ -42,7 +42,9 @@ impl App {
         self.end_break(false);
         if let Some(router) = &mut self.router {
             self.next_chapter = router.current_chapter_number() + 1;
-            router.stop().context("finishing chapter for device switch")?;
+            router
+                .stop()
+                .context("finishing chapter for device switch")?;
         }
         // Bank the open chapter here too: the switch stops recording, and a
         // chapter left open on the clock would keep counting against a capture
@@ -112,7 +114,7 @@ impl App {
     pub(super) fn screen_wanted(&self) -> Option<&str> {
         self.layout()
             .needs_screen()
-            .then(|| self.screen_uid.as_deref())
+            .then_some(self.screen_uid.as_deref())
             .flatten()
     }
 
@@ -196,7 +198,9 @@ impl App {
         // Close out the current chapter before the file set changes under it.
         if let Some(router) = &mut self.router {
             self.next_chapter = router.current_chapter_number() + 1;
-            router.stop().context("finishing chapter for screen switch")?;
+            router
+                .stop()
+                .context("finishing chapter for screen switch")?;
         }
         self.router = None;
 
@@ -244,7 +248,9 @@ impl App {
 /// A free function rather than only a method because
 /// [`Router::reopen_with_screen`] needs it from inside a closure that has
 /// already borrowed the connection mutably, so `&self` is not available.
-pub(super) fn screen_track(screen: Option<&screen_stream::ScreenConnection>) -> Result<Option<ScreenTrack>> {
+pub(super) fn screen_track(
+    screen: Option<&screen_stream::ScreenConnection>,
+) -> Result<Option<ScreenTrack>> {
     let Some(screen) = screen else {
         return Ok(None);
     };

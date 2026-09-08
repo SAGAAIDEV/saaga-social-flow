@@ -149,7 +149,10 @@ fn parse_rows(text: &str) -> Vec<AnalyticsRow> {
         .filter_map(|(n, line)| match serde_json::from_str(line) {
             Ok(row) => Some(row),
             Err(err) => {
-                eprintln!("stream-recorder: skipping analytics.jsonl line {}: {err}", n + 1);
+                eprintln!(
+                    "stream-recorder: skipping analytics.jsonl line {}: {err}",
+                    n + 1
+                );
                 None
             }
         })

@@ -76,13 +76,17 @@ pub fn drop_field(payload: &mut Value, key: &str, dropped: &[String]) -> bool {
             .cloned()
             .unwrap_or_default();
         for target in removed.as_array().unwrap_or(&Vec::new()) {
-            let Some(term) = target["term"].as_str().map(str::trim).filter(|t| !t.is_empty())
+            let Some(term) = target["term"]
+                .as_str()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
             else {
                 continue;
             };
-            let known = keywords
-                .iter()
-                .any(|had| had.as_str().is_some_and(|had| had.eq_ignore_ascii_case(term)));
+            let known = keywords.iter().any(|had| {
+                had.as_str()
+                    .is_some_and(|had| had.eq_ignore_ascii_case(term))
+            });
             if !known {
                 keywords.push(Value::String(term.to_string()));
             }
@@ -140,7 +144,10 @@ mod tests {
             unknown_key(400, &refusal(KEYWORD_TARGETS)),
             Some(KEYWORD_TARGETS.to_string())
         );
-        assert_eq!(unknown_key(400, &refusal("ogImage")), Some("ogImage".into()));
+        assert_eq!(
+            unknown_key(400, &refusal("ogImage")),
+            Some("ogImage".into())
+        );
     }
 
     /// Every one of these is a real refusal that deleting a field would not fix
@@ -166,7 +173,11 @@ mod tests {
 
         assert_eq!(unknown_key(400, &enum_refusal), None);
         assert_eq!(unknown_key(400, &query_refusal), None);
-        assert_eq!(unknown_key(403, &refusal(KEYWORDS)), None, "a permission failure");
+        assert_eq!(
+            unknown_key(403, &refusal(KEYWORDS)),
+            None,
+            "a permission failure"
+        );
         assert_eq!(unknown_key(500, "<html>gateway</html>"), None);
         assert_eq!(unknown_key(400, ""), None);
     }
@@ -184,7 +195,11 @@ mod tests {
     fn a_field_that_is_not_there_is_not_a_fix() {
         let mut payload = json!({ "data": { "title": "A post" } });
         assert!(!drop_field(&mut payload, "ogImage", &[]));
-        assert!(!drop_field(&mut json!({ "title": "no data key" }), "title", &[]));
+        assert!(!drop_field(
+            &mut json!({ "title": "no data key" }),
+            "title",
+            &[]
+        ));
     }
 
     /// The case the live CMS is actually in: no `keywordTargets`, and nothing
@@ -198,7 +213,10 @@ mod tests {
         ] } });
 
         assert!(drop_field(&mut payload, KEYWORD_TARGETS, &[]));
-        assert_eq!(payload["data"]["keywords"], json!(["ai watermarking", "provenance"]));
+        assert_eq!(
+            payload["data"]["keywords"],
+            json!(["ai watermarking", "provenance"])
+        );
         assert!(payload["data"].get(KEYWORD_TARGETS).is_none());
     }
 
@@ -213,7 +231,10 @@ mod tests {
         } });
 
         assert!(drop_field(&mut payload, KEYWORD_TARGETS, &[]));
-        assert_eq!(payload["data"]["keywords"], json!(["AI watermarking", "provenance"]));
+        assert_eq!(
+            payload["data"]["keywords"],
+            json!(["AI watermarking", "provenance"])
+        );
     }
 
     /// A CMS old enough to refuse both gets neither back — putting `keywords`
@@ -224,7 +245,11 @@ mod tests {
             { "term": "ai watermarking", "priority": "primary" },
         ] } });
 
-        assert!(drop_field(&mut payload, KEYWORD_TARGETS, &[KEYWORDS.to_string()]));
+        assert!(drop_field(
+            &mut payload,
+            KEYWORD_TARGETS,
+            &[KEYWORDS.to_string()]
+        ));
         assert!(payload["data"].get(KEYWORDS).is_none());
         assert_eq!(payload["data"].as_object().unwrap().len(), 0);
     }
@@ -240,6 +265,9 @@ mod tests {
 
         let both = warning(&[KEYWORD_TARGETS.to_string(), KEYWORDS.to_string()]).unwrap();
         assert!(both.contains("no keywordTargets, keywords"), "{both}");
-        assert!(!both.contains("saved in keywords"), "nothing was rescued: {both}");
+        assert!(
+            !both.contains("saved in keywords"),
+            "nothing was rescued: {both}"
+        );
     }
 }

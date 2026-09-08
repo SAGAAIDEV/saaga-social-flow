@@ -67,7 +67,8 @@ impl Aside {
         let anchor = crate::timesync::TimeSync::now_on(&clock);
         let writer = av::create_audio_writer(&conn.audio_settings, path)
             .with_context(|| format!("creating the aside writer for {}", path.display()))?;
-        conn.delegate.install_aside(AsideState::new(writer, anchor))?;
+        conn.delegate
+            .install_aside(AsideState::new(writer, anchor))?;
         Ok(Aside {
             delegate: conn.delegate.clone(),
             path: path.to_path_buf(),
@@ -121,16 +122,21 @@ mod live {
             .unwrap_or_else(|| mics[0].uid.clone());
         let camera = av::list_camera_devices().expect("cameras")[0].uid.clone();
         let conn = Connection::start_capture(&camera, &uid).expect("capture");
-        conn.wait_for_warmup(Duration::from_secs(10)).expect("warmup");
+        conn.wait_for_warmup(Duration::from_secs(10))
+            .expect("warmup");
 
-        let dir = std::env::temp_dir().join(format!("stream-recorder-aside-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-aside-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("figures").join("figure-01.m4a");
 
         let aside = Aside::start(&conn, &path).expect("aside starts on an idle session");
         // Starting a second one must fail, and must not touch the first.
         let refused = Aside::start(&conn, &dir.join("second.m4a"));
-        assert!(refused.is_err(), "a second aside was allowed over the first");
+        assert!(
+            refused.is_err(),
+            "a second aside was allowed over the first"
+        );
 
         std::thread::sleep(Duration::from_secs(2));
         let finished = aside.finish().expect("finish");
@@ -149,8 +155,16 @@ mod live {
         );
         // No chapter was installed, so the chapter counters must be untouched:
         // the aside is its own sink, not the chapter's.
-        assert_eq!(conn.delegate.audio_frames_appended(), 0, "an aside fed the chapter counter");
-        assert_eq!(conn.delegate.video_frames_appended(), 0, "an aside wrote video frames");
+        assert_eq!(
+            conn.delegate.audio_frames_appended(),
+            0,
+            "an aside fed the chapter counter"
+        );
+        assert_eq!(
+            conn.delegate.video_frames_appended(),
+            0,
+            "an aside wrote video frames"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -310,11 +310,7 @@ pub struct Snip {
 }
 
 impl Snip {
-    pub fn new(
-        mtm: MainThreadMarker,
-        geometry: DisplayGeometry,
-        tx: Sender<UiEvent>,
-    ) -> Snip {
+    pub fn new(mtm: MainThreadMarker, geometry: DisplayGeometry, tx: Sender<UiEvent>) -> Snip {
         let full = PointRect {
             x: 0.0,
             y: 0.0,

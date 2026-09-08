@@ -42,7 +42,10 @@ pub fn build_plan(
     let mut items = Vec::new();
 
     for video in &posts.items {
-        let url = links.url_for(&video.video_id).unwrap_or_default().to_string();
+        let url = links
+            .url_for(&video.video_id)
+            .unwrap_or_default()
+            .to_string();
         let orientation = orientation_of(links, &video.video_id);
         for post in &video.posts {
             // The one platform where the label can disagree with the file. Both
@@ -56,14 +59,27 @@ pub fn build_plan(
                     .to_string(),
                 false => post.platform.clone(),
             };
-            let post = &PlatformPost { platform, ..post.clone() };
+            let post = &PlatformPost {
+                platform,
+                ..post.clone()
+            };
 
             let text = render_text(&post.content, &post.tags);
             let title = post.title.clone();
-            let image = video.video_id == "longform" && matches!(post.platform.as_str(), "linkedin" | "facebook") && links.url_for("og-image").is_some();
-            let url = if image { links.url_for("og-image").unwrap().to_string() } else { url.clone() };
+            let image = video.video_id == "longform"
+                && matches!(post.platform.as_str(), "linkedin" | "facebook")
+                && links.url_for("og-image").is_some();
+            let url = if image {
+                links.url_for("og-image").unwrap().to_string()
+            } else {
+                url.clone()
+            };
             // Changing the artwork resets approval and dedupe along with the copy.
-            let hash = if image { copy_hash(&format!("{text}\nimage:{url}"), title.as_deref()) } else { copy_hash(&text, title.as_deref()) };
+            let hash = if image {
+                copy_hash(&format!("{text}\nimage:{url}"), title.as_deref())
+            } else {
+                copy_hash(&text, title.as_deref())
+            };
             let resolved = resolve_channel(&post.platform, channels);
             let already = ledger::queued_row(queued, &video.video_id, &post.platform, &hash);
             // The channel is asked about first because the flavour above is only
@@ -102,8 +118,11 @@ pub fn build_plan(
                 needs_approval: false,
                 image,
                 metadata: if image {
-                    (post.platform == "facebook").then(|| serde_json::json!({"facebook": {"type": "post"}}))
-                } else { metadata_for(&post.platform, title.as_deref(), youtube_category) },
+                    (post.platform == "facebook")
+                        .then(|| serde_json::json!({"facebook": {"type": "post"}}))
+                } else {
+                    metadata_for(&post.platform, title.as_deref(), youtube_category)
+                },
                 reason: reason_for(queued, &video.video_id, &post.platform, already),
                 prompt_id: PROMPT_ID.to_string(),
                 prompt_version: posts.prompt_version,
@@ -112,7 +131,9 @@ pub fn build_plan(
                 approved: false,
             };
 
-            if image { item.reason = "Designed OG image with social copy".into(); }
+            if image {
+                item.reason = "Designed OG image with social copy".into();
+            }
             if let Ok(channel) = &resolved {
                 item.channel_id = channel.id.clone();
                 item.channel_name = channel_label(channel).to_string();
@@ -130,7 +151,11 @@ pub fn build_plan(
     }
 
     items.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
-    SchedulePlan { project: project.to_string(), version, items }
+    SchedulePlan {
+        project: project.to_string(),
+        version,
+        items,
+    }
 }
 
 /// How this video was distributed — "landscape" or "portrait" — from links.json.
@@ -142,7 +167,6 @@ fn orientation_of<'a>(links: &'a DistributeLinks, video_id: &str) -> Option<&'a 
         .and_then(|item| item.orientation.as_deref())
 }
 
-
 /// Why this item exists — plus the one thing the ledger knows that the plan
 /// otherwise hides: this video is already live on this platform under *different*
 /// copy. Regenerating posts makes every item queueable again by design, so without
@@ -153,7 +177,11 @@ fn reason_for(
     platform: &str,
     already: Option<&ScheduleRow>,
 ) -> String {
-    let base = if video_id == "longform" { "hub video" } else { "vertical chapter" };
+    let base = if video_id == "longform" {
+        "hub video"
+    } else {
+        "vertical chapter"
+    };
     if already.is_some() {
         return base.to_string();
     }
@@ -178,7 +206,12 @@ fn order_key(item: &PlanItem) -> (u8, u32, &str, &str) {
             None => (2, 0),
         },
     };
-    (rank, chapter, item.video_id.as_str(), item.platform.as_str())
+    (
+        rank,
+        chapter,
+        item.video_id.as_str(),
+        item.platform.as_str(),
+    )
 }
 
 #[cfg(test)]
@@ -204,14 +237,44 @@ mod tests {
 
     fn all_channels() -> Vec<Channel> {
         vec![
-            channel("6a3dbb795ab6d2f10671b945", "instagram", "business", "saagasocials"),
+            channel(
+                "6a3dbb795ab6d2f10671b945",
+                "instagram",
+                "business",
+                "saagasocials",
+            ),
             channel("69267c5429ea336fd631f864", "linkedin", "profile", "amovfx"),
             channel("69267c5429ea336fd631f865", "linkedin", "page", "saagasolve"),
-            channel("6a3dbb555ab6d2f10671b8cf", "tiktok", "account", "andrewmelnychukos"),
-            channel("6a3dbba45ab6d2f10671b9db", "youtube", "channel", "SAAGA Solve"),
-            channel("6a4a9bbf40483446287252ef", "twitter", "profile", "AndrewOsee59559"),
-            channel("69266cd829ea336fd631d03a", "twitter", "profile", "amelnychukoseen"),
-            channel("6a4959825ab6d2f106a52bb2", "bluesky", "profile", "saaga-dev.bsky.social"),
+            channel(
+                "6a3dbb555ab6d2f10671b8cf",
+                "tiktok",
+                "account",
+                "andrewmelnychukos",
+            ),
+            channel(
+                "6a3dbba45ab6d2f10671b9db",
+                "youtube",
+                "channel",
+                "SAAGA Solve",
+            ),
+            channel(
+                "6a4a9bbf40483446287252ef",
+                "twitter",
+                "profile",
+                "AndrewOsee59559",
+            ),
+            channel(
+                "69266cd829ea336fd631d03a",
+                "twitter",
+                "profile",
+                "amelnychukoseen",
+            ),
+            channel(
+                "6a4959825ab6d2f106a52bb2",
+                "bluesky",
+                "profile",
+                "saaga-dev.bsky.social",
+            ),
         ]
     }
 
@@ -225,7 +288,11 @@ mod tests {
     }
 
     fn vp(video_id: &str, platforms: &[&str]) -> VideoPosts {
-        let video_type = if video_id == "longform" { "horizontal" } else { "vertical" };
+        let video_type = if video_id == "longform" {
+            "horizontal"
+        } else {
+            "vertical"
+        };
         VideoPosts {
             video_id: video_id.into(),
             video_type: video_type.into(),
@@ -409,7 +476,10 @@ mod tests {
         );
         let skip = find(&plan, "youtube").skip.clone().expect("skipped");
         assert!(!skip.contains("YouTube tab"), "not an upload: {skip}");
-        assert!(skip.to_lowercase().contains("channel"), "names the channel: {skip}");
+        assert!(
+            skip.to_lowercase().contains("channel"),
+            "names the channel: {skip}"
+        );
     }
 
     #[test]
@@ -417,7 +487,10 @@ mod tests {
         let plan = plan_for(&manifest("chapter-01", &["tiktok"]), &links(&[]), &[]);
         let item = find(&plan, "tiktok");
         assert_eq!(item.url, "");
-        assert_eq!(item.skip.as_deref(), Some("no distributed url — run Distribute"));
+        assert_eq!(
+            item.skip.as_deref(),
+            Some("no distributed url — run Distribute")
+        );
         assert_eq!(plan.queueable().count(), 0);
     }
 
@@ -505,7 +578,11 @@ mod tests {
     #[test]
     fn disconnected_channel_skips_and_names_the_channel() {
         let mut channels = all_channels();
-        channels.iter_mut().find(|c| c.service == "tiktok").unwrap().is_disconnected = true;
+        channels
+            .iter_mut()
+            .find(|c| c.service == "tiktok")
+            .unwrap()
+            .is_disconnected = true;
         let plan = build_plan(
             &manifest("chapter-02", &["tiktok"]),
             &links(&["chapter-02"]),
@@ -568,11 +645,17 @@ mod tests {
             &links(&["longform"]),
             &[],
         );
-        let youtube = find(&plan, "youtube").metadata.as_ref().expect("youtube metadata");
+        let youtube = find(&plan, "youtube")
+            .metadata
+            .as_ref()
+            .expect("youtube metadata");
         assert_eq!(youtube["youtube"]["privacy"], "public");
         assert_eq!(youtube["youtube"]["notifySubscribers"], true);
         assert_eq!(youtube["youtube"]["title"], "A Title");
-        let instagram = find(&plan, "instagram").metadata.as_ref().expect("instagram metadata");
+        let instagram = find(&plan, "instagram")
+            .metadata
+            .as_ref()
+            .expect("instagram metadata");
         assert_eq!(instagram["instagram"]["type"], "reel");
         assert_eq!(instagram["instagram"]["shouldShareToFeed"], true);
         assert!(find(&plan, "twitter").metadata.is_none());
@@ -602,7 +685,11 @@ mod tests {
                 vp("longform", &["youtube"]),
             ],
         };
-        let plan = plan_for(&posts, &links(&["longform", "chapter-01", "chapter-02"]), &[]);
+        let plan = plan_for(
+            &posts,
+            &links(&["longform", "chapter-01", "chapter-02"]),
+            &[],
+        );
         let order: Vec<(&str, &str)> = plan
             .items
             .iter()
@@ -637,18 +724,28 @@ mod tests {
     #[test]
     fn og_artwork_is_an_image_post_and_a_new_image_changes_approval_identity() {
         let mut links = links_with_thumbnail();
-        links.items.push(DistributedAsset { id: "og-image".into(), kind: "image".into(), orientation: Some("landscape".into()), chapter: None, url: "https://cdn.example.com/og-1.jpg".into(), file: None });
+        links.items.push(DistributedAsset {
+            id: "og-image".into(),
+            kind: "image".into(),
+            orientation: Some("landscape".into()),
+            chapter: None,
+            url: "https://cdn.example.com/og-1.jpg".into(),
+            file: None,
+        });
         let posts = manifest("longform", &["facebook", "linkedin"]);
         let plan = plan_for(&posts, &links, &[]);
         let item = find(&plan, "facebook");
         assert!(item.image);
         assert_eq!(item.metadata.as_ref().unwrap()["facebook"]["type"], "post");
-        let body = super::super::buffer::create_post_variables(&super::super::send::post_input(item));
-        assert_eq!(body["input"]["assets"][0]["image"]["url"], "https://cdn.example.com/og-1.jpg");
+        let body =
+            super::super::buffer::create_post_variables(&super::super::send::post_input(item));
+        assert_eq!(
+            body["input"]["assets"][0]["image"]["url"],
+            "https://cdn.example.com/og-1.jpg"
+        );
         assert!(body["input"]["assets"][0].get("video").is_none());
         links.items.last_mut().unwrap().url = "https://cdn.example.com/og-2.jpg".into();
         let changed = plan_for(&posts, &links, &[]);
         assert_ne!(item.copy_hash, find(&changed, "facebook").copy_hash);
     }
-
 }

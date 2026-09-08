@@ -110,15 +110,21 @@ fn decode(audio: &Path) -> Result<Peaks> {
         .with_context(|| format!("running ffmpeg to decode {}", audio.display()))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        bail!("ffmpeg could not decode {}: {}", audio.display(), err.trim());
+        bail!(
+            "ffmpeg could not decode {}: {}",
+            audio.display(),
+            err.trim()
+        );
     }
     if out.stdout.is_empty() {
         bail!("{} decoded to no audio at all", audio.display());
     }
     let samples: Vec<i16> = out
         .stdout
-        .chunks_exact(2)
-        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_le_bytes(*pair))
         .collect();
     Ok(Peaks {
         hz: PEAKS_HZ,
@@ -204,7 +210,14 @@ mod tests {
             values: vec![0; 250],
         };
         assert!((peaks.seconds() - 2.5).abs() < f64::EPSILON);
-        assert_eq!(Peaks { hz: 0, values: vec![1] }.seconds(), 0.0);
+        assert_eq!(
+            Peaks {
+                hz: 0,
+                values: vec![1]
+            }
+            .seconds(),
+            0.0
+        );
     }
 
     #[test]
@@ -216,7 +229,11 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(
             &cache,
-            serde_json::to_string(&Peaks { hz: 100, values: vec![7, 8, 9] }).unwrap(),
+            serde_json::to_string(&Peaks {
+                hz: 100,
+                values: vec![7, 8, 9],
+            })
+            .unwrap(),
         )
         .unwrap();
         // Unparseable as audio, so reaching ffmpeg at all would fail: proof of reuse.
@@ -233,7 +250,11 @@ mod tests {
         let cache = dir.join(PEAKS_JSON);
         std::fs::write(
             &cache,
-            serde_json::to_string(&Peaks { hz: 100, values: Vec::new() }).unwrap(),
+            serde_json::to_string(&Peaks {
+                hz: 100,
+                values: Vec::new(),
+            })
+            .unwrap(),
         )
         .unwrap();
         assert!(cached(&cache).is_none());
@@ -265,10 +286,19 @@ mod tests {
         let audio = dir.join("tone.mp3");
         let status = Command::new("ffmpeg")
             .args([
-                "-v", "error", "-y", "-f", "lavfi", "-i",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
                 "sine=frequency=440:duration=1",
-                "-f", "lavfi", "-i", "anullsrc=duration=1:sample_rate=8000",
-                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=duration=1:sample_rate=8000",
+                "-filter_complex",
+                "[0:a][1:a]concat=n=2:v=0:a=1",
             ])
             .arg(&audio)
             .status()
@@ -287,10 +317,7 @@ mod tests {
         // this checks presence and evenness rather than a threshold near 255.)
         let loud = &peaks.values[10..80];
         assert!(loud.iter().all(|&v| v > 0), "the tone reads as sound");
-        let (lo, hi) = (
-            *loud.iter().min().unwrap(),
-            *loud.iter().max().unwrap(),
-        );
+        let (lo, hi) = (*loud.iter().min().unwrap(), *loud.iter().max().unwrap());
         assert!(hi - lo <= 2, "a steady tone draws level: {lo}..{hi}");
         // And the second half is silence.
         let quiet = &peaks.values[120..180];

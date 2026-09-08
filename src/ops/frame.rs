@@ -1,8 +1,8 @@
 //! The unit of work an op sees: one frame's pixels, its time, where it came
 //! from, and somewhere to write findings.
 
-use objc2_core_media::{CMClock, CMTime};
 use objc2_core_foundation::CFRetained;
+use objc2_core_media::{CMClock, CMTime};
 use objc2_core_video::{CVImageBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth};
 
 use super::sidecar::Sidecar;

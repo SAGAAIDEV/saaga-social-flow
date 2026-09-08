@@ -179,10 +179,7 @@ enum Poll {
 }
 
 fn parse_poll(value: &serde_json::Value) -> Result<Poll> {
-    let status = value
-        .get("status")
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
+    let status = value.get("status").and_then(|s| s.as_str()).unwrap_or("");
     match status {
         "queued" | "processing" => Ok(Poll::Pending),
         "completed" => Ok(Poll::Done(ChapterTranscript {
@@ -222,7 +219,10 @@ fn parse_words(value: Option<&serde_json::Value>) -> Vec<TranscriptWord> {
                 text: item.get("text")?.as_str()?.to_string(),
                 start: item.get("start")?.as_i64()?,
                 end: item.get("end")?.as_i64()?,
-                confidence: item.get("confidence").and_then(|c| c.as_f64()).unwrap_or(1.0),
+                confidence: item
+                    .get("confidence")
+                    .and_then(|c| c.as_f64())
+                    .unwrap_or(1.0),
             })
         })
         .collect()
@@ -242,8 +242,7 @@ fn already_completed(path: &Path) -> bool {
 
 fn write_transcript(path: &Path, transcript: &ChapterTranscript) -> Result<()> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let text = serde_json::to_string_pretty(transcript).context("serializing transcript")?;
     std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
@@ -313,7 +312,10 @@ pub fn spawn_chapter_transcript(audio: PathBuf) {
                 "stream-recorder: ASSEMBLYAI_API_KEY unset; not transcribing {}",
                 audio.display()
             );
-            let _ = write_transcript(&out, &ChapterTranscript::skipped("ASSEMBLYAI_API_KEY unset"));
+            let _ = write_transcript(
+                &out,
+                &ChapterTranscript::skipped("ASSEMBLYAI_API_KEY unset"),
+            );
             return;
         }
     };

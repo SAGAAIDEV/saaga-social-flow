@@ -184,7 +184,11 @@ mod tests {
             validation: validation.map(|ok| Validation {
                 ok,
                 checked_at: "now".into(),
-                detail: if ok { "12 post(s)".into() } else { "over limit".into() },
+                detail: if ok {
+                    "12 post(s)".into()
+                } else {
+                    "over limit".into()
+                },
             }),
         }
     }
@@ -221,20 +225,33 @@ mod tests {
 
     #[test]
     fn apply_is_only_offered_when_something_is_ticked_and_validated() {
-        let ready = build(Some(&report(vec![rewrite("posts.social", true, Some(true))])), &root());
+        let ready = build(
+            Some(&report(vec![rewrite("posts.social", true, Some(true))])),
+            &root(),
+        );
         assert!(ready.can_apply);
         assert_eq!(ready.applicable, 1);
 
-        let unproven = build(Some(&report(vec![rewrite("posts.social", true, None)])), &root());
+        let unproven = build(
+            Some(&report(vec![rewrite("posts.social", true, None)])),
+            &root(),
+        );
         assert!(!unproven.can_apply);
     }
 
     #[test]
     fn a_proposal_carries_its_diff_against_the_live_prompt() {
-        let pane = build(Some(&report(vec![rewrite("posts.social", false, None)])), &root());
+        let pane = build(
+            Some(&report(vec![rewrite("posts.social", false, None)])),
+            &root(),
+        );
         let proposal = &pane.report.unwrap().rewrites[0];
         assert_eq!(proposal.index, 0);
-        assert!(proposal.scale.contains("lines"), "sized: {}", proposal.scale);
+        assert!(
+            proposal.scale.contains("lines"),
+            "sized: {}",
+            proposal.scale
+        );
         assert!(proposal.version_note.contains("would become v1"));
         assert!(!proposal.diff.is_empty());
         // The builtin is long, so replacing it with one line is mostly deletions.
@@ -254,7 +271,10 @@ mod tests {
 
     #[test]
     fn an_unknown_prompt_cannot_be_applied_and_says_so() {
-        let pane = build(Some(&report(vec![rewrite("schedule.plan", true, Some(true))])), &root());
+        let pane = build(
+            Some(&report(vec![rewrite("schedule.plan", true, Some(true))])),
+            &root(),
+        );
         let proposal = &pane.report.unwrap().rewrites[0];
         assert_eq!(proposal.scale, "unknown prompt");
         assert_eq!(proposal.version_note, "cannot be applied");

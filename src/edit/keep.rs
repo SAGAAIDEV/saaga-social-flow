@@ -364,9 +364,15 @@ mod tests {
     fn overlaps_reports_a_word_that_is_partly_heard() {
         let list = list(&[[1000, 2000]]);
         assert!(list.overlaps(1200, 1400), "inside");
-        assert!(list.overlaps(900, 1100), "straddling the start is still heard");
+        assert!(
+            list.overlaps(900, 1100),
+            "straddling the start is still heard"
+        );
         assert!(list.overlaps(1900, 2100), "straddling the end too");
-        assert!(!list.overlaps(2000, 2500), "touching the end is not overlapping");
+        assert!(
+            !list.overlaps(2000, 2500),
+            "touching the end is not overlapping"
+        );
         assert!(!list.overlaps(0, 1000), "nor is touching the start");
     }
 
@@ -386,7 +392,11 @@ mod tests {
 
     #[test]
     fn an_auto_list_is_built_from_computed_edits() {
-        let words = [word("hello", 200, 400), word("um", 600, 700), word("world", 1200, 1500)];
+        let words = [
+            word("hello", 200, 400),
+            word("um", 600, 700),
+            word("world", 1200, 1500),
+        ];
         let edits = super::super::compute::compute_edits(&words, 100, 100);
         let list = KeepList::auto(1, 10_000, &edits);
         assert_eq!(list.spans.len(), edits.len());
@@ -423,10 +433,8 @@ mod tests {
 
     #[test]
     fn save_load_round_trips_and_clear_removes() {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-keep-{}-round",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-keep-{}-round", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let list = list(&[[0, 1000], [2000, 3000]]);
         let path = save(&dir, &list).unwrap();
@@ -443,10 +451,8 @@ mod tests {
 
     #[test]
     fn an_empty_keep_list_is_refused_rather_than_saved() {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-keep-{}-empty",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-keep-{}-empty", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let empty = KeepList::hand(3, 5000, Vec::new());
         let err = save(&dir, &empty).unwrap_err().to_string();
@@ -458,10 +464,8 @@ mod tests {
     /// A corrupt file must degrade to the automatic cut, not block the chapter.
     #[test]
     fn an_unparseable_keep_file_is_ignored() {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-keep-{}-bad",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-keep-{}-bad", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(path_in(&dir), "{ not json").unwrap();

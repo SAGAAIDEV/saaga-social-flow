@@ -69,8 +69,7 @@ fn step_id(prompt_id: &str) -> String {
 }
 
 pub fn write_step(beside: &Path, root: &Path, step: &LlmStep) -> Result<()> {
-    std::fs::create_dir_all(beside)
-        .with_context(|| format!("creating {}", beside.display()))?;
+    std::fs::create_dir_all(beside).with_context(|| format!("creating {}", beside.display()))?;
     let path = beside.join(STEP_JSON);
     std::fs::write(
         &path,
@@ -120,8 +119,8 @@ pub fn load_ledger(root: &Path) -> Result<Vec<LlmStep>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
         let line = line.trim();

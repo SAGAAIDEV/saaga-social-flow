@@ -1,20 +1,36 @@
 //! One complete, immutable artwork set, activated only after every render succeeds.
-use std::path::{Path, PathBuf};
+use super::Card;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use super::Card;
+use std::path::{Path, PathBuf};
 
 pub const MANIFEST: &str = "thumbnails/artwork.json";
 /// Where a set's own renders live, one directory per set id.
 const SETS_DIR: &str = "thumbnails/sets";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Kind { Horizontal, Vertical, Og }
+pub enum Kind {
+    Horizontal,
+    Vertical,
+    Og,
+}
 impl Kind {
     pub const ALL: [Self; 3] = [Self::Horizontal, Self::Vertical, Self::Og];
-    pub fn name(self) -> &'static str { match self { Self::Horizontal => "horizontal", Self::Vertical => "vertical", Self::Og => "og" } }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+            Self::Og => "og",
+        }
+    }
     /// The one place each destination's size is written down on this side.
-    pub fn size(self) -> (u32,u32) { match self { Self::Horizontal => (1280,720), Self::Vertical => (720,1280), Self::Og => (1200,630) } }
+    pub fn size(self) -> (u32, u32) {
+        match self {
+            Self::Horizontal => (1280, 720),
+            Self::Vertical => (720, 1280),
+            Self::Og => (1200, 630),
+        }
+    }
     /// The artboard it composes on. The OG image is the horizontal card at
     /// another resolution rather than a second design, so it has none of its own.
     pub fn format(self) -> crate::thumbnail::format::Format {
@@ -46,28 +62,47 @@ impl Set {
         let dir = parent.join(&self.id);
         std::fs::create_dir_all(&dir)?;
         for kind in Kind::ALL {
-            std::fs::copy(self.path(root, kind)?, dir.join(format!("{}.jpg", kind.name())))?;
+            std::fs::copy(
+                self.path(root, kind)?,
+                dir.join(format!("{}.jpg", kind.name())),
+            )?;
         }
         Ok(dir)
     }
     pub fn path(&self, root: &Path, kind: Kind) -> Result<PathBuf> {
-        let asset = self.assets.iter().find(|asset| asset.kind == kind).context("artwork format is missing")?;
+        let asset = self
+            .assets
+            .iter()
+            .find(|asset| asset.kind == kind)
+            .context("artwork format is missing")?;
         // The dimensions were measured off the file by `accept`, so this catches
         // a manifest edited by hand rather than a render that came out wrong.
-        if (asset.width, asset.height) != kind.size() { bail!("incorrect artwork dimensions"); }
+        if (asset.width, asset.height) != kind.size() {
+            bail!("incorrect artwork dimensions");
+        }
         let relative = Path::new(&asset.file);
-        if relative.is_absolute() || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
             bail!("invalid artwork path");
         }
         let path = root.join(relative);
         let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-        if crate::agent::prompt::hash_of_bytes(&bytes) != asset.hash { bail!("artwork was changed — generate the set again"); }
+        if crate::agent::prompt::hash_of_bytes(&bytes) != asset.hash {
+            bail!("artwork was changed — generate the set again");
+        }
         Ok(path)
     }
 }
 pub fn load(root: &Path) -> Result<Set> {
-    let set: Set = serde_json::from_str(&std::fs::read_to_string(root.join(MANIFEST)).context("no artwork set drawn yet")?)?;
-    for kind in Kind::ALL { set.path(root, kind)?; }
+    let set: Set = serde_json::from_str(
+        &std::fs::read_to_string(root.join(MANIFEST)).context("no artwork set drawn yet")?,
+    )?;
+    for kind in Kind::ALL {
+        set.path(root, kind)?;
+    }
     Ok(set)
 }
 /// Whether an already-loaded set still matches what it was drawn from.
@@ -91,7 +126,9 @@ pub fn ready(root: &Path) -> Result<Set> {
     current(root, &set)?;
     Ok(set)
 }
-pub fn selected(root: &Path, kind: Kind) -> Result<PathBuf> { ready(root)?.path(root, kind) }
+pub fn selected(root: &Path, kind: Kind) -> Result<PathBuf> {
+    ready(root)?.path(root, kind)
+}
 
 pub struct Job {
     pub root: PathBuf,
@@ -103,26 +140,56 @@ pub struct Job {
 impl Job {
     pub fn new(root: &Path, card: Card) -> Result<Self> {
         super::ready(root, &card)?;
-        let photo = super::photo(root).context("Capture your photo first, then generate the artwork set")?;
+        let photo = super::photo(root)
+            .context("Capture your photo first, then generate the artwork set")?;
         let bytes = std::fs::read(&photo)?;
         let source_hash = crate::agent::prompt::hash_of_bytes(&bytes);
         let card_hash = crate::agent::prompt::hash_of(&card.fingerprint());
-        let id = crate::agent::prompt::hash_of(&format!("artwork-v1\n{card_hash}\n{source_hash}\n{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()));
+        let id = crate::agent::prompt::hash_of(&format!(
+            "artwork-v1\n{card_hash}\n{source_hash}\n{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
         let dir = root.join(SETS_DIR).join(&id);
         std::fs::create_dir_all(&dir)?;
         // Freeze the source so recapturing mid-job cannot mix different portraits.
         let photo = dir.join("source.jpg");
         std::fs::write(&photo, bytes)?;
-        Ok(Self { root: root.to_owned(), photo, set: Set { id, title: card.title.clone(), source_hash, card_hash, assets: vec![] }, card, next: 0 })
+        Ok(Self {
+            root: root.to_owned(),
+            photo,
+            set: Set {
+                id,
+                title: card.title.clone(),
+                source_hash,
+                card_hash,
+                assets: vec![],
+            },
+            card,
+            next: 0,
+        })
     }
-    pub fn kind(&self) -> Kind { Kind::ALL[self.next] }
-    pub fn page(&self) -> PathBuf { self.root.join(SETS_DIR).join(&self.set.id).join("card.html") }
+    pub fn kind(&self) -> Kind {
+        Kind::ALL[self.next]
+    }
+    pub fn page(&self) -> PathBuf {
+        self.root
+            .join(SETS_DIR)
+            .join(&self.set.id)
+            .join("card.html")
+    }
     /// The design this kind is drawn from: the saved one, on its own artboard.
     pub fn design(&self) -> Card {
-        Card { format: self.kind().format(), ..self.card.clone() }
+        Card {
+            format: self.kind().format(),
+            ..self.card.clone()
+        }
     }
     pub fn accept(&mut self, jpeg: &[u8]) -> Result<bool> {
-        if jpeg.is_empty() { bail!("renderer returned an empty image"); }
+        if jpeg.is_empty() {
+            bail!("renderer returned an empty image");
+        }
         let kind = self.kind();
         // Measured off the file rather than restated from the request. Recording
         // `kind.size()` unread would make the manifest's dimensions a copy of
@@ -131,17 +198,31 @@ impl Job {
             .context("renderer returned an image with no readable JPEG dimensions")?;
         if (width, height) != kind.size() {
             let (want_w, want_h) = kind.size();
-            bail!("the {} artwork drew at {width}x{height}, not {want_w}x{want_h}", kind.name());
+            bail!(
+                "the {} artwork drew at {width}x{height}, not {want_w}x{want_h}",
+                kind.name()
+            );
         }
         let file = format!("{SETS_DIR}/{}/{}.jpg", self.set.id, kind.name());
         std::fs::write(self.root.join(&file), jpeg)?;
-        self.set.assets.push(Asset { kind, file, width, height, hash: crate::agent::prompt::hash_of_bytes(jpeg) });
+        self.set.assets.push(Asset {
+            kind,
+            file,
+            width,
+            height,
+            hash: crate::agent::prompt::hash_of_bytes(jpeg),
+        });
         self.next += 1;
         Ok(self.next == Kind::ALL.len())
     }
     pub fn commit(&self) -> Result<()> {
-        for kind in Kind::ALL { self.set.path(&self.root, kind)?; }
-        let tmp = self.root.join("thumbnails").join(format!("artwork-{}.tmp", self.set.id));
+        for kind in Kind::ALL {
+            self.set.path(&self.root, kind)?;
+        }
+        let tmp = self
+            .root
+            .join("thumbnails")
+            .join(format!("artwork-{}.tmp", self.set.id));
         std::fs::write(&tmp, serde_json::to_vec_pretty(&self.set)?)?;
         std::fs::rename(tmp, self.root.join(MANIFEST)).context("activating artwork set")?;
         self.prune();
@@ -155,11 +236,18 @@ impl Job {
     /// delete must not fail a commit that has already succeeded, and nothing is
     /// removed until it is no longer the set anything reads.
     fn prune(&self) {
-        let Ok(entries) = std::fs::read_dir(self.root.join(SETS_DIR)) else { return };
+        let Ok(entries) = std::fs::read_dir(self.root.join(SETS_DIR)) else {
+            return;
+        };
         for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy() == self.set.id { continue; }
+            if entry.file_name().to_string_lossy() == self.set.id {
+                continue;
+            }
             if let Err(err) = std::fs::remove_dir_all(entry.path()) {
-                eprintln!("stream-recorder: could not remove {}: {err}", entry.path().display());
+                eprintln!(
+                    "stream-recorder: could not remove {}: {err}",
+                    entry.path().display()
+                );
             }
         }
     }
@@ -169,17 +257,40 @@ impl Job {
 fn fixture_jpeg(kind: Kind) -> Vec<u8> {
     // Frame header only: these tests exercise persistence, not image decoding.
     let (w, h) = kind.size();
-    vec![0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, (h >> 8) as u8, h as u8, (w >> 8) as u8, w as u8, 1, 1, 0x11, 0, 0xff, 0xd9]
+    vec![
+        0xff,
+        0xd8,
+        0xff,
+        0xc0,
+        0,
+        11,
+        8,
+        (h >> 8) as u8,
+        h as u8,
+        (w >> 8) as u8,
+        w as u8,
+        1,
+        1,
+        0x11,
+        0,
+        0xff,
+        0xd9,
+    ]
 }
 
 #[cfg(test)]
 pub(crate) fn fixture(root: &Path) -> Set {
     std::fs::create_dir_all(root).unwrap();
     crate::thumbnail::still::write_bytes(root, b"photo fixture").unwrap();
-    let design = Card { title: "A title".into(), ..Card::default() };
+    let design = Card {
+        title: "A title".into(),
+        ..Card::default()
+    };
     super::save(root, &design).unwrap();
     let mut job = Job::new(root, design).unwrap();
-    for kind in Kind::ALL { job.accept(&fixture_jpeg(kind)).unwrap(); }
+    for kind in Kind::ALL {
+        job.accept(&fixture_jpeg(kind)).unwrap();
+    }
     job.commit().unwrap();
     job.set
 }
@@ -191,7 +302,14 @@ mod tests {
     fn incomplete_or_tampered_artwork_cannot_replace_the_previous_set() {
         let root = std::env::temp_dir().join(format!("artwork-atomic-{}", std::process::id()));
         let prior = fixture(&root);
-        let mut job = Job::new(&root, Card { title: "Replacement".into(), ..Card::default() }).unwrap();
+        let mut job = Job::new(
+            &root,
+            Card {
+                title: "Replacement".into(),
+                ..Card::default()
+            },
+        )
+        .unwrap();
         assert!(job.accept(b"not an image").is_err());
         assert_eq!(job.next, 0);
         job.accept(&fixture_jpeg(Kind::Horizontal)).unwrap();
@@ -210,12 +328,19 @@ mod tests {
     }
     #[test]
     fn destination_sizes_are_distinct_and_the_source_is_frozen() {
-        assert_eq!(Kind::Horizontal.size(), (1280,720));
-        assert_eq!(Kind::Vertical.size(), (720,1280));
-        assert_eq!(Kind::Og.size(), (1200,630));
+        assert_eq!(Kind::Horizontal.size(), (1280, 720));
+        assert_eq!(Kind::Vertical.size(), (720, 1280));
+        assert_eq!(Kind::Og.size(), (1200, 630));
         let root = std::env::temp_dir().join(format!("artwork-source-{}", std::process::id()));
         let source = crate::thumbnail::still::write_bytes(&root, b"original").unwrap();
-        let job = Job::new(&root, Card { title: "Title".into(), ..Card::default() }).unwrap();
+        let job = Job::new(
+            &root,
+            Card {
+                title: "Title".into(),
+                ..Card::default()
+            },
+        )
+        .unwrap();
         std::fs::write(source, b"recaptured").unwrap();
         assert_eq!(std::fs::read(job.photo).unwrap(), b"original");
         std::fs::remove_dir_all(root).unwrap();
@@ -234,7 +359,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         crate::thumbnail::still::write_bytes(&root, b"photo").unwrap();
         // A portrait project: the picker must not reach the OG image.
-        let card = Card { title: "Title".into(), format: Format::Vertical, ..Card::default() };
+        let card = Card {
+            title: "Title".into(),
+            format: Format::Vertical,
+            ..Card::default()
+        };
         super::super::save(&root, &card).unwrap();
         let mut job = Job::new(&root, card).unwrap();
         for kind in Kind::ALL {
@@ -244,8 +373,18 @@ mod tests {
         job.commit().unwrap();
         // And the picker is not part of the set's identity, so flipping it back
         // must not retire artwork that is still exactly right.
-        super::super::save(&root, &Card { title: "Title".into(), ..Card::default() }).unwrap();
-        assert!(ready(&root).is_ok(), "the format picker retired a valid set");
+        super::super::save(
+            &root,
+            &Card {
+                title: "Title".into(),
+                ..Card::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            ready(&root).is_ok(),
+            "the format picker retired a valid set"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -257,22 +396,39 @@ mod tests {
         let first = fixture(&root);
         let snapshot = first.snapshot(&root, &root.join("upload-artwork")).unwrap();
         // Abandoned halfway: a failed run leaves a directory behind too.
-        let mut abandoned = Job::new(&root, Card { title: "Abandoned".into(), ..Card::default() }).unwrap();
+        let mut abandoned = Job::new(
+            &root,
+            Card {
+                title: "Abandoned".into(),
+                ..Card::default()
+            },
+        )
+        .unwrap();
         abandoned.accept(&fixture_jpeg(Kind::Horizontal)).unwrap();
 
-        let design = Card { title: "Second".into(), ..Card::default() };
+        let design = Card {
+            title: "Second".into(),
+            ..Card::default()
+        };
         super::super::save(&root, &design).unwrap();
         let mut job = Job::new(&root, design).unwrap();
-        for kind in Kind::ALL { job.accept(&fixture_jpeg(kind)).unwrap(); }
+        for kind in Kind::ALL {
+            job.accept(&fixture_jpeg(kind)).unwrap();
+        }
         assert_eq!(std::fs::read_dir(root.join(SETS_DIR)).unwrap().count(), 3);
         job.commit().unwrap();
 
-        let left: Vec<String> = std::fs::read_dir(root.join(SETS_DIR)).unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let left: Vec<String> = std::fs::read_dir(root.join(SETS_DIR))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         assert_eq!(left, vec![job.set.id.clone()]);
         assert!(!root.join(SETS_DIR).join(&first.id).exists());
         for kind in Kind::ALL {
-            assert_eq!(std::fs::read(snapshot.join(format!("{}.jpg", kind.name()))).unwrap(), fixture_jpeg(kind));
+            assert_eq!(
+                std::fs::read(snapshot.join(format!("{}.jpg", kind.name()))).unwrap(),
+                fixture_jpeg(kind)
+            );
         }
         assert!(ready(&root).is_ok(), "the live set survived the sweep");
         std::fs::remove_dir_all(root).unwrap();

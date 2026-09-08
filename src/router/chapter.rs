@@ -59,7 +59,6 @@ pub struct ScreenTrack {
     pub height: usize,
 }
 
-
 impl Router {
     /// Build both of a chapter's writers, anchored to one shared instant.
     ///
@@ -89,12 +88,8 @@ impl Router {
         let mut composed = Vec::new();
         for spec in graphs::preview_sinks(self.pair) {
             let path = spec.path_in(&self.session_dir, chapter);
-            let writer = create_composed_writer(
-                spec,
-                Some(&self.audio_settings),
-                &path,
-            )
-            .with_context(|| format!("creating composed writer for chapter {chapter}"))?;
+            let writer = create_composed_writer(spec, Some(&self.audio_settings), &path)
+                .with_context(|| format!("creating composed writer for chapter {chapter}"))?;
             composed.push(writer);
         }
 
@@ -152,7 +147,10 @@ impl Router {
                 pool: None,
             })
             .with_context(|| {
-                format!("opening the {} graph for chapter {chapter}", stream.as_str())
+                format!(
+                    "opening the {} graph for chapter {chapter}",
+                    stream.as_str()
+                )
             })?;
         Ok(graph)
     }
@@ -226,9 +224,8 @@ impl Router {
 
         for sink in &av.composed {
             let path = sink.spec.path_in(&self.session_dir, chapter_num);
-            transcode::fix_mp4_metadata(&path).with_context(|| {
-                format!("fixing {} mp4 metadata", sink.spec.name())
-            })?;
+            transcode::fix_mp4_metadata(&path)
+                .with_context(|| format!("fixing {} mp4 metadata", sink.spec.name()))?;
         }
 
         // Extract audio and transcode.
@@ -240,13 +237,13 @@ impl Router {
 
         if let Some(screen) = &mut screen {
             let screen_path = self.screen_chapter_path(chapter_num);
-            transcode::fix_mp4_metadata(&screen_path)
-                .context("fixing screen mp4 metadata")?;
+            transcode::fix_mp4_metadata(&screen_path).context("fixing screen mp4 metadata")?;
             close_graph(&mut screen.graph, &screen_path);
         }
 
         // Log the chapter close event.
-        self.marker_log.log_chapter_closed(chapter_num, &chapter_path)?;
+        self.marker_log
+            .log_chapter_closed(chapter_num, &chapter_path)?;
 
         Ok(())
     }

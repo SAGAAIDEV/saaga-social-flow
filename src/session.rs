@@ -261,7 +261,7 @@ impl VersionInfo {
 
 fn list_versions(root: &std::path::Path) -> Vec<VersionInfo> {
     let mut nums = std::collections::BTreeSet::new();
-        for stage in ["drafts", "edit", "render", "posts", "titles", "distribute"] {
+    for stage in ["drafts", "edit", "render", "posts", "titles", "distribute"] {
         let Some(entries) = std::fs::read_dir(root.join(stage)).ok() else {
             continue;
         };
@@ -352,7 +352,9 @@ fn session_dir() -> Result<PathBuf> {
     // Note: this uses UTC internally; a full solution would use the local timezone,
     // but that would require an external crate. This is sufficient for timestamping.
     let now = SystemTime::now();
-    let duration = now.duration_since(UNIX_EPOCH).context("system clock before 1970")?;
+    let duration = now
+        .duration_since(UNIX_EPOCH)
+        .context("system clock before 1970")?;
     let total_secs = duration.as_secs();
     let secs_per_day = 86400;
     let days_since_epoch = total_secs / secs_per_day;
@@ -363,7 +365,10 @@ fn session_dir() -> Result<PathBuf> {
     let (year, month, day) = days_to_ymd(days_since_epoch);
     let (hour, min, sec) = secs_to_hms(secs_today);
 
-    let id = format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", year, month, day, hour, min, sec);
+    let id = format!(
+        "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
+        year, month, day, hour, min, sec
+    );
     let dir = PathBuf::from(home)
         .join(".stream-recorder")
         .join("sessions")
@@ -384,7 +389,20 @@ fn days_to_ymd(mut days: u64) -> (u32, u32, u32) {
         days -= days_in_year as u64;
         year += 1;
     }
-    let days_in_month = [31, if is_leap_year(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let days_in_month = [
+        31,
+        if is_leap_year(year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1;
     for &dim in &days_in_month {
         if days < dim as u64 {
@@ -397,7 +415,7 @@ fn days_to_ymd(mut days: u64) -> (u32, u32, u32) {
 }
 
 fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 fn secs_to_hms(secs: u64) -> (u32, u32, u32) {
@@ -422,12 +440,18 @@ mod tests {
         assert_eq!(session.compose_dir(), PathBuf::from("/tmp/rec/compose/v3"));
         assert_eq!(session.render_dir(), PathBuf::from("/tmp/rec/render/v3"));
         assert_eq!(session.posts_dir(), PathBuf::from("/tmp/rec/posts/v3"));
-        assert_eq!(session.substack_dir(), PathBuf::from("/tmp/rec/substack/v3"));
+        assert_eq!(
+            session.substack_dir(),
+            PathBuf::from("/tmp/rec/substack/v3")
+        );
         assert_eq!(
             session.distribute_dir(),
             PathBuf::from("/tmp/rec/distribute/v3")
         );
-        assert_eq!(session.schedule_dir(), PathBuf::from("/tmp/rec/schedule/v3"));
+        assert_eq!(
+            session.schedule_dir(),
+            PathBuf::from("/tmp/rec/schedule/v3")
+        );
         assert_eq!(session.version, Some(3));
     }
 
@@ -467,10 +491,8 @@ mod tests {
     /// found nothing, while all of it sat under `{stage}/v1`.
     #[test]
     fn reopening_a_bumped_project_lands_back_on_its_version() {
-        let root = std::env::temp_dir().join(format!(
-            "stream-recorder-resume-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-resume-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("drafts/v1")).unwrap();
         std::fs::write(root.join("drafts/v1/chapter-01.mp4"), b"x").unwrap();
@@ -509,10 +531,8 @@ mod tests {
     /// in the version picker like every other take.
     #[test]
     fn a_new_project_starts_at_v1() {
-        let root = std::env::temp_dir().join(format!(
-            "stream-recorder-resume-new-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-resume-new-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("drafts/v1")).unwrap();
         let session = Session::open_root(root.clone()).unwrap();
@@ -552,10 +572,8 @@ mod tests {
 
     #[test]
     fn list_versions_reads_stage_folders() {
-        let root = std::env::temp_dir().join(format!(
-            "stream-recorder-versions-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-versions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("drafts/v1")).unwrap();
         std::fs::write(root.join("drafts/v1/chapter-01.mp4"), b"x").unwrap();

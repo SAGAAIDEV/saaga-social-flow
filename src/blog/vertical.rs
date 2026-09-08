@@ -1,12 +1,20 @@
 //! Optional portrait video; its designed poster is supplied by the artwork set.
-use anyhow::{Context, Result};
 use super::{payload, strapi};
 use crate::session::Session;
-pub(super) fn upload(client: &strapi::Strapi, session: &Session, status: impl Fn(String)) -> Result<Option<payload::VerticalCut>> {
+use anyhow::{Context, Result};
+pub(super) fn upload(
+    client: &strapi::Strapi,
+    session: &Session,
+    status: impl Fn(String),
+) -> Result<Option<payload::VerticalCut>> {
     let video = session.render_dir().join("vertical/longform.mp4");
-    if !video.is_file() { return Ok(None); }
+    if !video.is_file() {
+        return Ok(None);
+    }
     status("Uploading the vertical cut…".into());
-    let uploaded = client.upload_video(&video).with_context(|| format!("uploading {}", video.display()))?;
+    let uploaded = client
+        .upload_video(&video)
+        .with_context(|| format!("uploading {}", video.display()))?;
     Ok(Some(payload::VerticalCut { url: uploaded.url }))
 }
 
@@ -22,7 +30,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("blog-vertical-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let session = Session { root: root.clone(), dir: root.join("drafts"), version: None };
+        let session = Session {
+            root: root.clone(),
+            dir: root.join("drafts"),
+            version: None,
+        };
         // Reaching the network at all is the failure here: a horizontal-only
         // project is a normal project, not a degraded one.
         let got = upload(&strapi::Strapi::for_test(), &session, |_| {}).unwrap();

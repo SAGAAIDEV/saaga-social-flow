@@ -204,8 +204,14 @@ mod tests {
         let pane = build(&dir, &dir, true, None);
         assert_eq!(pane.blocked, None);
         assert_eq!(pane.sections.len(), 1);
-        assert_eq!(pane.sections[0].index, 1, "numbered for the reader, not from zero");
-        assert_eq!(pane.sections[0].marker.as_deref(), Some("chapter 2 · 04:12"));
+        assert_eq!(
+            pane.sections[0].index, 1,
+            "numbered for the reader, not from zero"
+        );
+        assert_eq!(
+            pane.sections[0].marker.as_deref(),
+            Some("chapter 2 · 04:12")
+        );
         assert_eq!(pane.quotes[0].marker.as_deref(), Some("chapter 2"));
         assert_eq!(
             pane.summary.as_deref(),

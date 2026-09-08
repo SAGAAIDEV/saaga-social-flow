@@ -110,12 +110,7 @@ impl Tap {
 
     /// Publish a finished capture buffer. Used by the screen delegate so a
     /// preview composite can read the screen without a chapter graph.
-    pub fn publish_buffer(
-        &self,
-        pixels: CFRetained<CVImageBuffer>,
-        pts: CMTime,
-        stream: StreamId,
-    ) {
+    pub fn publish_buffer(&self, pixels: CFRetained<CVImageBuffer>, pts: CMTime, stream: StreamId) {
         let mut latest = self.latest.lock().unwrap_or_else(|e| e.into_inner());
         *latest = Some(TapFrame {
             pixels: SharedPixels::from_retained(pixels),

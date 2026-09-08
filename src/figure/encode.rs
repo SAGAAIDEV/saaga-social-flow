@@ -146,7 +146,13 @@ mod tests {
     /// were under it. The one thing every figure shares is the format.
     #[test]
     fn a_figure_keeps_the_size_and_shape_it_was_dragged_at() {
-        for (w, h) in [(800, 600), (640, 500), (1000, 400), (300, 900), (2400, 1350)] {
+        for (w, h) in [
+            (800, 600),
+            (640, 500),
+            (1000, 400),
+            (300, 900),
+            (2400, 1350),
+        ] {
             let bytes = encode_rgb(gradient(w, h)).expect("encodes");
             assert_eq!(&bytes[0..4], b"RIFF", "{w}x{h} is not a RIFF container");
             assert_eq!(&bytes[8..12], b"WEBP", "{w}x{h} is not WebP");
@@ -253,7 +259,10 @@ mod tests {
         let top_left = back.get_pixel(w / 4, h / 4);
         let bottom_right = back.get_pixel(w * 3 / 4, h * 3 / 4);
         let top_right = back.get_pixel(w * 3 / 4, h / 4);
-        assert!(top_left[0] > 200 && top_left[2] < 50, "top-left is {top_left:?}, expected red");
+        assert!(
+            top_left[0] > 200 && top_left[2] < 50,
+            "top-left is {top_left:?}, expected red"
+        );
         assert!(
             bottom_right[2] > 200 && bottom_right[0] < 50,
             "bottom-right is {bottom_right:?}, expected blue"

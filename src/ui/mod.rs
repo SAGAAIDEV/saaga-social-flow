@@ -13,15 +13,15 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use anyhow::{anyhow, Result};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
-use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{
+    define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
+};
 use objc2_app_kit::{
-    NSAlert, NSAutoresizingMaskOptions, NSBorderType, NSBox, NSButton, NSButtonType,
-    NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
-    NSFont, NSFontWeight, NSLevelIndicator,
-    NSLevelIndicatorStyle, NSPopUpButton, NSProgressIndicator,
-    NSProgressIndicatorStyle, NSScrollView,
-    NSSplitView, NSSplitViewDividerStyle, NSTabView, NSTabViewItem, NSTabViewType,
-    NSTextField, NSTextView, NSTitlePosition, NSView,
+    NSAlert, NSAutoresizingMaskOptions, NSBorderType, NSBox, NSButton, NSButtonType, NSColor,
+    NSControlSize, NSControlStateValueOff, NSControlStateValueOn, NSFont, NSFontWeight,
+    NSLevelIndicator, NSLevelIndicatorStyle, NSPopUpButton, NSProgressIndicator,
+    NSProgressIndicatorStyle, NSScrollView, NSSplitView, NSSplitViewDividerStyle, NSTabView,
+    NSTabViewItem, NSTabViewType, NSTextField, NSTextView, NSTitlePosition, NSView,
 };
 use objc2_foundation::{NSObject, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -106,8 +106,8 @@ pub fn copy_to_pasteboard(text: &str) -> bool {
 
 mod preview;
 pub mod render;
-mod workflow;
 pub mod web;
+mod workflow;
 pub use preview::PreviewHost;
 pub use web::WebPane;
 
@@ -139,7 +139,10 @@ pub enum UiEvent {
     ProjectSelected(usize),
     ValidateRewrite(usize),
     /// A checkbox in an HTML pane moved, carrying its new value.
-    WebApprove { index: usize, value: bool },
+    WebApprove {
+        index: usize,
+        value: bool,
+    },
     SaveBrief(std::collections::BTreeMap<String, String>),
     /// The Settings form, carrying only the boxes that were filled in.
     SaveSettings(std::collections::BTreeMap<String, String>),
@@ -154,7 +157,10 @@ pub enum UiEvent {
     /// let a brief's stage directions land on the drawn thumbnail.
     SaveCard(std::collections::BTreeMap<String, String>),
     SaveYoutube(std::collections::BTreeMap<String, String>),
-    SaveVideoBrief { fields: std::collections::BTreeMap<String, String>, apply: bool },
+    SaveVideoBrief {
+        fields: std::collections::BTreeMap<String, String>,
+        apply: bool,
+    },
     GenerateVideoCopy(std::collections::BTreeMap<String, String>),
     GenerateArtwork(std::collections::BTreeMap<String, String>),
     ImportPortrait(String),
@@ -163,8 +169,14 @@ pub enum UiEvent {
     /// A Strapi relation id, or empty for none.
     BlogAuthorSelected(String),
     BlogCategorySelected(String),
-    ToggleReference { name: String, value: bool },
-    AddReference { name: String, data: String },
+    ToggleReference {
+        name: String,
+        value: bool,
+    },
+    AddReference {
+        name: String,
+        data: String,
+    },
     RemoveReference(String),
     ProjectNameChanged(String),
     /// Words a pane asked to be put on the system pasteboard.
@@ -172,7 +184,10 @@ pub enum UiEvent {
     /// Which chapter the Edit tab is showing.
     OpenChapter(u32),
     /// A hand-edited keep-list, in `[start_ms, end_ms]` pairs.
-    SaveEdit { chapter: u32, spans: Vec<[i64; 2]> },
+    SaveEdit {
+        chapter: u32,
+        spans: Vec<[i64; 2]>,
+    },
     ApplyEdit(u32),
     ResetEdit(u32),
     ToggleRegions,
@@ -768,8 +783,8 @@ impl ControlTarget {
         alert.addButtonWithTitle(&NSString::from_str("Delete the whole Buffer queue"));
         match alert.runModal() {
             // NSAlertFirstButtonReturn is 1000, and they count up from there.
-            n if n == 1001 => Some(ClearChoice::Project),
-            n if n == 1002 => Some(ClearChoice::Everything),
+            1001 => Some(ClearChoice::Project),
+            1002 => Some(ClearChoice::Everything),
             _ => None,
         }
     }
@@ -845,12 +860,7 @@ impl ControlTarget {
     /// `pending` names a layout picked mid-take that the next chapter will start
     /// in. It rides here rather than in its own field because this method owns
     /// the status line, and two writers would just overwrite each other.
-    pub fn set_recording(
-        &self,
-        chapter: Option<u32>,
-        version: Option<u32>,
-        pending: Option<&str>,
-    ) {
+    pub fn set_recording(&self, chapter: Option<u32>, version: Option<u32>, pending: Option<&str>) {
         if MainThreadMarker::new().is_none() {
             return;
         }
@@ -1073,8 +1083,6 @@ impl ControlTarget {
         }
     }
 
-
-
     // Schedule tab updates
     /// Puts the due count on the tab itself, so work waiting in a project you are
     /// not looking at is visible without opening anything.
@@ -1267,33 +1275,30 @@ impl Layout {
 
 fn fill_parent(view: &NSView) {
     view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewHeightSizable,
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
 }
 
 fn pin_top(view: &NSView) {
     view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewMinYMargin,
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewMinYMargin,
     );
 }
 
 fn fill_below(view: &NSView) {
     view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewHeightSizable,
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
 }
 
 /// Anchored to the bottom at a fixed height; the space above it takes the growth.
 fn pin_bottom(view: &NSView) {
     view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewMaxYMargin,
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewMaxYMargin,
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn layout_left(
     width: f64,
     height: f64,
@@ -1340,7 +1345,14 @@ fn layout_left(
     y -= SECTION_GAP;
     let n = groups.len().max(1);
     let group_w = ((content_w - BUTTON_GAP * (n - 1) as f64) / n as f64).max(80.0);
-    let group_h = groups.iter().map(|(_, buttons)| buttons.len() as f64 * BUTTON_H + buttons.len().saturating_sub(1) as f64 * BUTTON_GAP + 32.0).fold(GROUP_H, f64::max);
+    let group_h = groups
+        .iter()
+        .map(|(_, buttons)| {
+            buttons.len() as f64 * BUTTON_H
+                + buttons.len().saturating_sub(1) as f64 * BUTTON_GAP
+                + 32.0
+        })
+        .fold(GROUP_H, f64::max);
     let stack_bottom = (y - SECTION_GAP - group_h).max(PAD + 110.0);
     for (i, (frame, buttons)) in groups.iter().enumerate() {
         let x = PAD + i as f64 * (group_w + BUTTON_GAP);
@@ -1523,6 +1535,7 @@ pub fn settings_page(note: Option<&str>) -> String {
 }
 
 /// Build the record window's controls and tabs.
+#[allow(clippy::too_many_arguments)]
 pub fn attach_controls(
     window: &Window,
     cameras: &[CaptureDevice],
@@ -1608,8 +1621,13 @@ pub fn attach_controls(
     right.addSubview(&notebook_tabs);
     let brief_host = NSView::initWithFrame(NSView::alloc(mtm), right.bounds());
     let speaking_host = NSView::initWithFrame(NSView::alloc(mtm), right.bounds());
-    for (id, label, host) in [("video-brief", "Video details", &brief_host), ("speaking-notes", "Speaking notes", &speaking_host)] {
-        let item = unsafe { NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str(id))) };
+    for (id, label, host) in [
+        ("video-brief", "Video details", &brief_host),
+        ("speaking-notes", "Speaking notes", &speaking_host),
+    ] {
+        let item = unsafe {
+            NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str(id)))
+        };
         item.setLabel(&NSString::from_str(label));
         item.setView(Some(host));
         notebook_tabs.addTabViewItem(&item);
@@ -1619,7 +1637,8 @@ pub fn attach_controls(
     // which would throw away the notes someone is typing and their scroll.
     let host_bounds = brief_host.bounds();
     let thumbnail_status = NSTextField::labelWithString(
-        &NSString::from_str("Record a video, then press Render video and thumbnails."), mtm,
+        &NSString::from_str("Record a video, then press Render video and thumbnails."),
+        mtm,
     );
     thumbnail_status.setFrame(NSRect::new(
         NSPoint::new(PAD, host_bounds.size.height - 30.0),
@@ -1631,7 +1650,10 @@ pub fn attach_controls(
     let video_brief_pane = WebPane::attach(&brief_host, mtm, tx.clone());
     video_brief_pane.set_frame(NSRect::new(
         NSPoint::new(0.0, 0.0),
-        NSSize::new(host_bounds.size.width, (host_bounds.size.height - 34.0).max(60.0)),
+        NSSize::new(
+            host_bounds.size.width,
+            (host_bounds.size.height - 34.0).max(60.0),
+        ),
     ));
     video_brief_pane.fill_below();
     let right = speaking_host;
@@ -1763,8 +1785,7 @@ pub fn attach_controls(
     );
     project_name_field.setBezeled(true);
     project_name_field.setEditable(true);
-    project_name_field
-        .setPlaceholderString(Some(&NSString::from_str("Project name")));
+    project_name_field.setPlaceholderString(Some(&NSString::from_str("Project name")));
     project_name_field.setStringValue(&NSString::from_str(project_name));
     unsafe {
         project_name_field.setTarget(Some(&target));
@@ -1865,15 +1886,15 @@ pub fn attach_controls(
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
     let buttons: [(&str, Sel); 9] = [
-        ("", sel!(onNewChapter:)),                    // 0 ┐
-        ("Retake  ⌃⌥T", sel!(onRetake:)),                 // 1 │ Record
+        ("", sel!(onNewChapter:)),        // 0 ┐
+        ("Retake  ⌃⌥T", sel!(onRetake:)), // 1 │ Record
         ("Stop", sel!(onStop:)),
         ("Render video and thumbnails", sel!(onRunRender:)),
-        ("Notes", sel!(onNotes:)),                    // 4 ┐ Notes (right pane)
+        ("Notes", sel!(onNotes:)), // 4 ┐ Notes (right pane)
         ("Copy Transcript", sel!(onCopyTranscript:)), // 5 ┘
-        ("New Project", sel!(onNewProject:)),         // 6 ┐
-        ("New Version", sel!(onNewVersion:)),         // 7 │ Session
-        ("", sel!(onToggleRegions:)),                 // 8 ┘ title set by set_regions
+        ("New Project", sel!(onNewProject:)), // 6 ┐
+        ("New Version", sel!(onNewVersion:)), // 7 │ Session
+        ("", sel!(onToggleRegions:)), // 8 ┘ title set by set_regions
     ];
     const RECORD: Range<usize> = 0..4;
     const NOTES: Range<usize> = 4..6;
@@ -1897,7 +1918,9 @@ pub fn attach_controls(
 
     *target.ivars().render_button.borrow_mut() = Some(built[3].clone());
     let render_status = NSTextField::labelWithString(
-        &NSString::from_str("Record a video, then render it. One press: photo, cut, title, artwork, YouTube."),
+        &NSString::from_str(
+            "Record a video, then render it. One press: photo, cut, title, artwork, YouTube.",
+        ),
         mtm,
     );
     left.addSubview(&render_status);
@@ -1971,24 +1994,30 @@ pub fn attach_controls(
     let post_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
     fill_parent(&post_view);
 
-    let post_title = NSTextField::labelWithString(
-        &NSString::from_str("Social posts"),
-        mtm,
-    );
-    post_title.setFrame(NSRect::new(NSPoint::new(PAD * 2.0, bounds.size.height - 60.0), NSSize::new(600.0, 24.0)));
+    let post_title = NSTextField::labelWithString(&NSString::from_str("Social posts"), mtm);
+    post_title.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 60.0),
+        NSSize::new(600.0, 24.0),
+    ));
     pin_top(&post_title);
     post_view.addSubview(&post_title);
 
     // Provider first, then Model — same reasoning as the Notes tab. The prompt
     // field after them keeps its x, since 160 + 10 + 220 still clears 400.
     let p_model_label = NSTextField::labelWithString(&NSString::from_str("Model"), mtm);
-    p_model_label.setFrame(NSRect::new(NSPoint::new(PAD * 2.0 + 170.0, bounds.size.height - 86.0), NSSize::new(60.0, LABEL_H)));
+    p_model_label.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0 + 170.0, bounds.size.height - 86.0),
+        NSSize::new(60.0, LABEL_H),
+    ));
     pin_top(&p_model_label);
     post_view.addSubview(&p_model_label);
 
     let posts_model_popup = make_model_popup(
         mtm,
-        NSRect::new(NSPoint::new(PAD * 2.0 + 170.0, bounds.size.height - 114.0), NSSize::new(220.0, CONTROL_H)),
+        NSRect::new(
+            NSPoint::new(PAD * 2.0 + 170.0, bounds.size.height - 114.0),
+            NSSize::new(220.0, CONTROL_H),
+        ),
         model_menu,
         model_idx,
         &target,
@@ -1999,13 +2028,19 @@ pub fn attach_controls(
     *target.ivars().posts_model_popup.borrow_mut() = Some(posts_model_popup.clone());
 
     let p_provider_label = NSTextField::labelWithString(&NSString::from_str("Provider"), mtm);
-    p_provider_label.setFrame(NSRect::new(NSPoint::new(PAD * 2.0, bounds.size.height - 86.0), NSSize::new(80.0, LABEL_H)));
+    p_provider_label.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 86.0),
+        NSSize::new(80.0, LABEL_H),
+    ));
     pin_top(&p_provider_label);
     post_view.addSubview(&p_provider_label);
 
     let posts_provider_popup = make_popup(
         mtm,
-        NSRect::new(NSPoint::new(PAD * 2.0, bounds.size.height - 114.0), NSSize::new(160.0, CONTROL_H)),
+        NSRect::new(
+            NSPoint::new(PAD * 2.0, bounds.size.height - 114.0),
+            NSSize::new(160.0, CONTROL_H),
+        ),
         provider_labels.to_vec(),
         provider_idx,
         &target,
@@ -2021,7 +2056,10 @@ pub fn attach_controls(
         &NSString::from_str("Audience / Tone prompt — kept between runs, e.g. “Be concise.”"),
         mtm,
     );
-    p_prompt_label.setFrame(NSRect::new(NSPoint::new(PAD * 2.0 + 400.0, bounds.size.height - 86.0), NSSize::new(420.0, LABEL_H)));
+    p_prompt_label.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0 + 400.0, bounds.size.height - 86.0),
+        NSSize::new(420.0, LABEL_H),
+    ));
     pin_top(&p_prompt_label);
     post_view.addSubview(&p_prompt_label);
 
@@ -2079,7 +2117,10 @@ pub fn attach_controls(
             mtm,
         )
     };
-    gen_posts_btn.setFrame(NSRect::new(NSPoint::new(PAD * 2.0, bounds.size.height - 156.0), NSSize::new(180.0, 32.0)));
+    gen_posts_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 156.0),
+        NSSize::new(180.0, 32.0),
+    ));
     pin_top(&gen_posts_btn);
     post_view.addSubview(&gen_posts_btn);
     *target.ivars().posts_button.borrow_mut() = Some(gen_posts_btn.clone());
@@ -2092,14 +2133,23 @@ pub fn attach_controls(
             mtm,
         )
     };
-    save_posts_btn.setFrame(NSRect::new(NSPoint::new(PAD * 2.0 + 190.0, bounds.size.height - 156.0), NSSize::new(120.0, 32.0)));
+    save_posts_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0 + 190.0, bounds.size.height - 156.0),
+        NSSize::new(120.0, 32.0),
+    ));
     pin_top(&save_posts_btn);
     post_view.addSubview(&save_posts_btn);
 
     // Below the buttons, not beside them: the prompt text area now occupies the
     // right of that row.
-    let posts_status = NSTextField::labelWithString(&NSString::from_str("Ready to generate social copy for 8 platforms."), mtm);
-    posts_status.setFrame(NSRect::new(NSPoint::new(PAD * 2.0, bounds.size.height - 186.0), NSSize::new(700.0, 20.0)));
+    let posts_status = NSTextField::labelWithString(
+        &NSString::from_str("Ready to generate social copy for 8 platforms."),
+        mtm,
+    );
+    posts_status.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 186.0),
+        NSSize::new(700.0, 20.0),
+    ));
     pin_top(&posts_status);
     post_view.addSubview(&posts_status);
     *target.ivars().posts_status.borrow_mut() = Some(posts_status.clone());
@@ -2116,10 +2166,7 @@ pub fn attach_controls(
     posts_form.show_empty();
 
     let post_item = unsafe {
-        NSTabViewItem::initWithIdentifier(
-            NSTabViewItem::alloc(),
-            Some(&NSString::from_str("post")),
-        )
+        NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str("post")))
     };
     post_item.setLabel(&NSString::from_str("Generate posts"));
     post_item.setView(Some(&post_view));
@@ -2157,10 +2204,8 @@ pub fn attach_controls(
     distribute_view.addSubview(&upload_btn);
     *target.ivars().distribute_button.borrow_mut() = Some(upload_btn.clone());
 
-    let dist_status = NSTextField::labelWithString(
-        &NSString::from_str("Render first, then upload."),
-        mtm,
-    );
+    let dist_status =
+        NSTextField::labelWithString(&NSString::from_str("Render first, then upload."), mtm);
     dist_status.setFrame(NSRect::new(
         NSPoint::new(PAD * 2.0 + 150.0, bounds.size.height - 82.0),
         NSSize::new(620.0, 24.0),
@@ -2368,10 +2413,7 @@ pub fn attach_controls(
     blog_pane.fill_below();
 
     let blog_item = unsafe {
-        NSTabViewItem::initWithIdentifier(
-            NSTabViewItem::alloc(),
-            Some(&NSString::from_str("blog")),
-        )
+        NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str("blog")))
     };
     blog_item.setLabel(&NSString::from_str("Blog"));
     blog_item.setView(Some(&blog_view));
@@ -2698,11 +2740,21 @@ pub fn attach_controls(
     settings_item.setLabel(&NSString::from_str("Settings"));
     settings_item.setView(Some(&settings_view));
 
-    workflow::attach(&tab_view, bounds, mtm, &[
-        ("draft", &draft_item), ("youtube", &publish_item), ("blog", &blog_item),
-        ("post", &post_item), ("distribute", &distribute_item), ("schedule", &schedule_item),
-        ("analytics", &analytics_item), ("reflect", &reflect_item),
-    ]);
+    workflow::attach(
+        &tab_view,
+        bounds,
+        mtm,
+        &[
+            ("draft", &draft_item),
+            ("youtube", &publish_item),
+            ("blog", &blog_item),
+            ("post", &post_item),
+            ("distribute", &distribute_item),
+            ("schedule", &schedule_item),
+            ("analytics", &analytics_item),
+            ("reflect", &reflect_item),
+        ],
+    );
     tab_view.addTabViewItem(&settings_item);
 
     let layout = Layout {
@@ -2753,7 +2805,11 @@ mod settings_pane_tests {
         let html = super::settings_page(Some("Saved."));
         assert!(!html.contains("template error"), "{html}");
         for group in crate::settings::Group::ALL {
-            assert!(html.contains(group.title()), "missing section {}", group.title());
+            assert!(
+                html.contains(group.title()),
+                "missing section {}",
+                group.title()
+            );
             assert!(
                 html.contains(&format!("result-{}", group.slug())),
                 "missing test-result slot for {}",
@@ -2774,10 +2830,16 @@ mod settings_pane_tests {
         unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-or-v1-topsecretvalue9999") };
         let html = super::settings_page(None);
         unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
-        assert!(!html.contains("topsecretvalue"), "the pane leaked a stored key");
+        assert!(
+            !html.contains("topsecretvalue"),
+            "the pane leaked a stored key"
+        );
         assert!(html.contains("…9999"), "the tail hint is missing: {html}");
         // Not supplied by the team file in this test, so it must not claim to be.
-        assert!(!html.contains("from the team"), "misattributed a local value");
+        assert!(
+            !html.contains("from the team"),
+            "misattributed a local value"
+        );
     }
 }
 

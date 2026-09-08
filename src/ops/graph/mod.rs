@@ -257,9 +257,7 @@ impl Graph {
                         match op.apply(&mut frame) {
                             Ok(Flow::Continue) => outputs[index] = Some(frame.into_pixels()),
                             Ok(Flow::Drop) => dropped_any = true,
-                            Err(error) => {
-                                return Err(format!("{} failed: {error:#}", op.name()))
-                            }
+                            Err(error) => return Err(format!("{} failed: {error:#}", op.name())),
                         }
                     }
                     Node::Sink { .. } => {
@@ -296,7 +294,7 @@ impl Graph {
                 if run.dropped_any {
                     self.counters.dropped += 1;
                 }
-                return run;
+                run
             }
             Ok(Err(message)) => {
                 self.bypass(&format!("{} graph: {message}", self.stream.as_str()));
@@ -349,9 +347,7 @@ impl Graph {
     pub fn close(&mut self, beside: &Path) -> Result<Vec<std::path::PathBuf>> {
         self.sidecar.counters = self.counters;
 
-        let Graph {
-            nodes, sidecar, ..
-        } = self;
+        let Graph { nodes, sidecar, .. } = self;
         let closed = catch_unwind(AssertUnwindSafe(move || -> Result<()> {
             for node in nodes.iter_mut() {
                 if let Node::Op { op, .. } = node {
@@ -425,8 +421,8 @@ impl Graph {
 
 mod build;
 
-pub use build::{GraphBuilder, NodeId};
 pub(crate) use build::Node;
+pub use build::{GraphBuilder, NodeId};
 
 #[cfg(test)]
 mod branch_tests;

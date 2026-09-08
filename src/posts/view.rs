@@ -4,9 +4,7 @@ use std::cell::RefCell;
 
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSScrollView, NSTextField, NSTextView, NSView,
-};
+use objc2_app_kit::{NSAutoresizingMaskOptions, NSScrollView, NSTextField, NSTextView, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use super::schema::{platform_label, PlatformPost, PostsManifest, VideoPosts};
@@ -132,9 +130,10 @@ impl PostsForm {
                 content,
                 tags,
             };
-            if let Some(item) = items.iter_mut().find(|i| {
-                i.video_id == field.video_id && i.video_type == field.video_type
-            }) {
+            if let Some(item) = items
+                .iter_mut()
+                .find(|i| i.video_id == field.video_id && i.video_type == field.video_type)
+            {
                 item.posts.push(post);
             } else {
                 items.push(VideoPosts {
@@ -283,9 +282,10 @@ impl PostsForm {
                 NSPoint::new(PAD, cursor),
                 NSSize::new(inner, body_h),
             ));
-            field
-                .body
-                .setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(inner, body_h)));
+            field.body.setFrame(NSRect::new(
+                NSPoint::new(0.0, 0.0),
+                NSSize::new(inner, body_h),
+            ));
             cursor -= 4.0 + TAGS_H;
             field.tags.setFrame(NSRect::new(
                 NSPoint::new(PAD, cursor),

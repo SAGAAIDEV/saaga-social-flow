@@ -76,8 +76,7 @@ fn holding_pins_the_frame_where_it_was_pressed() {
     let after = published(&tracker);
 
     assert!(
-        (after.anchor.0 - pinned.0).abs() < 1e-9
-            && (after.anchor.1 - pinned.1).abs() < 1e-9,
+        (after.anchor.0 - pinned.0).abs() < 1e-9 && (after.anchor.1 - pinned.1).abs() < 1e-9,
         "the frame followed the pointer while held: pinned at {pinned:?}, \
          ended at {:?}",
         after.anchor,

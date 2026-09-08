@@ -15,8 +15,8 @@ use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_av_foundation::{
-    AVCaptureAudioDataOutput, AVCaptureDeviceInput, AVCaptureSession,
-    AVFileTypeAppleM4A, AVMediaTypeAudio,
+    AVCaptureAudioDataOutput, AVCaptureDeviceInput, AVCaptureSession, AVFileTypeAppleM4A,
+    AVMediaTypeAudio,
 };
 
 use super::audio_delegate::AudioDelegate;
@@ -125,19 +125,20 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
         bail!("no audio input devices found");
     }
 
-    let chosen_uid = match device_picker::resolve_default(cfg.audio_device_uid.as_deref(), &devices, reselect) {
-        Some(uid) => uid,
-        None => {
-            if let Some(saved) = &cfg.audio_device_uid {
-                if !devices.iter().any(|d| &d.uid == saved) {
-                    eprintln!(
-                        "stream-recorder: saved default mic is no longer connected, pick again"
-                    );
+    let chosen_uid =
+        match device_picker::resolve_default(cfg.audio_device_uid.as_deref(), &devices, reselect) {
+            Some(uid) => uid,
+            None => {
+                if let Some(saved) = &cfg.audio_device_uid {
+                    if !devices.iter().any(|d| &d.uid == saved) {
+                        eprintln!(
+                            "stream-recorder: saved default mic is no longer connected, pick again"
+                        );
+                    }
                 }
+                device_picker::prompt_select("microphone", &devices)?
             }
-            device_picker::prompt_select("microphone", &devices)?
-        }
-    };
+        };
 
     if cfg.audio_device_uid.as_deref() != Some(chosen_uid.as_str()) {
         cfg.audio_device_uid = Some(chosen_uid.clone());
@@ -182,4 +183,3 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
     }
     Ok(())
 }
-

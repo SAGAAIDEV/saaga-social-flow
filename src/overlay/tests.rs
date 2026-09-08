@@ -5,8 +5,8 @@
 //! a free function over `&[DrawnRegion]` rather than a method on the view.
 
 use super::hit::grab_anywhere;
-use crate::region::{Axis, Corner};
 use super::*;
+use crate::region::{Axis, Corner};
 
 fn region(rect: PointRect, orientation: Orientation) -> DrawnRegion {
     DrawnRegion {
@@ -23,8 +23,18 @@ fn region(rect: PointRect, orientation: Orientation) -> DrawnRegion {
 /// Split-Horizontal's top-left corner, so its gnomon is well inside the
 /// horizontal region's body.
 fn overlapping() -> Vec<DrawnRegion> {
-    let horizontal = PointRect { x: 400.0, y: 200.0, w: 701.0, h: 540.0 };
-    let vertical = PointRect { x: 400.0, y: 200.0, w: 540.0, h: 640.0 };
+    let horizontal = PointRect {
+        x: 400.0,
+        y: 200.0,
+        w: 701.0,
+        h: 540.0,
+    };
+    let vertical = PointRect {
+        x: 400.0,
+        y: 200.0,
+        w: 540.0,
+        h: 640.0,
+    };
     vec![
         region(horizontal, Orientation::Horizontal),
         region(vertical, Orientation::Vertical),
@@ -141,7 +151,12 @@ fn a_coincident_corner_goes_to_the_active_region() {
 /// resolve to the one being recorded.
 #[test]
 fn the_active_region_wins_a_tie_inside_one_tier() {
-    let same = PointRect { x: 400.0, y: 200.0, w: 600.0, h: 460.0 };
+    let same = PointRect {
+        x: 400.0,
+        y: 200.0,
+        w: 600.0,
+        h: 460.0,
+    };
     let regions = vec![
         region(same, Orientation::Horizontal),
         region(same, Orientation::Vertical),
@@ -162,7 +177,10 @@ fn the_region_interior_is_not_a_target_so_clicks_pass_through() {
     let rect = regions[0].rect;
     // Well inside the region, clear of its centre gnomon and its corners.
     let inside = (rect.x + rect.w * 0.75, rect.y + rect.h * 0.75);
-    assert!(rect.contains(inside), "fixture point must be inside the region");
+    assert!(
+        rect.contains(inside),
+        "fixture point must be inside the region"
+    );
     assert_eq!(
         grab_anywhere(&regions, 0, inside),
         None,
@@ -178,10 +196,19 @@ fn the_handles_still_answer() {
     let regions = overlapping();
     let (cx, cy) = regions[0].rect.center();
     assert!(grab_anywhere(&regions, 0, (cx, cy)).is_some(), "knob");
-    assert!(grab_anywhere(&regions, 0, (cx + 40.0, cy)).is_some(), "x arm");
-    assert!(grab_anywhere(&regions, 0, (cx, cy - 40.0)).is_some(), "y arm");
+    assert!(
+        grab_anywhere(&regions, 0, (cx + 40.0, cy)).is_some(),
+        "x arm"
+    );
+    assert!(
+        grab_anywhere(&regions, 0, (cx, cy - 40.0)).is_some(),
+        "y arm"
+    );
     let corner = Corner::TopLeft.at(&regions[0].rect);
-    assert!(grab_anywhere(&regions, 0, corner).is_some(), "corner handle");
+    assert!(
+        grab_anywhere(&regions, 0, corner).is_some(),
+        "corner handle"
+    );
 }
 
 /// A 2× display roomy enough for a widened Split pair.

@@ -143,7 +143,10 @@ pub fn page(article: &Article, figures: &[Figure]) -> String {
         // it — so both are shown, and only when they really differ.
         titled = match article.h1.is_empty() {
             true => String::new(),
-            false => format!("  <p class=\"titled\">title: {}</p>\n", escape(&article.title)),
+            false => format!(
+                "  <p class=\"titled\">title: {}</p>\n",
+                escape(&article.title)
+            ),
         },
         heading = escape(match article.h1.is_empty() {
             true => &article.title,
@@ -171,9 +174,11 @@ pub fn page(article: &Article, figures: &[Figure]) -> String {
 fn controls(article: &Article) -> String {
     let mut notes = Vec::new();
     if article.no_index {
-        notes.push("<strong>noindex</strong> — publishes and stays linkable, but drops out of \
+        notes.push(
+            "<strong>noindex</strong> — publishes and stays linkable, but drops out of \
                     /blog, out of the sitemap, and tells search engines not to index it"
-            .to_string());
+                .to_string(),
+        );
     }
     if !article.canonical_url.is_empty() {
         notes.push(format!(
@@ -204,7 +209,9 @@ fn faq(entries: &[super::schema::Faq]) -> String {
             )
         })
         .collect();
-    format!("  <section class=\"faq\">\n    <h2>FAQ</h2>\n    <dl>\n{items}    </dl>\n  </section>\n")
+    format!(
+        "  <section class=\"faq\">\n    <h2>FAQ</h2>\n    <dl>\n{items}    </dl>\n  </section>\n"
+    )
 }
 
 fn summary(article: &Article) -> String {
@@ -220,7 +227,10 @@ fn render(block: &Block, figures: &[Figure]) -> String {
         // Verbatim — see the module docs.
         Block::Text { html } => html.clone(),
         Block::Quote { text, highlight } => {
-            format!("  <blockquote>{}</blockquote>", highlighted(text, highlight))
+            format!(
+                "  <blockquote>{}</blockquote>",
+                highlighted(text, highlight)
+            )
         }
         Block::Table { headers, rows } => table(headers, rows),
         // Named, not rendered. The component is React in the landing repo and

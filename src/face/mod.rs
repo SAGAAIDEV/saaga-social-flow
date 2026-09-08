@@ -64,9 +64,9 @@ use crate::config::FaceTracking;
 use crate::ops::render::Renderer;
 use crate::region::framing::{Anchor, AnchorCell};
 
+use crate::track::smooth::Smoother;
 use detect::Detector;
 use sample::Sampler;
-use crate::track::smooth::Smoother;
 
 /// What one chapter's worth of tracking did. Reported so a take that framed
 /// badly can be diagnosed from numbers rather than from re-watching it.
@@ -257,9 +257,8 @@ mod tests {
             return;
         };
 
-        let url = objc2_foundation::NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(
-            &path,
-        ));
+        let url =
+            objc2_foundation::NSURL::fileURLWithPath(&objc2_foundation::NSString::from_str(&path));
         let image = unsafe { objc2_core_image::CIImage::imageWithContentsOfURL(&url) }
             .expect("Core Image could not decode the image");
         let extent = unsafe { image.extent() };
@@ -279,7 +278,11 @@ mod tests {
         };
         let tracker = FaceTracker::build(config.clone(), renderer).expect("tracker");
         let cell = tracker.anchor_cell();
-        assert_eq!(cell.get(), None, "nothing is published before the first frame");
+        assert_eq!(
+            cell.get(),
+            None,
+            "nothing is published before the first frame"
+        );
 
         // Two seconds at 30fps of the same frame: long enough for the glide to
         // settle, though the first detection snaps anyway.
@@ -303,7 +306,10 @@ mod tests {
         );
 
         let anchor = cell.get().expect("an anchor was published");
-        assert!(anchor.1 < 0.5, "the portrait's face is in the upper half: {anchor:?}");
+        assert!(
+            anchor.1 < 0.5,
+            "the portrait's face is in the upper half: {anchor:?}"
+        );
 
         // And that anchor reaches a framing as a real offset. Split ·
         // Horizontal, whose 522-column camera slot is the case tracking matters

@@ -147,7 +147,10 @@ mod tests {
         assert_eq!(got.post_id, "post-9");
         assert!(got.is_sent());
         assert_eq!(got.sent_at.as_deref(), Some("2026-08-09T20:44:00Z"));
-        assert_eq!(got.metrics_updated_at.as_deref(), Some("2026-08-15T06:00:00Z"));
+        assert_eq!(
+            got.metrics_updated_at.as_deref(),
+            Some("2026-08-15T06:00:00Z")
+        );
         assert_eq!(got.metrics.len(), 3);
         assert_eq!(metric(&got, "impressions"), Some(8120.0));
         assert_eq!(metric(&got, "engagementRate"), Some(6.8));

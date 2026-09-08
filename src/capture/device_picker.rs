@@ -7,8 +7,8 @@ use objc2::rc::Retained;
 use objc2_av_foundation::{
     AVCaptureDevice, AVCaptureDeviceDiscoverySession, AVCaptureDevicePosition, AVCaptureDeviceType,
     AVCaptureDeviceTypeBuiltInWideAngleCamera, AVCaptureDeviceTypeContinuityCamera,
-    AVCaptureDeviceTypeDeskViewCamera, AVCaptureDeviceTypeExternal,
-    AVCaptureDeviceTypeMicrophone, AVMediaType,
+    AVCaptureDeviceTypeDeskViewCamera, AVCaptureDeviceTypeExternal, AVCaptureDeviceTypeMicrophone,
+    AVMediaType,
 };
 use objc2_foundation::NSArray;
 
@@ -42,8 +42,8 @@ pub fn devices_of(media_type: &AVMediaType) -> Retained<NSArray<AVCaptureDevice>
     // type falls to the video list rather than to an empty one — an empty list
     // would make the discovery session find nothing and silently take the
     // fallback path below on every call.
-    let is_audio = unsafe { objc2_av_foundation::AVMediaTypeAudio }
-        .is_some_and(|audio| media_type == &*audio);
+    let is_audio =
+        unsafe { objc2_av_foundation::AVMediaTypeAudio }.is_some_and(|audio| media_type == audio);
     let types: &[&AVCaptureDeviceType] = unsafe {
         if is_audio {
             // `Microphone` supersedes `BuiltInMicrophone` and covers external
@@ -107,7 +107,11 @@ pub fn default_device(media_type: &AVMediaType) -> Option<CaptureDevice> {
 
 /// Return the saved default device UID if it's still connected and reselect
 /// was not requested, otherwise `None` (caller must prompt).
-pub fn resolve_default(saved: Option<&str>, devices: &[CaptureDevice], reselect: bool) -> Option<String> {
+pub fn resolve_default(
+    saved: Option<&str>,
+    devices: &[CaptureDevice],
+    reselect: bool,
+) -> Option<String> {
     if reselect {
         return None;
     }
@@ -139,7 +143,10 @@ pub fn prompt_select(kind: &str, devices: &[CaptureDevice]) -> Result<String> {
         if let Some(i) = parse_selection(&line, devices.len()) {
             return Ok(devices[i].uid.clone());
         }
-        println!("stream-recorder: enter a number between 1 and {}", devices.len());
+        println!(
+            "stream-recorder: enter a number between 1 and {}",
+            devices.len()
+        );
     }
 }
 

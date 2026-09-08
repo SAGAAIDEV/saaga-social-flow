@@ -20,8 +20,8 @@ use anyhow::{bail, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::longform::Longform;
 use super::schema::{Link, Quote, Section, SubstackNotes};
+use crate::longform::Longform;
 
 pub const SYSTEM_PROMPT: &str = r#"You turn a recorded technical video into WRITING NOTES for a Substack essay.
 
@@ -155,11 +155,8 @@ pub fn generate_notes(
         bail!("no transcribed chapters to write notes from");
     }
 
-    let system = crate::agent::prompt::resolve(
-        crate::agent::prompt::SUBSTACK,
-        SYSTEM_PROMPT,
-        prompt_root,
-    );
+    let system =
+        crate::agent::prompt::resolve(crate::agent::prompt::SUBSTACK, SYSTEM_PROMPT, prompt_root);
     let prompt = build_user_prompt(longform);
 
     let (extracted, step) = crate::agent::extract::extract::<NotesExtraction>(
@@ -171,7 +168,12 @@ pub fn generate_notes(
         provider,
     )?;
 
-    let notes = extracted.into_notes(version, &system, &longform.timestamps, longform.links.clone());
+    let notes = extracted.into_notes(
+        version,
+        &system,
+        &longform.timestamps,
+        longform.links.clone(),
+    );
     if notes.is_empty() {
         bail!("the model returned nothing to type from");
     }
@@ -253,7 +255,10 @@ mod tests {
             Some(3),
             &resolved(),
             &[(2, "04:12".to_string())],
-            vec![Link { label: "Watch".into(), url: "https://y/1".into() }],
+            vec![Link {
+                label: "Watch".into(),
+                url: "https://y/1".into(),
+            }],
         )
     }
 
@@ -311,7 +316,11 @@ mod tests {
 
         let unstamped = extraction().into_notes(Some(3), &resolved(), &[], Vec::new());
         assert_eq!(unstamped.sections[0].timestamp, None);
-        assert_eq!(unstamped.sections[0].chapter, Some(2), "the chapter still stands");
+        assert_eq!(
+            unstamped.sections[0].chapter,
+            Some(2),
+            "the chapter still stands"
+        );
     }
 
     #[test]
@@ -335,7 +344,10 @@ mod tests {
                 figures: Vec::new(),
             }],
             timestamps: vec![(2, "04:12".into())],
-            links: vec![Link { label: "Watch".into(), url: "https://y/1".into() }],
+            links: vec![Link {
+                label: "Watch".into(),
+                url: "https://y/1".into(),
+            }],
             loose_figures: Vec::new(),
         };
         let user = build_user_prompt(&longform);

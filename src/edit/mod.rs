@@ -24,9 +24,7 @@ pub mod pane;
 pub mod render;
 pub mod waveform;
 
-use crate::notes::{
-    closed_chapter_numbers, load_transcript, ChapterTranscript, TranscriptStatus,
-};
+use crate::notes::{closed_chapter_numbers, load_transcript, ChapterTranscript, TranscriptStatus};
 use crate::session::Session;
 use compute::{compute_edits, DEFAULT_PADDING_MS};
 
@@ -76,18 +74,20 @@ pub fn spawn_render(session: Session, tx: Sender<RenderEvent>) {
     // Kept back from the closure so a thread that never starts still reports —
     // otherwise the app waits on a render that does not exist.
     let unstarted = tx.clone();
-    if let Err(err) = thread::Builder::new().name("render-hf".into()).spawn(move || {
-        match run_render(&session, &tx) {
-            Ok(dir) => {
-                eprintln!("stream-recorder: render ready → {}", dir.display());
-                let _ = tx.send(RenderEvent::Ready(dir));
-            }
-            Err(err) => {
-                eprintln!("stream-recorder: render failed: {err:#}");
-                let _ = tx.send(RenderEvent::Failed(format!("Render failed: {err:#}")));
-            }
-        }
-    }) {
+    if let Err(err) =
+        thread::Builder::new()
+            .name("render-hf".into())
+            .spawn(move || match run_render(&session, &tx) {
+                Ok(dir) => {
+                    eprintln!("stream-recorder: render ready → {}", dir.display());
+                    let _ = tx.send(RenderEvent::Ready(dir));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: render failed: {err:#}");
+                    let _ = tx.send(RenderEvent::Failed(format!("Render failed: {err:#}")));
+                }
+            })
+    {
         eprintln!("stream-recorder: could not start render job: {err}");
         let _ = unstarted.send(RenderEvent::Failed(format!(
             "Could not start the render job: {err}"
@@ -210,8 +210,7 @@ fn hand_edited_chapters(session_dir: &Path, edit_root: &Path) -> Vec<u32> {
     closed_chapter_numbers(session_dir)
         .into_iter()
         .filter(|n| {
-            keep::load(&pane::chapter_dir(edit_root, *n))
-                .is_some_and(|list| list.is_hand())
+            keep::load(&pane::chapter_dir(edit_root, *n)).is_some_and(|list| list.is_hand())
         })
         .collect()
 }
@@ -279,7 +278,9 @@ fn existing_cut_numbers(edit_root: &Path) -> Vec<u32> {
     for n in 1..=99 {
         let ch_dir = edit_root.join(format!("chapter-{n:02}"));
         if ch_dir.exists()
-            && (ch_dir.join(format!("chapter-{n:02}-horizontal.mp4")).exists()
+            && (ch_dir
+                .join(format!("chapter-{n:02}-horizontal.mp4"))
+                .exists()
                 || ch_dir.join(format!("chapter-{n:02}-vertical.mp4")).exists())
         {
             numbers.push(n);
@@ -542,7 +543,11 @@ mod tests {
 
         // Without a hand edit, the disfluency cut splits around "um".
         let _ = edit_chapter(&drafts, &edits, 1, Some(&words));
-        assert_eq!(written_edits(&edits, 1).len(), 2, "the automatic cut splits");
+        assert_eq!(
+            written_edits(&edits, 1).len(),
+            2,
+            "the automatic cut splits"
+        );
 
         // With one, the cut is exactly what was asked for.
         keep::save(
@@ -575,7 +580,10 @@ mod tests {
         let _ = edit_chapter(&drafts, &edits, 2, None);
         let written = written_edits(&edits, 2);
         assert_eq!((written[0].start, written[0].end), (500, 4000));
-        assert!(written[0].text.is_empty(), "no words to name, and that is fine");
+        assert!(
+            written[0].text.is_empty(),
+            "no words to name, and that is fine"
+        );
 
         // Where the same chapter with no hand edit has nothing to go on.
         keep::clear(&pane::chapter_dir(&edits, 2)).unwrap();
@@ -625,10 +633,10 @@ mod tests {
         let _ = edit_chapter(&drafts, &edits, 1, Some(&words));
         std::thread::sleep(Duration::from_millis(20));
         std::fs::write(&dest, b"a rendered cut").unwrap();
-        assert!(render::is_fresh(&dest, &cut_inputs(
-            &drafts.join("chapter-01-horizontal.mp4"),
-            &edits_path,
-        )));
+        assert!(render::is_fresh(
+            &dest,
+            &cut_inputs(&drafts.join("chapter-01-horizontal.mp4"), &edits_path,)
+        ));
 
         // A second pass leaves it exactly as it was — no ffmpeg, no new mtime.
         let before = dest.metadata().unwrap().modified().unwrap();
@@ -708,7 +716,10 @@ mod tests {
         let by_hand = hand_edited_chapters(&drafts, &edits);
         assert_eq!(by_hand, vec![1, 2]);
         let waited = wait_for_words(&drafts, &by_hand, &|_| {}).unwrap();
-        assert!(waited.is_empty(), "nothing to wait for, nothing transcribed");
+        assert!(
+            waited.is_empty(),
+            "nothing to wait for, nothing transcribed"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -744,7 +755,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod progress_tests {
     use super::*;
@@ -756,7 +766,10 @@ mod progress_tests {
     fn the_phases_share_the_bar_in_order() {
         assert!(0.0 < CUT.0 && CUT.0 < CUT.1);
         assert!(CUT.1 <= COMPOSED && COMPOSED <= RENDER.0);
-        assert!(RENDER.0 < RENDER.1 && RENDER.1 < 1.0, "the app's Ready is what fills it");
+        assert!(
+            RENDER.0 < RENDER.1 && RENDER.1 < 1.0,
+            "the app's Ready is what fills it"
+        );
 
         assert_eq!(within(RENDER, 0, 4), RENDER.0);
         assert_eq!(within(RENDER, 4, 4), RENDER.1);

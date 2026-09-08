@@ -91,7 +91,6 @@ impl Composite {
     }
 }
 
-
 impl Composite {
     /// The rect to crop out of the tapped screen buffer for *this* frame.
     ///
@@ -130,15 +129,19 @@ impl VideoOp for Composite {
     }
 
     fn open(&mut self, ctx: &StreamCtx) -> Result<()> {
-        self.renderer = Some(
-            ctx.renderer
-                .clone()
-                .context("the composite op needs a GPU render context and this session has none")?,
-        );
-        self.pool = Some(Arc::new(
+        self.renderer =
+            Some(ctx.renderer.clone().context(
+                "the composite op needs a GPU render context and this session has none",
+            )?);
+        // Shared with the render callback on the capture queue; the pool is a
+        // CoreVideo handle this crate cannot mark `Send`, which is all the lint
+        // sees. An `Rc` would be wrong for exactly that reason.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let pool = Arc::new(
             Pool::create(self.output.w, self.output.h)
                 .context("creating the composite op's pixel buffer pool")?,
-        ));
+        );
+        self.pool = Some(pool);
         self.failed = 0;
         Ok(())
     }
@@ -159,23 +162,27 @@ impl VideoOp for Composite {
             return Ok(Flow::Drop);
         };
 
-        let composed = match self.tap.as_ref().and_then(|tap| tap.latest()).and_then(|screen| {
-            let buffer = (
-                CVPixelBufferGetWidth(screen.pixels.get()) as f64,
-                CVPixelBufferGetHeight(screen.pixels.get()) as f64,
-            );
-            match self.screen_crop(buffer) {
-                Some(crop) => {
-                    crop_rect_into_slot(screen.pixels.get(), crop, self.screen_slot, canvas_h)
+        let composed = match self
+            .tap
+            .as_ref()
+            .and_then(|tap| tap.latest())
+            .and_then(|screen| {
+                let buffer = (
+                    CVPixelBufferGetWidth(screen.pixels.get()) as f64,
+                    CVPixelBufferGetHeight(screen.pixels.get()) as f64,
+                );
+                match self.screen_crop(buffer) {
+                    Some(crop) => {
+                        crop_rect_into_slot(screen.pixels.get(), crop, self.screen_slot, canvas_h)
+                    }
+                    None => fit_into_slot(
+                        screen.pixels.get(),
+                        self.screen_slot,
+                        canvas_h,
+                        &Framing::fixed(),
+                    ),
                 }
-                None => fit_into_slot(
-                    screen.pixels.get(),
-                    self.screen_slot,
-                    canvas_h,
-                    &Framing::fixed(),
-                ),
-            }
-        }) {
+            }) {
             Some(screen) => match self.topmost {
                 Topmost::Screen => unsafe { screen.imageByCompositingOverImage(&camera) },
                 Topmost::Camera => unsafe { camera.imageByCompositingOverImage(&screen) },
@@ -233,15 +240,17 @@ mod tests {
     #[test]
     fn an_unopened_composite_drops() {
         let layout = Layout::get(Pair::Split, Orientation::Horizontal);
-        let mut op =
-            Composite::for_layout("composite-horizontal", layout, None, None, None, Framing::fixed());
-        let mut sidecar = crate::ops::Sidecar::default();
-        let pixels = crate::ops::frame::test_support::pixel_buffer(
-            64,
-            64,
-            u32::from_be_bytes(*b"BGRA"),
-            64,
+        let mut op = Composite::for_layout(
+            "composite-horizontal",
+            layout,
+            None,
+            None,
+            None,
+            Framing::fixed(),
         );
+        let mut sidecar = crate::ops::Sidecar::default();
+        let pixels =
+            crate::ops::frame::test_support::pixel_buffer(64, 64, u32::from_be_bytes(*b"BGRA"), 64);
         let mut frame = Frame::new(
             pixels,
             objc2_core_media::CMTime {

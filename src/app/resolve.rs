@@ -27,9 +27,7 @@ use crate::region::{DisplayGeometry, PixelSize, PointRect};
 /// a zoom happen mid-chapter, and what stops the render resampling a second
 /// time on top of ScreenCaptureKit's.
 pub(crate) fn slot_output(layout: &Layout) -> Option<PixelSize> {
-    layout
-        .slot_size()
-        .map(|(w, h)| PixelSize::rounded(w, h))
+    layout.slot_size().map(|(w, h)| PixelSize::rounded(w, h))
 }
 
 /// A root region's placement, centred on the display at 1:1.

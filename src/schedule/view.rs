@@ -103,9 +103,7 @@ impl ScheduleForm {
             let on_screen = carried
                 .iter()
                 .find(|(video, platform, hash, _)| {
-                    *video == item.video_id
-                        && *platform == item.platform
-                        && *hash == item.copy_hash
+                    *video == item.video_id && *platform == item.platform && *hash == item.copy_hash
                 })
                 .map(|(_, _, _, ticked)| *ticked);
             rows.push(self.add_row(item, on_screen.unwrap_or(item.approved)));

@@ -23,14 +23,16 @@ pub fn spawn_generate_titles(
 ) {
     if let Err(err) = thread::Builder::new()
         .name("titles-gen".into())
-        .spawn(move || match run(&session, &model, provider.as_deref(), &tx) {
-            Ok((path, manifest)) => {
-                let _ = tx.send(TitlesEvent::Ready(path, manifest));
-            }
-            Err(err) => {
-                let _ = tx.send(TitlesEvent::Status(format!("Titles failed: {err:#}")));
-            }
-        })
+        .spawn(
+            move || match run(&session, &model, provider.as_deref(), &tx) {
+                Ok((path, manifest)) => {
+                    let _ = tx.send(TitlesEvent::Ready(path, manifest));
+                }
+                Err(err) => {
+                    let _ = tx.send(TitlesEvent::Status(format!("Titles failed: {err:#}")));
+                }
+            },
+        )
     {
         eprintln!("stream-recorder: could not start titles job: {err}");
     }

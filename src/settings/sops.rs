@@ -119,12 +119,13 @@ fn decrypt(path: &Path) -> Result<String, String> {
         // when *creating* a file. Decrypting reads the key arn baked into the
         // file itself and resolves credentials the ordinary way, so the profile
         // has to be handed over here or an unset AWS_PROFILE picks `default`.
-        .env("AWS_PROFILE", std::env::var("AWS_PROFILE").as_deref().unwrap_or(PROFILE))
+        .env(
+            "AWS_PROFILE",
+            std::env::var("AWS_PROFILE").as_deref().unwrap_or(PROFILE),
+        )
         .output()
         .map_err(|err| match err.kind() {
-            std::io::ErrorKind::NotFound => {
-                "sops is not installed (brew install sops)".to_string()
-            }
+            std::io::ErrorKind::NotFound => "sops is not installed (brew install sops)".to_string(),
             _ => format!("could not run sops: {err}"),
         })?;
 
@@ -152,12 +153,12 @@ fn explain(stderr: &str) -> String {
     // someone to re-run `aws sso login` when they simply have no access wastes
     // the one instruction they will actually follow.
     if lower.contains("accessdenied") || lower.contains("not authorized") {
-        return format!(
-            "your AWS account has no grant on the saaga dev KMS key — \
+        return "your AWS account has no grant on the saaga dev KMS key — \
              ask for kms:Decrypt on it, then retry"
-        );
+            .to_string();
     }
-    if lower.contains("expired") || lower.contains("sso session") || lower.contains("invalid_grant") {
+    if lower.contains("expired") || lower.contains("sso session") || lower.contains("invalid_grant")
+    {
         return format!("your AWS session has expired — run `aws sso login --profile {PROFILE}`");
     }
     // What an unconfigured or logged-out machine actually produces:
@@ -219,7 +220,10 @@ Recovery failed because no master key was able to decrypt the file.";
     fn the_logged_out_case_names_the_login_command() {
         let said = explain(NO_PROFILE);
         assert!(said.contains("aws sso login"), "{said}");
-        assert!(!said.contains("Failed to get the data key"), "led with the useless headline: {said}");
+        assert!(
+            !said.contains("Failed to get the data key"),
+            "led with the useless headline: {said}"
+        );
     }
 
     /// The two failures a person actually hits should each name their fix,
@@ -227,12 +231,17 @@ Recovery failed because no master key was able to decrypt the file.";
     /// place — usually to re-copying a key that was never the problem.
     #[test]
     fn the_common_failures_name_the_command_that_fixes_them() {
-        let expired = explain("error: ExpiredToken: The security token included in the request is expired");
+        let expired =
+            explain("error: ExpiredToken: The security token included in the request is expired");
         assert!(expired.contains("aws sso login"), "{expired}");
 
-        let denied = explain("AccessDeniedException: User is not authorized to perform kms:Decrypt");
+        let denied =
+            explain("AccessDeniedException: User is not authorized to perform kms:Decrypt");
         assert!(denied.contains("grant"), "{denied}");
-        assert!(!denied.contains("sso login"), "sent them to log in when they lack access: {denied}");
+        assert!(
+            !denied.contains("sso login"),
+            "sent them to log in when they lack access: {denied}"
+        );
 
         let missing = explain("NoCredentialProviders: no valid providers in chain");
         assert!(missing.contains("aws sso login"), "{missing}");
@@ -253,7 +262,10 @@ Recovery failed because no master key was able to decrypt the file.";
     #[test]
     fn decrypted_output_parses_as_dotenv() {
         let parsed = crate::settings::parse("OPENROUTER_API_KEY=sk-or-v1-x\nS3_BUCKET=media\n");
-        assert_eq!(parsed.get("OPENROUTER_API_KEY").map(String::as_str), Some("sk-or-v1-x"));
+        assert_eq!(
+            parsed.get("OPENROUTER_API_KEY").map(String::as_str),
+            Some("sk-or-v1-x")
+        );
         assert_eq!(parsed.get("S3_BUCKET").map(String::as_str), Some("media"));
     }
 }

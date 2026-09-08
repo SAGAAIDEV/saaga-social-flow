@@ -81,6 +81,8 @@ impl Pause {
         self.floor = now;
     }
 
+    /// Only the tests read this back; the router tracks the break itself.
+    #[cfg(test)]
     pub fn is_paused(&self) -> bool {
         self.paused_at.is_some()
     }
@@ -90,7 +92,8 @@ impl Pause {
         self.removed.is_some()
     }
 
-    /// Everything removed so far, in seconds.
+    /// Everything removed so far, in seconds. Only the tests read it back.
+    #[cfg(test)]
     pub fn removed_seconds(&self) -> f64 {
         self.removed.map(crate::timesync::seconds).unwrap_or(0.0)
     }
@@ -101,7 +104,10 @@ impl Pause {
         if before(pts, self.floor) {
             return None;
         }
-        if self.paused_at.is_some_and(|paused_at| !before(pts, paused_at)) {
+        if self
+            .paused_at
+            .is_some_and(|paused_at| !before(pts, paused_at))
+        {
             return None;
         }
         Some(match self.removed {
@@ -141,7 +147,13 @@ pub fn retime(buffer: &CMSampleBuffer, pts: CMTime) -> Option<CFRetained<CMSampl
     }
     let mut out: *mut CMSampleBuffer = std::ptr::null_mut();
     let status = unsafe {
-        CMSampleBuffer::create_copy_with_new_timing(None, buffer, 1, &timing, NonNull::from(&mut out))
+        CMSampleBuffer::create_copy_with_new_timing(
+            None,
+            buffer,
+            1,
+            &timing,
+            NonNull::from(&mut out),
+        )
     };
     if status != 0 || out.is_null() {
         return None;
@@ -236,7 +248,10 @@ mod tests {
         pause.pause(at(10.0));
         pause.pause(at(11.0));
         pause.resume(at(12.0));
-        assert!((pause.removed_seconds() - 2.0).abs() < 1e-6, "the second pause moved the start");
+        assert!(
+            (pause.removed_seconds() - 2.0).abs() < 1e-6,
+            "the second pause moved the start"
+        );
     }
 }
 
@@ -270,9 +285,11 @@ mod live {
             .unwrap_or_else(|| mics[0].uid.clone());
         let camera = av::list_camera_devices().expect("cameras")[0].uid.clone();
         let conn = Connection::start_capture(&camera, &uid).expect("capture");
-        conn.wait_for_warmup(Duration::from_secs(10)).expect("warmup");
+        conn.wait_for_warmup(Duration::from_secs(10))
+            .expect("warmup");
 
-        let dir = std::env::temp_dir().join(format!("stream-recorder-pause-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-pause-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("chapter.mp4");
@@ -283,14 +300,22 @@ mod live {
         std::thread::sleep(Duration::from_secs(1));
         {
             let mut guard = state.lock().unwrap();
-            guard.as_mut().unwrap().pause.pause(TimeSync::now_on(&clock));
+            guard
+                .as_mut()
+                .unwrap()
+                .pause
+                .pause(TimeSync::now_on(&clock));
         }
         let before = conn.delegate.audio_frames_appended();
         std::thread::sleep(Duration::from_secs(1));
         let during = conn.delegate.audio_frames_appended();
         {
             let mut guard = state.lock().unwrap();
-            guard.as_mut().unwrap().pause.resume(TimeSync::now_on(&clock));
+            guard
+                .as_mut()
+                .unwrap()
+                .pause
+                .resume(TimeSync::now_on(&clock));
         }
         std::thread::sleep(Duration::from_secs(1));
         conn.stop_and_finish().expect("finish");

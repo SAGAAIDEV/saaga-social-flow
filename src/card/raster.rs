@@ -140,9 +140,9 @@ impl SnapshotDelegate {
             return;
         };
         if let Some(job) = slot.take() {
-            let _ = job
-                .tx
-                .send(RasterEvent::Failed(format!("the card page failed to load: {message}")));
+            let _ = job.tx.send(RasterEvent::Failed(format!(
+                "the card page failed to load: {message}"
+            )));
         }
     }
 }
@@ -176,7 +176,9 @@ fn await_images_then_snapshot(webview: &WKWebView, job: Job) {
     let slot = RefCell::new(Some(job));
     let webview_for_block = webview.retain();
     let handler = RcBlock::new(move |result: *mut AnyObject, error: *mut NSError| {
-        let Some(job) = slot.borrow_mut().take() else { return };
+        let Some(job) = slot.borrow_mut().take() else {
+            return;
+        };
         if !error.is_null() {
             let message = unsafe { (*error).localizedDescription() }.to_string();
             let _ = job.tx.send(RasterEvent::Failed(format!(
@@ -254,11 +256,7 @@ fn encode(image: *mut NSImage, error: *mut NSError, max_edge: f64) -> Result<Vec
     let size = image.size();
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), size);
     let cg = unsafe {
-        image.CGImageForProposedRect_context_hints(
-            &mut { rect } as *mut NSRect,
-            None,
-            None,
-        )
+        image.CGImageForProposedRect_context_hints(&mut { rect } as *mut NSRect, None, None)
     }
     .context("the snapshot carried no bitmap")?;
     crate::thumbnail::still::encode_cg(&cg, max_edge)
@@ -357,4 +355,3 @@ impl Drop for Raster {
 fn file_url(path: &Path) -> Option<Retained<NSURL>> {
     Some(NSURL::fileURLWithPath(&NSString::from_str(path.to_str()?)))
 }
-

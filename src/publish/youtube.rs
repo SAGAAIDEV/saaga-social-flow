@@ -271,8 +271,7 @@ pub fn upload_video(token: &str, path: &Path, meta: &VideoMeta) -> Result<String
         Err(err) => return Err(err).context("starting the youtube upload"),
     };
 
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("opening {}", path.display()))?;
+    let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let finished = ureq::put(&session)
         .set("Content-Type", "video/mp4")
         .set("Content-Length", &size.to_string())
@@ -280,7 +279,9 @@ pub fn upload_video(token: &str, path: &Path, meta: &VideoMeta) -> Result<String
         .timeout(std::time::Duration::from_secs(3600))
         .send(file);
     let body: serde_json::Value = match finished {
-        Ok(response) => response.into_json().context("parsing the upload response")?,
+        Ok(response) => response
+            .into_json()
+            .context("parsing the upload response")?,
         Err(ureq::Error::Status(code, response)) => {
             let detail = response.into_string().unwrap_or_default();
             bail!("youtube rejected the video ({code}): {}", detail.trim());
@@ -369,7 +370,11 @@ mod tests {
                 "{privacy:?} does not round-trip through its own index"
             );
         }
-        assert_eq!(Privacy::ALL.len(), 3, "a new option needs a label and an index");
+        assert_eq!(
+            Privacy::ALL.len(),
+            3,
+            "a new option needs a label and an index"
+        );
     }
 
     /// Public leads the list. Not cosmetic: the popup's first entry is what a

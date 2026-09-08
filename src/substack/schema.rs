@@ -200,7 +200,10 @@ mod tests {
             hooks: vec!["The queue drained at 3am and nobody noticed.".into()],
             sections: vec![Section {
                 heading: "Where it broke".into(),
-                beats: vec!["the retry had no ceiling".into(), "12k duplicate rows".into()],
+                beats: vec![
+                    "the retry had no ceiling".into(),
+                    "12k duplicate rows".into(),
+                ],
                 chapter: Some(2),
                 timestamp: Some("04:12".into()),
             }],
@@ -223,7 +226,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = save(&dir, &sample()).expect("save");
         assert!(path.exists());
-        assert!(dir.join(NOTES_MD).exists(), "the file you type from is written too");
+        assert!(
+            dir.join(NOTES_MD).exists(),
+            "the file you type from is written too"
+        );
         assert_eq!(load(&dir).expect("load"), sample());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -257,7 +263,10 @@ mod tests {
 
     #[test]
     fn a_marker_uses_whichever_half_it_has() {
-        assert_eq!(marker(Some(3), Some("01:02")).as_deref(), Some("chapter 3 · 01:02"));
+        assert_eq!(
+            marker(Some(3), Some("01:02")).as_deref(),
+            Some("chapter 3 · 01:02")
+        );
         assert_eq!(marker(Some(3), None).as_deref(), Some("chapter 3"));
         assert_eq!(marker(None, Some("01:02")).as_deref(), Some("01:02"));
         assert_eq!(marker(None, None), None);
@@ -270,10 +279,16 @@ mod tests {
         let bare = SubstackNotes {
             version: Some(1),
             prompt_hash: "abc".into(),
-            links: vec![Link { label: "Watch".into(), url: "u".into() }],
+            links: vec![Link {
+                label: "Watch".into(),
+                url: "u".into(),
+            }],
             ..SubstackNotes::default()
         };
-        assert!(bare.is_empty(), "links alone are not something to type from");
+        assert!(
+            bare.is_empty(),
+            "links alone are not something to type from"
+        );
         assert!(!sample().is_empty());
         assert_eq!(sample().beat_count(), 2);
     }

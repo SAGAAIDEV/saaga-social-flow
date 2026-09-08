@@ -115,6 +115,7 @@ pub struct BlockView {
 /// rather than under a path this function is given, so loading them internally
 /// would make the pane — and every test of it — depend on whatever the machine
 /// happens to have picked.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     root: &Path,
     dir: &Path,
@@ -230,7 +231,12 @@ fn article_view(article: Article) -> ArticleView {
                 // itself lives in `components.json` and is shown there.
                 Block::Embed { id } => ("embed", Vec::new(), id.clone()),
             };
-            BlockView { index: index + 1, kind, headings, body }
+            BlockView {
+                index: index + 1,
+                kind,
+                headings,
+                body,
+            }
         })
         .collect();
 
@@ -252,7 +258,10 @@ fn article_view(article: Article) -> ArticleView {
                 article.canonical_url
             ),
             (false, false) => {
-                format!("canonical to {} — search will credit that page", article.canonical_url)
+                format!(
+                    "canonical to {} — search will credit that page",
+                    article.canonical_url
+                )
             }
             (false, true) => String::new(),
         },
@@ -289,7 +298,9 @@ fn headings_in(html: &str) -> Vec<String> {
         let Some(level) = rest.chars().next().filter(|c| ('1'..='3').contains(c)) else {
             continue;
         };
-        let Some(open_end) = rest.find('>') else { break };
+        let Some(open_end) = rest.find('>') else {
+            break;
+        };
         let close = format!("</h{level}>");
         let after = &rest[open_end + 1..];
         let Some(close_at) = after.find(&close) else {
@@ -378,7 +389,16 @@ mod tests {
     #[test]
     fn a_project_with_no_draft_invites_the_first_one() {
         let dir = temp("empty");
-        let pane = build(&dir, &dir, true, None, None, &unset(), &no_library(), figures(&dir));
+        let pane = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        );
         assert!(pane.blocked.unwrap().contains("press Create Draft"));
         assert!(pane.article.is_none());
         assert!(pane.posted.is_none());
@@ -388,7 +408,16 @@ mod tests {
     #[test]
     fn a_gate_reason_wins_over_the_invitation() {
         let dir = temp("gated");
-        let pane = build(&dir, &dir, false, Some("Not on YouTube yet".into()), None, &unset(), &no_library(), figures(&dir));
+        let pane = build(
+            &dir,
+            &dir,
+            false,
+            Some("Not on YouTube yet".into()),
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        );
         assert_eq!(pane.blocked.as_deref(), Some("Not on YouTube yet"));
         assert!(!pane.can_publish);
     }
@@ -397,9 +426,21 @@ mod tests {
     fn a_written_draft_shows_its_blocks_and_counts() {
         let dir = temp("written");
         written(&dir);
-        let pane = build(&dir, &dir, true, None, None, &unset(), &no_library(), figures(&dir));
+        let pane = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        );
         let article = pane.article.expect("a draft");
-        assert_eq!(article.summary, "1 section(s) · 1 quote(s) · 0 table(s) · 0 figure(s)");
+        assert_eq!(
+            article.summary,
+            "1 section(s) · 1 quote(s) · 0 table(s) · 0 figure(s)"
+        );
         assert_eq!(article.blocks[0].kind, "text");
         assert_eq!(article.blocks[0].index, 1, "numbered for the reader");
         assert_eq!(article.blocks[1].kind, "quote");
@@ -414,8 +455,22 @@ mod tests {
     fn the_description_reports_its_own_length() {
         let dir = temp("length");
         written(&dir);
-        let article = build(&dir, &dir, true, None, None, &unset(), &no_library(), figures(&dir)).article.unwrap();
-        assert_eq!(article.description_length, article.description.chars().count());
+        let article = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        )
+        .article
+        .unwrap();
+        assert_eq!(
+            article.description_length,
+            article.description.chars().count()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -426,16 +481,26 @@ mod tests {
     fn the_headings_shown_are_the_ones_the_page_will_list() {
         let dir = temp("toc");
         written(&dir);
-        let article = build(&dir, &dir, true, None, None, &unset(), &no_library(), figures(&dir)).article.unwrap();
+        let article = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        )
+        .article
+        .unwrap();
         assert_eq!(article.blocks[0].headings, vec!["Where it broke", "Detail"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn headings_survive_attributes_and_nested_tags() {
-        let got = headings_in(
-            "<h2 id=\"a\">Where <strong>it</strong> broke</h2><p>x</p><h2>Second</h2>",
-        );
+        let got =
+            headings_in("<h2 id=\"a\">Where <strong>it</strong> broke</h2><p>x</p><h2>Second</h2>");
         assert_eq!(got, vec!["Where it broke", "Second"]);
     }
 
@@ -485,7 +550,16 @@ mod tests {
     #[test]
     fn an_unconfigured_pane_says_nothing_is_chosen() {
         let dir = temp("byline-none");
-        let pane = build(&dir, &dir, true, None, None, &unset(), &no_library(), figures(&dir));
+        let pane = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &unset(),
+            &no_library(),
+            figures(&dir),
+        );
         assert_eq!(pane.author, "none chosen");
         assert_eq!(pane.category, "none chosen");
         assert!(pane.library_hint.contains("Press Refresh"));
@@ -501,7 +575,16 @@ mod tests {
     #[test]
     fn the_pane_names_the_byline_it_would_post_under() {
         let dir = temp("byline");
-        let pane = build(&dir, &dir, true, None, None, &picked(12, 2), &library(), figures(&dir));
+        let pane = build(
+            &dir,
+            &dir,
+            true,
+            None,
+            None,
+            &picked(12, 2),
+            &library(),
+            figures(&dir),
+        );
         assert_eq!(pane.author, "Ahmed Raza");
         assert_eq!(pane.category, "AI Powered Marketing");
         assert!(pane.library_hint.contains("read 2026-08-29T00:00:00Z"));
@@ -512,7 +595,9 @@ mod tests {
         // Two authors really do share a name in the live CMS, so the job title
         // is what tells them apart in the list.
         assert!(
-            pane.authors.iter().any(|c| c.label.contains("Senior SEO Content Strategist")),
+            pane.authors
+                .iter()
+                .any(|c| c.label.contains("Senior SEO Content Strategist")),
             "{:?}",
             pane.authors.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
@@ -558,7 +643,11 @@ mod tests {
                 entry(11, "Danish Rafique", Some("Senior SEO Content Strategist")),
                 entry(25, "Danish Rafique", Some("SEO Content Strategist")),
             ],
-            categories: vec![entry(2, "AI Powered Marketing", Some("Marketing, automated"))],
+            categories: vec![entry(
+                2,
+                "AI Powered Marketing",
+                Some("Marketing, automated"),
+            )],
         }
     }
 

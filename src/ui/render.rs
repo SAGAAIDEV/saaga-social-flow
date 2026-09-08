@@ -36,13 +36,16 @@ fn environment() -> Environment<'static> {
         .expect("components template");
     env.add_template("reflect.html", REFLECT)
         .expect("reflect template");
-    env.add_template("video.html", VIDEO).expect("video template");
+    env.add_template("video.html", VIDEO)
+        .expect("video template");
     env.add_template("edit.html", EDIT).expect("edit template");
     env.add_template("substack.html", SUBSTACK)
         .expect("substack template");
     env.add_template("blog.html", BLOG).expect("blog template");
-    env.add_template("youtube.html", include_str!("templates/youtube.html")).expect("youtube template");
-    env.add_template("settings.html", include_str!("templates/settings.html")).expect("settings template");
+    env.add_template("youtube.html", include_str!("templates/youtube.html"))
+        .expect("youtube template");
+    env.add_template("settings.html", include_str!("templates/settings.html"))
+        .expect("settings template");
     env
 }
 
@@ -151,11 +154,14 @@ mod tests {
 
     #[test]
     fn the_video_pane_preserves_and_escapes_author_notes() {
-        let html = page("video.html", context! {
-            brief => crate::video_brief::Brief { notes: "</textarea><script>bad()</script>".into(), title: "A title".into(), description: "A description".into() },
-            root => "/tmp/project", busy => true, model => "chosen-model",
-            art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
-        });
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief { notes: "</textarea><script>bad()</script>".into(), title: "A title".into(), description: "A description".into() },
+                root => "/tmp/project", busy => true, model => "chosen-model",
+                art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
+            },
+        );
         assert!(!html.contains("template error"), "{html}");
         assert!(!html.contains("<script>bad()</script>"));
         assert!(html.contains("<fieldset disabled>"));
@@ -165,18 +171,24 @@ mod tests {
         assert!(!html.contains("name=\"title\""));
         assert!(!html.contains("Generate title"));
         assert!(html.contains("A title") && html.contains("A description"));
-        assert!(html.contains("Render video and thumbnails"), "the pane names the button that fills it");
+        assert!(
+            html.contains("Render video and thumbnails"),
+            "the pane names the button that fills it"
+        );
     }
 
     /// Before any render there is no copy, no artwork and nothing to watch, and
     /// each section says what will fill it rather than drawing an empty box.
     #[test]
     fn an_empty_video_pane_says_what_the_render_will_produce() {
-        let html = page("video.html", context! {
-            brief => crate::video_brief::Brief::default(),
-            root => "/tmp/project", busy => false, model => "m",
-            art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
-        });
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
+            },
+        );
         assert!(!html.contains("template error"), "{html}");
         assert!(!html.contains("id=\"copy\""));
         assert!(html.contains("Nothing written yet"));
@@ -194,79 +206,94 @@ mod tests {
     /// the set is made of, the photo they were drawn from, and the clips.
     #[test]
     fn a_rendered_video_pane_shows_copy_artwork_and_clips_in_that_order() {
-        let html = page("video.html", context! {
-            brief => crate::video_brief::Brief { notes: "".into(), title: "Ship it anyway".into(), description: "Why the queue fell over.".into() },
-            root => "/tmp/project", busy => false, model => "m",
-            art => context! {
-                artwork => vec![
-                    context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
-                    context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
-                    context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
-                ],
-                artwork_notice => None::<String>,
-                still => context! { url => "file:///tmp/still.jpg" },
-                screen => context! { url => "file:///tmp/screen.jpg" },
-                brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
-                candidates => vec![
-                    context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
-                ],
-                models => vec![
-                    context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
-                ],
-                references => vec![
-                    context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
-                ],
-                active_id => "thumb-a", can_generate => true, blocked => None::<String>,
-                card => context! {
-                    format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
-                    kicker => "SAAGA",
-                    themes => vec![
-                        context! { id => "dark", label => "dark", selected => true },
-                        context! { id => "light", label => "light", selected => false },
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief { notes: "".into(), title: "Ship it anyway".into(), description: "Why the queue fell over.".into() },
+                root => "/tmp/project", busy => false, model => "m",
+                art => context! {
+                    artwork => vec![
+                        context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
+                        context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
+                        context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
                     ],
-                    focus => "0.34", can_draw => true, hint => "Redraws all three.",
+                    artwork_notice => None::<String>,
+                    still => context! { url => "file:///tmp/still.jpg" },
+                    screen => context! { url => "file:///tmp/screen.jpg" },
+                    brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
+                    candidates => vec![
+                        context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
+                    ],
+                    models => vec![
+                        context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
+                    ],
+                    references => vec![
+                        context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
+                    ],
+                    active_id => "thumb-a", can_generate => true, blocked => None::<String>,
+                    card => context! {
+                        format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
+                        kicker => "SAAGA",
+                        themes => vec![
+                            context! { id => "dark", label => "dark", selected => true },
+                            context! { id => "light", label => "light", selected => false },
+                        ],
+                        focus => "0.34", can_draw => true, hint => "Redraws all three.",
+                    },
+                },
+                review => context! {
+                    blocked => None::<String>,
+                    clips => vec![
+                        context! { id => "longform", label => "Longform", url => "file:///tmp/render/horizontal/longform.mp4",
+                                   orientation => "landscape", megabytes => 12.5 },
+                        context! { id => "chapter-01", label => "Chapter 01", url => "file:///tmp/render/vertical/chapter-01.mp4",
+                                   orientation => "portrait", megabytes => 3.0 },
+                    ],
+                },
+                youtube => None::<String>,
+                figures => context! {
+                    can_write => true,
+                    hint => "2 figures · 1 still to write about.",
+                    rows => vec![
+                        context! {
+                            n => 2, label => "figure 02", url => "file:///tmp/figures/figure-02.webp",
+                            moment => "ch 03 · 1:24", size => "1280 × 720",
+                            caption => "The retry storm that took the queue down.", alt => "A log filling with 429s",
+                            written => true, said => "So this is the log at three in the morning, every line a 429.",
+                            said_note => "",
+                        },
+                        context! {
+                            n => 1, label => "figure 01", url => "file:///tmp/figures/figure-01.webp",
+                            moment => "ch 01 · 0:12", size => "900 × 600",
+                            caption => "", alt => "", written => false, said => "",
+                            said_note => "Transcribing what you said…",
+                        },
+                    ],
                 },
             },
-            review => context! {
-                blocked => None::<String>,
-                clips => vec![
-                    context! { id => "longform", label => "Longform", url => "file:///tmp/render/horizontal/longform.mp4",
-                               orientation => "landscape", megabytes => 12.5 },
-                    context! { id => "chapter-01", label => "Chapter 01", url => "file:///tmp/render/vertical/chapter-01.mp4",
-                               orientation => "portrait", megabytes => 3.0 },
-                ],
-            },
-            youtube => None::<String>,
-            figures => context! {
-                can_write => true,
-                hint => "2 figures · 1 still to write about.",
-                rows => vec![
-                    context! {
-                        n => 2, label => "figure 02", url => "file:///tmp/figures/figure-02.webp",
-                        moment => "ch 03 · 1:24", size => "1280 × 720",
-                        caption => "The retry storm that took the queue down.", alt => "A log filling with 429s",
-                        written => true, said => "So this is the log at three in the morning, every line a 429.",
-                        said_note => "",
-                    },
-                    context! {
-                        n => 1, label => "figure 01", url => "file:///tmp/figures/figure-01.webp",
-                        moment => "ch 01 · 0:12", size => "900 × 600",
-                        caption => "", alt => "", written => false, said => "",
-                        said_note => "Transcribing what you said…",
-                    },
-                ],
-            },
-        });
+        );
         assert!(!html.contains("template error"), "{html}");
         // The figures, each with what was said over it — or why nothing was yet.
-        assert!(html.contains("every line a 429"), "the spoken explanation is on the page");
-        assert!(html.contains("Transcribing what you said…"), "a figure still transcribing says so");
-        assert!(html.contains("The retry storm that took the queue down."), "the blurb is shown under it");
+        assert!(
+            html.contains("every line a 429"),
+            "the spoken explanation is on the page"
+        );
+        assert!(
+            html.contains("Transcribing what you said…"),
+            "a figure still transcribing says so"
+        );
+        assert!(
+            html.contains("The retry storm that took the queue down."),
+            "the blurb is shown under it"
+        );
         assert!(html.contains("figure-02.webp") && html.contains("figure-01.webp"));
         assert!(html.contains("captureFigure") && html.contains("writeBlurbs"));
         let figs = html.find("figure-02.webp").unwrap();
-        assert!(html.find("horizontal.jpg").unwrap() < figs && figs < html.find("longform.mp4").unwrap(),
-            "figures sit between the artwork and the clips");
+        assert!(
+            html.find("horizontal.jpg").unwrap() < figs
+                && figs < html.find("longform.mp4").unwrap(),
+            "figures sit between the artwork and the clips"
+        );
         // Order of production is the order on the page.
         let copy = html.find("id=\"copy\"").expect("the copy box");
         let art = html.find("horizontal.jpg").expect("the artwork set");
@@ -284,12 +311,19 @@ mod tests {
         assert!(html.contains("saveCard"));
         assert!(html.contains(r#"data-form="card""#));
         assert!(html.contains(r#"data-field="kicker""#));
-        assert!(html.contains(r#"value="0.34""#), "the focus is where it was left");
+        assert!(
+            html.contains(r#"value="0.34""#),
+            "the focus is where it was left"
+        );
         // The design controls and the AI experiments still have a home, folded away.
         assert_eq!(html.matches("<details class=\"acc\">").count(), 2);
         // The pipeline strip reads the whole run off the page's own data.
         let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
-        assert_eq!(steps.matches("done").count(), 4, "photo, render, copy and artwork are done: {steps}");
+        assert_eq!(
+            steps.matches("done").count(),
+            4,
+            "photo, render, copy and artwork are done: {steps}"
+        );
         assert!(steps.contains("YouTube"));
         assert!(html.contains("saveBrief") && html.contains(r#"data-form="brief""#));
         assert!(html.contains("selectThumbnail") && html.contains("· live"));
@@ -304,20 +338,27 @@ mod tests {
     #[test]
     fn a_stale_artwork_set_says_why_above_the_pictures() {
         let mut art = serde_json::to_value(empty_art()).unwrap();
-        art["artwork_notice"] = "Design changed since the artwork was drawn — redraw it before publishing".into();
+        art["artwork_notice"] =
+            "Design changed since the artwork was drawn — redraw it before publishing".into();
         art["artwork"] = serde_json::json!([
             { "id": "horizontal", "url": "file:///tmp/sets/a/horizontal.jpg", "label": "horizontal · 1280×720", "selected": true }
         ]);
-        let html = page("video.html", context! {
-            brief => crate::video_brief::Brief::default(),
-            root => "/tmp/project", busy => false, model => "m",
-            art => art, review => no_clips(), youtube => None::<String>, figures => no_figures(),
-        });
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => art, review => no_clips(), youtube => None::<String>, figures => no_figures(),
+            },
+        );
         assert!(!html.contains("template error"), "{html}");
         let notice = html.find("Design changed").expect("the notice");
         let picture = html.find("horizontal.jpg").expect("the picture");
         assert!(notice < picture);
-        assert!(html.contains(r#"class="badge warn">Stale"#), "the card is badged stale");
+        assert!(
+            html.contains(r#"class="badge warn">Stale"#),
+            "the card is badged stale"
+        );
         let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
         assert!(steps.contains(r#"class="stale""#), "{steps}");
     }
@@ -326,12 +367,15 @@ mod tests {
     /// render's chain, read without a trip to the YouTube tab.
     #[test]
     fn an_uploaded_project_completes_the_pipeline_strip() {
-        let html = page("video.html", context! {
-            brief => crate::video_brief::Brief::default(),
-            root => "/tmp/project", busy => false, model => "m",
-            art => empty_art(), review => no_clips(), figures => no_figures(),
-            youtube => "https://www.youtube.com/watch?v=abc",
-        });
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => empty_art(), review => no_clips(), figures => no_figures(),
+                youtube => "https://www.youtube.com/watch?v=abc",
+            },
+        );
         assert!(!html.contains("template error"), "{html}");
         let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
         let youtube = steps.rfind("<li").unwrap();
@@ -340,7 +384,10 @@ mod tests {
 
     #[test]
     fn an_empty_reflect_pane_invites_the_first_run() {
-        let html = page("reflect.html", context! { report => None::<()>, can_apply => false });
+        let html = page(
+            "reflect.html",
+            context! { report => None::<()>, can_apply => false },
+        );
         assert!(html.contains("Press Reflect"));
         assert!(html.contains("messageHandlers.app"), "the bridge is wired");
         // The payload is HTML-escaped inside the attribute; the click handler
@@ -388,7 +435,10 @@ mod tests {
         assert!(html.contains("I assumed the ledger would catch it."));
         assert!(html.contains("verbatim"), "the quotes are labelled as such");
         assert!(html.contains("generateSubstack"));
-        assert!(html.contains("copyText"), "every row carries a copy payload");
+        assert!(
+            html.contains("copyText"),
+            "every row carries a copy payload"
+        );
         assert!(html.contains("editSubstackPrompt"));
         assert!(html.contains("v0 (builtin)"));
         // An empty group is omitted rather than shown as a heading with nothing
@@ -466,14 +516,29 @@ mod tests {
         );
         assert!(html.contains("Why watermarking fails"));
         assert!(html.contains("/blog/why-watermarking-fails"));
-        assert!(html.contains("140 to 160"), "the description target is stated");
+        assert!(
+            html.contains("140 to 160"),
+            "the description target is stated"
+        );
         // Both SEO fields the generator now writes. The FAQ especially: it
         // publishes as structured data, so it has to be readable before the
         // publish rather than after.
-        assert!(html.contains("and what enforcement costs"), "the heading is shown");
-        assert!(html.contains("Not past the first retry."), "the FAQ is shown");
-        assert!(html.contains("primary · ai watermarking"), "the keyword brief is shown");
-        assert!(html.contains("Where it broke"), "the table of contents is shown");
+        assert!(
+            html.contains("and what enforcement costs"),
+            "the heading is shown"
+        );
+        assert!(
+            html.contains("Not past the first retry."),
+            "the FAQ is shown"
+        );
+        assert!(
+            html.contains("primary · ai watermarking"),
+            "the keyword brief is shown"
+        );
+        assert!(
+            html.contains("Where it broke"),
+            "the table of contents is shown"
+        );
         assert!(html.contains("Ahmed Raza"), "the byline is visible");
         assert!(html.contains("Education"));
         assert!(html.contains("publishBlog"));
@@ -484,7 +549,10 @@ mod tests {
         let write_at = html.find("writeBlog").expect("the write button");
         let preview_at = html.find("previewBlog").expect("the preview button");
         let publish_at = html.find("publishBlog").expect("the publish button");
-        assert!(write_at < preview_at && preview_at < publish_at, "buttons out of order");
+        assert!(
+            write_at < preview_at && preview_at < publish_at,
+            "buttons out of order"
+        );
         assert!(
             html.contains("Create Draft publishes the draft below as it stands"),
             "the pane says the draft on disk is what publishes"
@@ -492,18 +560,27 @@ mod tests {
         // The pickers, and the row each one is currently on. Without `selected`
         // the dropdown would open on whatever is first and a glance at the tab
         // would report the wrong byline.
-        assert!(html.contains("blogAuthor"), "the author picker is on the page");
+        assert!(
+            html.contains("blogAuthor"),
+            "the author picker is on the page"
+        );
         assert!(html.contains("blogCategory"));
         assert!(html.contains("refreshBlogLibrary"));
         // The figure strip, and the two states a figure can be in. A captured
         // figure with no blurb has to say so rather than render an empty
         // caption, which reads as a blurb that came back blank.
-        assert!(html.contains("captureFigure"), "the snip button is on the page");
+        assert!(
+            html.contains("captureFigure"),
+            "the snip button is on the page"
+        );
         assert!(html.contains("writeBlurbs"));
         assert!(html.contains("figure 02 · ch 03 · 1:24 · 1280 × 720"));
         assert!(html.contains("The retry storm that took the queue down."));
         assert!(html.contains("alt: A log filling with 429s"));
-        assert!(html.contains("No blurb yet."), "the unwritten figure says so");
+        assert!(
+            html.contains("No blurb yet."),
+            "the unwritten figure says so"
+        );
         assert!(html.contains("1 still to write about"));
         assert!(
             html.contains(r#"<option value="12" selected>"#),
@@ -534,14 +611,24 @@ mod tests {
                 },
                 article => None::<()>,
                 article_path => None::<String>,
+                figures => no_figures(),
             },
         );
+        // The pane rendered, rather than the error page standing in for it. In a
+        // debug build that page dumps the referenced variables, so every string
+        // below is in it too — which is how these two tests passed for weeks
+        // without the `figures` block the template had started to need, and
+        // failed the moment CI ran them in release.
+        assert!(!html.contains("template error"), "{html}");
         // Displayed with `/` as `&#x2f;` — minijinja escapes it and the browser
         // decodes it back, so the host is what to assert on, not the whole URL.
         assert!(html.contains("saagasolve.com"));
         assert!(html.contains("cms.saagasolve.com"));
         assert!(html.contains("published"));
-        assert!(html.contains("author could not be set"), "a warning is not swallowed");
+        assert!(
+            html.contains("author could not be set"),
+            "a warning is not swallowed"
+        );
         // Both URLs are copyable, and the payload carries them unescaped. The
         // admin one especially: it is how a bad post gets fixed.
         assert!(html.contains("https://saagasolve.com/blog/why-watermarking-fails"));
@@ -561,8 +648,10 @@ mod tests {
                 posted => None::<()>,
                 article => None::<()>,
                 article_path => None::<String>,
+                figures => no_figures(),
             },
         );
+        assert!(!html.contains("template error"), "{html}");
         assert!(html.contains("Not on YouTube yet"));
         assert!(!html.contains("article.json"));
     }
@@ -622,8 +711,18 @@ mod tests {
                 peaks: vec![0, 128, 255],
                 spans: vec![[0, 41_200], [43_900, 121_000]],
                 words: vec![
-                    Word { text: "hello".into(), start: 0, end: 500, kept: true },
-                    Word { text: "um".into(), start: 41_500, end: 43_000, kept: false },
+                    Word {
+                        text: "hello".into(),
+                        start: 0,
+                        end: 500,
+                        kept: true,
+                    },
+                    Word {
+                        text: "um".into(),
+                        start: 41_500,
+                        end: 43_000,
+                        kept: false,
+                    },
                 ],
                 edited: false,
                 source_label: "2:14".into(),
@@ -637,14 +736,20 @@ mod tests {
 
         // The rail lists every chapter and marks the hand-edited one.
         assert!(html.contains("openChapter"), "the rail switches chapters");
-        assert!(html.contains("3:12"), "another chapter's length is on the rail");
+        assert!(
+            html.contains("3:12"),
+            "another chapter's length is on the rail"
+        );
         // The editor's own payloads.
         assert!(html.contains("applyEdit"));
         assert!(html.contains("resetEdit"));
         assert!(html.contains("saveEdit"));
         // The timeline's data, inlined rather than fetched.
         assert!(html.contains("[0,128,255]"), "peaks reach the pane");
-        assert!(html.contains("[[0,41200],[43900,121000]]"), "so do the spans");
+        assert!(
+            html.contains("[[0,41200],[43900,121000]]"),
+            "so do the spans"
+        );
         assert!(html.contains("chapter-01-horizontal.mp4"));
         // Word chips, with the dropped one struck through.
         assert!(html.contains(r#"data-start="41500""#));
@@ -725,7 +830,10 @@ mod tests {
         assert!(html.contains("posts.social"));
         assert!(html.contains("+2 −1 lines"));
         assert!(html.contains("ready to apply"));
-        assert!(html.contains(r#"class="del""#), "a deletion is visibly marked");
+        assert!(
+            html.contains(r#"class="del""#),
+            "a deletion is visibly marked"
+        );
         assert!(html.contains("Old rule."));
         assert!(html.contains("checked"), "an approved rewrite stays ticked");
         assert!(html.contains("12 post(s)"));
@@ -762,16 +870,18 @@ mod tests {
     }
     #[test]
     fn youtube_details_are_editable_and_escaped() {
-        let html = page("youtube.html", minijinja::context! {
-            metadata => crate::publish::metadata::Metadata {
-                title: "A <video>".into(), description: "Text & details".into(),
-            }, info => "Ready to upload",
-        });
+        let html = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata {
+                    title: "A <video>".into(), description: "Text & details".into(),
+                }, info => "Ready to upload",
+            },
+        );
         assert!(html.contains("A &lt;video&gt;"));
         assert!(html.contains("Text &amp; details"));
         assert!(html.contains("saveYoutube"));
         assert!(html.contains("Save video details"));
         assert!(!html.contains("Template error"));
     }
-
 }

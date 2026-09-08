@@ -298,13 +298,20 @@ fn peak_sees_the_transient_that_rms_averages_away() {
     samples[300] = 1.0;
     let levels = levels_dbfs(&float_bytes(&samples), F32_MONO);
 
-    assert!(levels.peak_dbfs > -0.1, "peak caught it: {}", levels.peak_dbfs);
+    assert!(
+        levels.peak_dbfs > -0.1,
+        "peak caught it: {}",
+        levels.peak_dbfs
+    );
     assert!(
         levels.rms_dbfs < -20.0,
         "rms averaged it away: {}",
         levels.rms_dbfs
     );
-    assert!(levels.peak_dbfs >= levels.rms_dbfs, "peak is never below rms");
+    assert!(
+        levels.peak_dbfs >= levels.rms_dbfs,
+        "peak is never below rms"
+    );
 }
 
 #[test]

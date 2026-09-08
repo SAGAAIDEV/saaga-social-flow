@@ -65,7 +65,10 @@ pub fn requested(session: &Session) -> Vec<super::generate::EmbedOffer> {
     let steps: Value = match serde_json::from_str(&text) {
         Ok(steps) => steps,
         Err(err) => {
-            eprintln!("stream-recorder: {} is not valid JSON: {err}", path.display());
+            eprintln!(
+                "stream-recorder: {} is not valid JSON: {err}",
+                path.display()
+            );
             return Vec::new();
         }
     };
@@ -163,7 +166,9 @@ pub fn run(args: &Args) -> Result<()> {
         .context("opening landing checkout")?;
     let runner = std::env::var_os("CONTENT_WORKFLOW_RUNNER")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/content-job.mjs"));
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/content-job.mjs")
+        });
     if !runner.is_file() {
         bail!("Recorder content-job runner not found; set CONTENT_WORKFLOW_RUNNER");
     }
@@ -244,11 +249,15 @@ mod reading {
     use super::*;
 
     fn session(tag: &str) -> (PathBuf, Session) {
-        let root = std::env::temp_dir()
-            .join(format!("blog-components-{}-{tag}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("blog-components-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let session = Session { root: root.clone(), dir: root.join("drafts"), version: None };
+        let session = Session {
+            root: root.clone(),
+            dir: root.join("drafts"),
+            version: None,
+        };
         std::fs::create_dir_all(session.blog_dir()).unwrap();
         (root, session)
     }

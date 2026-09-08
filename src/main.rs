@@ -49,12 +49,11 @@ mod notes;
 mod ops;
 mod overlay;
 mod permissions;
-mod preflight;
 mod pointer;
 mod posts;
-mod titles;
-mod reflect;
+mod preflight;
 mod publish;
+mod reflect;
 mod region;
 mod review;
 mod router;
@@ -66,11 +65,12 @@ mod stage;
 mod substack;
 mod thumbnail;
 mod timesync;
+mod titles;
 mod track;
 mod transcode;
 mod ui;
-mod writer;
 mod video_brief;
+mod writer;
 
 use std::path::Path;
 
@@ -81,8 +81,7 @@ use crate::cli::{Args, Command};
 
 pub(crate) fn load_dotenv() {
     let next_to_crate = Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
-    let screencast = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../screencast/.env");
+    let screencast = Path::new(env!("CARGO_MANIFEST_DIR")).join("../screencast/.env");
     let next_to_cwd = std::env::current_dir().ok().map(|d| d.join(".env"));
     // Last, so it never shadows a checkout's own file on a development machine.
     // It is also the only one of these that exists on a machine that installed a
@@ -146,8 +145,8 @@ fn main() -> Result<()> {
     if let Some(command) = &args.command {
         match command {
             Command::Credentials => return settings::report(&mut std::io::stdout()),
-        Command::Doctor => return preflight::report(&mut std::io::stdout()),
-        Command::BlogComponents(request) => return blog::components::run(request),
+            Command::Doctor => return preflight::report(&mut std::io::stdout()),
+            Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,
                 format,
@@ -173,7 +172,11 @@ fn main() -> Result<()> {
                     // Use the selected orientation throughout rasterisation.
                     size: format.size(),
                 };
-                let drawn = if *all_formats { card::cli::run_set(request)? } else { card::cli::run(request)? };
+                let drawn = if *all_formats {
+                    card::cli::run_set(request)?
+                } else {
+                    card::cli::run(request)?
+                };
                 println!("{}", drawn.display());
                 return Ok(());
             }

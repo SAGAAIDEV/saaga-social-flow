@@ -116,7 +116,11 @@ pub fn library_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".stream-recorder").join(PROMPTS_DIR))
+    Some(
+        PathBuf::from(home)
+            .join(".stream-recorder")
+            .join(PROMPTS_DIR),
+    )
 }
 
 /// Where a standing override for `prompt_id` lives, whether or not it is there
@@ -339,8 +343,7 @@ pub fn apply(
 ) -> Result<VersionRow> {
     let dir = prompts_dir(root);
     let history = dir.join(HISTORY_DIR);
-    std::fs::create_dir_all(&history)
-        .with_context(|| format!("creating {}", history.display()))?;
+    std::fs::create_dir_all(&history).with_context(|| format!("creating {}", history.display()))?;
 
     let live = dir.join(format!("{prompt_id}.txt"));
     if let Ok(previous) = std::fs::read_to_string(&live) {
@@ -432,9 +435,24 @@ mod tests {
     #[test]
     fn versions_climb_per_prompt_and_archive_what_they_replace() {
         let dir = temp("climb");
-        apply(&dir, POSTS, "first", "reflect", None, "2026-08-16T09:00:00Z").unwrap();
-        let second =
-            apply(&dir, POSTS, "second", "reflect", None, "2026-08-17T09:00:00Z").unwrap();
+        apply(
+            &dir,
+            POSTS,
+            "first",
+            "reflect",
+            None,
+            "2026-08-16T09:00:00Z",
+        )
+        .unwrap();
+        let second = apply(
+            &dir,
+            POSTS,
+            "second",
+            "reflect",
+            None,
+            "2026-08-17T09:00:00Z",
+        )
+        .unwrap();
         assert_eq!(second.version, 2);
         // A different prompt starts its own count.
         let other = apply(&dir, TITLES, "t", "hand", None, "2026-08-17T09:00:00Z").unwrap();
@@ -454,7 +472,15 @@ mod tests {
     #[test]
     fn a_hand_edited_overlay_resolves_as_unversioned() {
         let dir = temp("handedit");
-        apply(&dir, POSTS, "generated", "reflect", None, "2026-08-16T09:00:00Z").unwrap();
+        apply(
+            &dir,
+            POSTS,
+            "generated",
+            "reflect",
+            None,
+            "2026-08-16T09:00:00Z",
+        )
+        .unwrap();
         assert_eq!(only_project(POSTS, "builtin", Some(&dir)).version, Some(1));
 
         std::fs::write(
@@ -542,8 +568,15 @@ mod tests {
         let lib = library("project-wins");
         std::fs::write(lib.join(format!("{POSTS}.txt")), "house voice").unwrap();
         let project = temp("project-wins");
-        apply(&project, POSTS, "this project only", "reflect", None, "2026-08-16T09:00:00Z")
-            .unwrap();
+        apply(
+            &project,
+            POSTS,
+            "this project only",
+            "reflect",
+            None,
+            "2026-08-16T09:00:00Z",
+        )
+        .unwrap();
 
         let got = resolve_in(POSTS, "builtin", Some(&project), Some(&lib));
         assert_eq!(got.text, "this project only");

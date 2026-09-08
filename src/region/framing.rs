@@ -269,7 +269,10 @@ mod tests {
         assert!(offset.0 < 0.5, "got {offset:?}");
         // 0.30 * 1920 = 576, minus half of the 522px window = 315, over 1398
         // of travel.
-        assert!((offset.0 - (576.0 - 261.0) / 1398.0).abs() < 1e-9, "{offset:?}");
+        assert!(
+            (offset.0 - (576.0 - 261.0) / 1398.0).abs() < 1e-9,
+            "{offset:?}"
+        );
     }
 
     /// Tracking the full-bleed longform is a no-op without a punch-in, and

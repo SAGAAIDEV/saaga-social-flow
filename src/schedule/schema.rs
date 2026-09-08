@@ -257,7 +257,10 @@ mod tests {
             .sendable()
             .map(|item| (item.video_id.as_str(), item.platform.as_str()))
             .collect();
-        assert_eq!(shipped, vec![("longform", "youtube"), ("chapter-01", "tiktok")]);
+        assert_eq!(
+            shipped,
+            vec![("longform", "youtube"), ("chapter-01", "tiktok")]
+        );
         assert_eq!(plan.queueable().count(), 2, "a tick cannot unblock a skip");
     }
 
@@ -271,10 +274,9 @@ mod tests {
         assert!(back.items[0].approved);
         assert!(!back.items[2].approved);
         // A plan written before the gate existed reads back as unapproved.
-        let legacy = serde_json::to_string(&saved).expect("serialize").replace(
-            "\"approved\":true",
-            "\"approved\":false",
-        );
+        let legacy = serde_json::to_string(&saved)
+            .expect("serialize")
+            .replace("\"approved\":true", "\"approved\":false");
         let legacy: SchedulePlan = serde_json::from_str(&legacy).expect("parse");
         assert_eq!(legacy.sendable().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);

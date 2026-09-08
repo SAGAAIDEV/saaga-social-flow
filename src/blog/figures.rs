@@ -99,7 +99,9 @@ fn resolve(
         let figure = captured
             .iter()
             .find(|figure| figure.n == *n)
-            .with_context(|| format!("the article places figure {n:02}, which was never captured"))?;
+            .with_context(|| {
+                format!("the article places figure {n:02}, which was never captured")
+            })?;
         if !figure.file.is_file() {
             bail!(
                 "figure {n:02}'s image is missing from {}",

@@ -300,11 +300,7 @@ mod tests {
     #[test]
     fn uh_huh_is_a_filler_after_cleaning() {
         let edits = compute_edits(
-            &[
-                w("Yes", 0, 100),
-                w("uh-huh", 120, 200),
-                w("okay", 300, 400),
-            ],
+            &[w("Yes", 0, 100), w("uh-huh", 120, 200), w("okay", 300, 400)],
             0,
             0,
         );

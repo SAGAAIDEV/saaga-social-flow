@@ -49,7 +49,10 @@ impl Brief {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str(&format!("{} thumbnail, the text legible at small size.", format.aspect_ratio()));
+        out.push_str(&format!(
+            "{} thumbnail, the text legible at small size.",
+            format.aspect_ratio()
+        ));
         out
     }
 
@@ -81,7 +84,10 @@ mod tests {
     /// A title on its own is a legitimate brief — the pictures carry the rest.
     #[test]
     fn either_field_alone_still_renders() {
-        let title_only = Brief { title: "SHIP IT".into(), ..Brief::default() };
+        let title_only = Brief {
+            title: "SHIP IT".into(),
+            ..Brief::default()
+        };
         assert!(title_only.render().contains("\"SHIP IT\""));
 
         let description_only = Brief {
@@ -110,7 +116,11 @@ mod tests {
     #[test]
     fn empty_is_recognised() {
         assert!(Brief::default().is_empty());
-        assert!(Brief { title: "  ".into(), description: "\n".into() }.is_empty());
+        assert!(Brief {
+            title: "  ".into(),
+            description: "\n".into()
+        }
+        .is_empty());
         assert!(!brief().is_empty());
     }
 }

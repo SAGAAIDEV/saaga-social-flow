@@ -23,13 +23,18 @@ pub const CANDIDATES_DIR: &str = "thumbnails/candidates";
 pub enum Row {
     Candidate(Candidate),
     /// This candidate became the live thumbnail at `at`.
-    Activated { id: String, at: String },
+    Activated {
+        id: String,
+        at: String,
+    },
     /// Everything drawn before `at` was retired — Regenerate starting a fresh set.
     ///
     /// An event rather than a rewrite, for the same reason the rest of this file
     /// is append-only: deleting the rows would take the answer to "which image
     /// was live in week two" with them, and that cannot be reconstructed.
-    Cleared { at: String },
+    Cleared {
+        at: String,
+    },
 }
 
 /// One generated image and the inputs that identify it.
@@ -98,7 +103,10 @@ pub fn load(root: &Path) -> Vec<Row> {
         .filter_map(|(n, line)| match serde_json::from_str(line) {
             Ok(row) => Some(row),
             Err(err) => {
-                eprintln!("stream-recorder: skipping thumbnails.jsonl line {}: {err}", n + 1);
+                eprintln!(
+                    "stream-recorder: skipping thumbnails.jsonl line {}: {err}",
+                    n + 1
+                );
                 None
             }
         })
@@ -152,7 +160,10 @@ pub fn clear(root: &Path, rows: &mut Vec<Row>, at: String) -> Result<usize> {
             // is worth saying, but never worth losing the new batch over.
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => {
-                eprintln!("stream-recorder: could not remove {}: {err}", path.display())
+                eprintln!(
+                    "stream-recorder: could not remove {}: {err}",
+                    path.display()
+                )
             }
         }
     }
@@ -219,15 +230,27 @@ mod tests {
         let a = candidate_id("m", "brief", "still", "screen", "refs", 0);
         assert_eq!(a, candidate_id("m", "brief", "still", "screen", "refs", 0));
         // Every input is part of the identity.
-        assert_ne!(a, candidate_id("other", "brief", "still", "screen", "refs", 0));
+        assert_ne!(
+            a,
+            candidate_id("other", "brief", "still", "screen", "refs", 0)
+        );
         assert_ne!(a, candidate_id("m", "edited", "still", "screen", "refs", 0));
-        assert_ne!(a, candidate_id("m", "brief", "other-still", "screen", "refs", 0));
-        assert_ne!(a, candidate_id("m", "brief", "still", "screen", "other-refs", 0));
+        assert_ne!(
+            a,
+            candidate_id("m", "brief", "other-still", "screen", "refs", 0)
+        );
+        assert_ne!(
+            a,
+            candidate_id("m", "brief", "still", "screen", "other-refs", 0)
+        );
         // Two candidates from one model and one brief are still distinct.
         assert_ne!(a, candidate_id("m", "brief", "still", "screen", "refs", 1));
         // The screen grab is part of the identity too, or capturing a new slide
         // would recognise the old picture as already drawn.
-        assert_ne!(a, candidate_id("m", "brief", "still", "other-screen", "refs", 0));
+        assert_ne!(
+            a,
+            candidate_id("m", "brief", "still", "other-screen", "refs", 0)
+        );
         assert_ne!(a, candidate_id("m", "brief", "still", "", "refs", 0));
         assert!(a.starts_with("thumb-"));
     }
@@ -246,7 +269,10 @@ mod tests {
         let root = temp("clear");
         let old = draw(&root, "thumb-old");
         let mut rows = vec![Row::Candidate(old.clone())];
-        assert_eq!(clear(&root, &mut rows, "2026-08-15T10:00:00Z".into()).unwrap(), 1);
+        assert_eq!(
+            clear(&root, &mut rows, "2026-08-15T10:00:00Z".into()).unwrap(),
+            1
+        );
         assert!(!old.path(&root).exists(), "the retired image is gone");
         assert!(candidates(&rows).is_empty());
 
@@ -295,7 +321,10 @@ mod tests {
     fn clearing_an_empty_strip_writes_nothing() {
         let root = temp("clear-empty");
         let mut rows = Vec::new();
-        assert_eq!(clear(&root, &mut rows, "2026-08-15T10:00:00Z".into()).unwrap(), 0);
+        assert_eq!(
+            clear(&root, &mut rows, "2026-08-15T10:00:00Z".into()).unwrap(),
+            0
+        );
         assert!(rows.is_empty(), "no event for a clear that retired nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -325,14 +354,39 @@ mod tests {
         let root = temp("activations");
         append(&root, &Row::Candidate(candidate("thumb-a", "b"))).unwrap();
         append(&root, &Row::Candidate(candidate("thumb-b", "b"))).unwrap();
-        append(&root, &Row::Activated { id: "thumb-a".into(), at: "day-1".into() }).unwrap();
-        append(&root, &Row::Activated { id: "thumb-b".into(), at: "day-8".into() }).unwrap();
-        append(&root, &Row::Activated { id: "thumb-a".into(), at: "day-15".into() }).unwrap();
+        append(
+            &root,
+            &Row::Activated {
+                id: "thumb-a".into(),
+                at: "day-1".into(),
+            },
+        )
+        .unwrap();
+        append(
+            &root,
+            &Row::Activated {
+                id: "thumb-b".into(),
+                at: "day-8".into(),
+            },
+        )
+        .unwrap();
+        append(
+            &root,
+            &Row::Activated {
+                id: "thumb-a".into(),
+                at: "day-15".into(),
+            },
+        )
+        .unwrap();
 
         let rows = load(&root);
         assert_eq!(
             activations(&rows),
-            vec![("thumb-a", "day-1"), ("thumb-b", "day-8"), ("thumb-a", "day-15")],
+            vec![
+                ("thumb-a", "day-1"),
+                ("thumb-b", "day-8"),
+                ("thumb-a", "day-15")
+            ],
             "the whole history survives, so each window is measurable"
         );
         assert_eq!(active(&rows).unwrap().id, "thumb-a", "the latest wins");
@@ -355,7 +409,14 @@ mod tests {
     fn a_dangling_activation_yields_nothing() {
         let root = temp("dangling");
         append(&root, &Row::Candidate(candidate("thumb-a", "b"))).unwrap();
-        append(&root, &Row::Activated { id: "thumb-missing".into(), at: "now".into() }).unwrap();
+        append(
+            &root,
+            &Row::Activated {
+                id: "thumb-missing".into(),
+                at: "now".into(),
+            },
+        )
+        .unwrap();
         assert!(active(&load(&root)).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }

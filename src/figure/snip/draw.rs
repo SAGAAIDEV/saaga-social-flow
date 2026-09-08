@@ -27,7 +27,10 @@ pub(super) fn draw(state: &SnipState) {
         w: state.geometry.points.0,
         h: state.geometry.points.1,
     };
-    match state.selection().filter(|rect| rect.w > 0.0 && rect.h > 0.0) {
+    match state
+        .selection()
+        .filter(|rect| rect.w > 0.0 && rect.h > 0.0)
+    {
         Some(selection) => {
             dim_around(&full, &selection);
             outline(&selection);
@@ -44,14 +47,24 @@ pub(super) fn draw(state: &SnipState) {
 /// The dim, painted as the four bands around `hole` so the selection is shown
 /// at full brightness. See the module docs.
 fn dim_around(full: &PointRect, hole: &PointRect) {
-    let above = PointRect { x: full.x, y: full.y, w: full.w, h: hole.y - full.y };
+    let above = PointRect {
+        x: full.x,
+        y: full.y,
+        w: full.w,
+        h: hole.y - full.y,
+    };
     let below = PointRect {
         x: full.x,
         y: hole.y + hole.h,
         w: full.w,
         h: (full.y + full.h) - (hole.y + hole.h),
     };
-    let left = PointRect { x: full.x, y: hole.y, w: hole.x - full.x, h: hole.h };
+    let left = PointRect {
+        x: full.x,
+        y: hole.y,
+        w: hole.x - full.x,
+        h: hole.h,
+    };
     let right = PointRect {
         x: hole.x + hole.w,
         y: hole.y,
@@ -85,8 +98,18 @@ fn guides(state: &SnipState) {
     let Some((x, y)) = state.cursor else { return };
     let (w, h) = state.geometry.points;
     grey(1.0, 0.35).set();
-    NSBezierPath::fillRect(ns_rect(&PointRect { x: x - 0.5, y: 0.0, w: 1.0, h }));
-    NSBezierPath::fillRect(ns_rect(&PointRect { x: 0.0, y: y - 0.5, w, h: 1.0 }));
+    NSBezierPath::fillRect(ns_rect(&PointRect {
+        x: x - 0.5,
+        y: 0.0,
+        w: 1.0,
+        h,
+    }));
+    NSBezierPath::fillRect(ns_rect(&PointRect {
+        x: 0.0,
+        y: y - 0.5,
+        w,
+        h: 1.0,
+    }));
 }
 
 /// `1280 × 720` above the selection, in pixels rather than points.
@@ -111,7 +134,11 @@ fn size_label(selection: &PointRect, geometry: &DisplayGeometry) {
     let above = selection.y - plate_h - 4.0;
     let plate = PointRect {
         x: selection.x,
-        y: if above >= 0.0 { above } else { selection.y + 4.0 },
+        y: if above >= 0.0 {
+            above
+        } else {
+            selection.y + 4.0
+        },
         w: size.width + pad * 2.0,
         h: plate_h,
     };
@@ -130,8 +157,7 @@ fn size_label(selection: &PointRect, geometry: &DisplayGeometry) {
 /// [`crate::figure::encode::published_size`]. Nothing is ever scaled up, so
 /// there is no arrow the other way: a small box is a small figure.
 pub(super) fn size_text(w: i64, h: i64) -> String {
-    let (pw, ph) =
-        crate::figure::encode::published_size(w.max(0) as u32, h.max(0) as u32);
+    let (pw, ph) = crate::figure::encode::published_size(w.max(0) as u32, h.max(0) as u32);
     match (i64::from(pw), i64::from(ph)) == (w, h) {
         true => format!("{w} × {h}"),
         false => format!("{w} × {h}  ↓ {pw} × {ph}"),
@@ -144,8 +170,7 @@ pub(super) fn size_text(w: i64, h: i64) -> String {
 /// gesture has explained itself, and a caption floating over the picture is in
 /// the way of aiming it.
 fn hint(full: &PointRect) {
-    let text =
-        NSString::from_str("Drag to capture a figure  ·  click or right-click to cancel");
+    let text = NSString::from_str("Drag to capture a figure  ·  click or right-click to cancel");
     let attributes = attributes(16.0);
     let size = unsafe { text.sizeWithAttributes(Some(&attributes)) };
     let pad = 12.0;
@@ -171,7 +196,10 @@ fn attributes(size: f64) -> Retained<NSDictionary<NSString, AnyObject>> {
     unsafe {
         NSDictionary::from_slices(
             &[NSFontAttributeName, NSForegroundColorAttributeName],
-            &[font.as_ref() as &AnyObject, foreground.as_ref() as &AnyObject],
+            &[
+                font.as_ref() as &AnyObject,
+                foreground.as_ref() as &AnyObject,
+            ],
         )
     }
 }

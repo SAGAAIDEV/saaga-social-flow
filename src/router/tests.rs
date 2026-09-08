@@ -43,15 +43,12 @@ fn chapter_flow_produces_encoded_streams() {
         _ => panic!("needs saved camera+mic defaults; run the record command once first"),
     };
 
-    let session_dir = std::env::temp_dir().join(format!(
-        "stream-recorder-test-{}",
-        std::process::id()
-    ));
+    let session_dir =
+        std::env::temp_dir().join(format!("stream-recorder-test-{}", std::process::id()));
     fs::create_dir_all(&session_dir).unwrap();
 
-    let connection =
-        crate::capture::av::Connection::start_capture(&camera_uid, &audio_uid)
-            .expect("start_capture");
+    let connection = crate::capture::av::Connection::start_capture(&camera_uid, &audio_uid)
+        .expect("start_capture");
     connection
         .wait_for_warmup(std::time::Duration::from_secs(5))
         .expect("warmup");
@@ -132,7 +129,10 @@ fn chapter_flow_produces_encoded_streams() {
                 .arg(&path)
                 .output()
                 .expect("ffprobe duration");
-            String::from_utf8_lossy(&out.stdout).trim().parse().expect("duration parses")
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse()
+                .expect("duration parses")
         };
         let zcr = crossings / duration;
         assert!(
@@ -199,7 +199,9 @@ fn chapter_flow_with_screen_produces_aligned_pairs() {
     );
     let geometry =
         crate::capture::screen::display_geometry(&display_uid).expect("display geometry");
-    let slot = layout.slot_size().expect("split-horizontal has a screen slot");
+    let slot = layout
+        .slot_size()
+        .expect("split-horizontal has a screen slot");
     let output = crate::region::PixelSize::rounded(slot.0, slot.1);
     let base = crate::region::placement::base_size(output, &geometry);
     let resolved = crate::region::placement::resolve(
@@ -338,9 +340,9 @@ fn chapter_flow_with_screen_produces_aligned_pairs() {
 #[test]
 #[ignore]
 fn region_reaches_the_file_at_the_configured_origin() {
+    use crate::capture::screen_stream::Capture;
     use crate::capture::screen_stream::ScreenConnection;
     use crate::capture::screen_writer::video_settings;
-    use crate::capture::screen_stream::Capture;
     use crate::region::PointRect;
 
     let cfg = crate::config::load();

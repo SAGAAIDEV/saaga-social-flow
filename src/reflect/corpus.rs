@@ -48,7 +48,7 @@ pub struct Corpus {
     /// Plan items a human left unapproved, with the reason they exist.
     pub declined: Vec<String>,
     /// Measured posts: label, window, and the metrics that came back.
-    pub measured: Vec<(String, String, Vec<(String, f64)>)>,
+    pub measured: Vec<Measured>,
     pub llm_steps: usize,
 }
 
@@ -176,9 +176,7 @@ pub fn caption_deltas(generated: &serde_json::Value, final_posts: &PostsManifest
         for post in &video.posts {
             let from_model = items
                 .iter()
-                .find(|item| {
-                    item.get("video_id").and_then(|v| v.as_str()) == Some(&video.video_id)
-                })
+                .find(|item| item.get("video_id").and_then(|v| v.as_str()) == Some(&video.video_id))
                 .and_then(|item| item.get("posts")?.as_array())
                 .and_then(|posts| {
                     posts.iter().find(|entry| {
@@ -187,7 +185,9 @@ pub fn caption_deltas(generated: &serde_json::Value, final_posts: &PostsManifest
                 })
                 .and_then(|entry| entry.get("content")?.as_str())
                 .map(str::to_string);
-            let Some(generated) = from_model else { continue };
+            let Some(generated) = from_model else {
+                continue;
+            };
             out.push(Delta {
                 label: format!("{} · {}", video.video_id, post.platform),
                 generated,
@@ -206,8 +206,12 @@ pub fn declined(plan: &SchedulePlan) -> Vec<String> {
         .collect()
 }
 
+/// One measured post: its label, the window it was measured over, and the
+/// metrics that came back.
+pub type Measured = (String, String, Vec<(String, f64)>);
+
 /// Measured posts, flattened to (label, window, metrics).
-pub fn measured(rows: &[AnalyticsRow]) -> Vec<(String, String, Vec<(String, f64)>)> {
+pub fn measured(rows: &[AnalyticsRow]) -> Vec<Measured> {
     rows.iter()
         .filter(|row| !row.metrics.is_empty())
         .map(|row| {
@@ -239,7 +243,10 @@ mod tests {
 
     #[test]
     fn a_delta_knows_whether_a_human_touched_it() {
-        assert!(!delta("a", "same", " same ").changed(), "whitespace is not an edit");
+        assert!(
+            !delta("a", "same", " same ").changed(),
+            "whitespace is not an edit"
+        );
         assert!(delta("a", "before", "after").changed());
     }
 
@@ -274,10 +281,7 @@ mod tests {
     #[test]
     fn inputs_count_only_what_changed() {
         let corpus = Corpus {
-            titles: vec![
-                delta("a", "x", "x"),
-                delta("b", "x", "y"),
-            ],
+            titles: vec![delta("a", "x", "x"), delta("b", "x", "y")],
             captions: vec![delta("c", "x", "y")],
             declined: vec!["chapter-02 · tiktok — vertical chapter".into()],
             llm_steps: 3,
@@ -300,8 +304,16 @@ mod tests {
             longform: String::new(),
             version: Some(1),
             chapters: vec![
-                ChapterTitle { n: 1, title: "Generated One".into(), approved: true },
-                ChapterTitle { n: 2, title: "Human Two".into(), approved: true },
+                ChapterTitle {
+                    n: 1,
+                    title: "Generated One".into(),
+                    approved: true,
+                },
+                ChapterTitle {
+                    n: 2,
+                    title: "Human Two".into(),
+                    approved: true,
+                },
             ],
         };
         let deltas = title_deltas(&generated, &final_titles);

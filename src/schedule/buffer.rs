@@ -148,7 +148,11 @@ impl BufferClient {
 
     #[tracing::instrument(skip(self, input), fields(channel = %input.channel_id))]
     pub fn create_post(&self, input: &CreatePostInput) -> Result<CreatedPost> {
-        let data = graphql(&self.api_key, CREATE_POST_MUTATION, create_post_variables(input))?;
+        let data = graphql(
+            &self.api_key,
+            CREATE_POST_MUTATION,
+            create_post_variables(input),
+        )?;
         let payload = data.get("createPost").filter(|value| !value.is_null());
         parse_created_post(payload.context("buffer createPost carried no payload")?)
     }
@@ -193,10 +197,16 @@ impl BufferClient {
                 "after": after,
             });
             let data = graphql(&self.api_key, PENDING_POSTS_QUERY, vars)?;
-            let posts = data.get("posts").context("buffer posts carried no results")?;
+            let posts = data
+                .get("posts")
+                .context("buffer posts carried no results")?;
             for edge in array_at(posts, "edges") {
-                let Some(node) = edge.get("node") else { continue };
-                let Some(id) = opt_string_at(node, "id") else { continue };
+                let Some(node) = edge.get("node") else {
+                    continue;
+                };
+                let Some(id) = opt_string_at(node, "id") else {
+                    continue;
+                };
                 out.push(PendingPost {
                     id,
                     status: opt_string_at(node, "status").unwrap_or_default(),
@@ -276,8 +286,10 @@ fn resolve_org_id(api_key: &str) -> Result<String> {
     // and the symptom ("no instagram channel connected") points nowhere near the
     // cause — so name every candidate and say how to pin one.
     if orgs.len() > 1 {
-        let listed: Vec<String> =
-            orgs.iter().map(|(id, name)| format!("{name} ({id})")).collect();
+        let listed: Vec<String> = orgs
+            .iter()
+            .map(|(id, name)| format!("{name} ({id})"))
+            .collect();
         eprintln!(
             "buffer: account has {} organizations [{}] — using the first; set BUFFER_ORG_ID to choose",
             orgs.len(),
@@ -293,7 +305,9 @@ fn resolve_org_id(api_key: &str) -> Result<String> {
 
 /// Every organization on the account as `(id, name)`, in api order.
 fn organizations(data: &Value) -> Vec<(String, String)> {
-    let orgs = data.get("account").map(|account| array_at(account, "organizations"));
+    let orgs = data
+        .get("account")
+        .map(|account| array_at(account, "organizations"));
     orgs.unwrap_or_default()
         .iter()
         .filter_map(|org| {
@@ -306,7 +320,10 @@ fn organizations(data: &Value) -> Vec<(String, String)> {
 
 /// A 200 carrying a non-empty top-level `errors` array is still a failure.
 fn graphql_errors(body: &Value) -> Option<String> {
-    let errors = body.get("errors")?.as_array().filter(|list| !list.is_empty())?;
+    let errors = body
+        .get("errors")?
+        .as_array()
+        .filter(|list| !list.is_empty())?;
     let messages: Vec<String> = errors
         .iter()
         .map(|error| opt_string_at(error, "message").unwrap_or_else(|| error.to_string()))
@@ -332,7 +349,9 @@ pub(super) fn graphql(api_key: &str, query: &str, variables: Value) -> Result<Va
         }
         Err(err) => return Err(err).context("calling buffer graphql"),
     };
-    let value: Value = response.into_json().context("parsing buffer graphql body")?;
+    let value: Value = response
+        .into_json()
+        .context("parsing buffer graphql body")?;
     if let Some(message) = graphql_errors(&value) {
         bail!("buffer graphql error: {message}");
     }
@@ -344,11 +363,27 @@ pub(super) fn graphql(api_key: &str, query: &str, variables: Value) -> Result<Va
 
 /// Like SAAGA's buffer-graphql client, HTTP 200 can still contain an error union.
 fn inspect_data_errors(data: &Value) -> Result<()> {
-    let Some(fields) = data.as_object() else { return Ok(()) };
+    let Some(fields) = data.as_object() else {
+        return Ok(());
+    };
     for node in fields.values() {
-        let kind = node.get("__typename").and_then(Value::as_str).unwrap_or_default();
-        if matches!(kind, "MutationError" | "NotFoundError" | "LimitReachedError" | "AuthorizationError" | "ValidationError" | "PostPublishingError") {
-            let message = node.get("message").and_then(Value::as_str).unwrap_or("request refused");
+        let kind = node
+            .get("__typename")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if matches!(
+            kind,
+            "MutationError"
+                | "NotFoundError"
+                | "LimitReachedError"
+                | "AuthorizationError"
+                | "ValidationError"
+                | "PostPublishingError"
+        ) {
+            let message = node
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("request refused");
             bail!("buffer {kind}: {message}");
         }
     }
@@ -358,7 +393,9 @@ fn inspect_data_errors(data: &Value) -> Result<()> {
 fn parse_created_post(payload: &Value) -> Result<CreatedPost> {
     if let Some(post) = payload.get("post").filter(|value| !value.is_null()) {
         return Ok(CreatedPost {
-            id: opt_string_at(post, "id").filter(|id| !id.trim().is_empty()).context("buffer createPost returned no post id")?,
+            id: opt_string_at(post, "id")
+                .filter(|id| !id.trim().is_empty())
+                .context("buffer createPost returned no post id")?,
             due_at: opt_string_at(post, "dueAt"),
             status: string_at(post, "status"),
         });
@@ -408,11 +445,18 @@ fn bool_at(raw: &Value, key: &str) -> bool {
 }
 
 fn strings_at(raw: &Value, key: &str) -> Vec<String> {
-    array_at(raw, key).iter().filter_map(Value::as_str).map(str::to_string).collect()
+    array_at(raw, key)
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
 }
 
 fn array_at<'a>(raw: &'a Value, key: &str) -> &'a [Value] {
-    raw.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default()
+    raw.get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -447,7 +491,10 @@ mod tests {
         // AssetInput is @oneOf on the media kind: no "source", no "type: VIDEO".
         assert!(asset.get("source").is_none() && asset.get("type").is_none());
         let video = &asset["video"];
-        assert_eq!(video["url"], "https://s3.example.com/vertical/chapter-01.mp4");
+        assert_eq!(
+            video["url"],
+            "https://s3.example.com/vertical/chapter-01.mp4"
+        );
         assert!(video.get("source").is_none() && video.get("type").is_none());
         assert_eq!(video["metadata"]["title"], "Chapter One");
         // The planner's metadata rides through untouched.
@@ -483,7 +530,9 @@ mod tests {
         // `Value` indexing yields null for a missing key, so null == key omitted.
         let untitled = create_post_variables(&sample(None, None));
         assert!(untitled["input"]["metadata"].is_null());
-        assert!(untitled["input"]["assets"][0]["video"].get("metadata").is_none());
+        assert!(untitled["input"]["assets"][0]["video"]
+            .get("metadata")
+            .is_none());
         let mut no_url = sample(None, None);
         no_url.video_url = "  ".into();
         // assets is non-null on the input, so an empty list — never a null.
@@ -493,7 +542,10 @@ mod tests {
     #[test]
     fn errors_are_detected_in_the_envelope_and_in_the_create_post_payload() {
         let body = json!({ "data": null, "errors": [{ "message": "bad enum" }, { "m": 1 }] });
-        assert_eq!(graphql_errors(&body).as_deref(), Some(r#"bad enum; {"m":1}"#));
+        assert_eq!(
+            graphql_errors(&body).as_deref(),
+            Some(r#"bad enum; {"m":1}"#)
+        );
         assert!(graphql_errors(&json!({ "data": { "ok": true } })).is_none());
         assert!(graphql_errors(&json!({ "errors": [] })).is_none());
         let post = json!({ "id": "abc", "dueAt": "2026-08-15T17:00:00Z", "status": "buffer" });
@@ -539,13 +591,25 @@ mod tests {
     }
     #[test]
     fn http_success_does_not_hide_buffer_error_unions() {
-        for kind in ["MutationError", "NotFoundError", "LimitReachedError", "AuthorizationError", "ValidationError", "PostPublishingError"] {
-            let error = inspect_data_errors(&json!({"createPost": {"__typename": kind, "message": "Refused"}})).unwrap_err();
+        for kind in [
+            "MutationError",
+            "NotFoundError",
+            "LimitReachedError",
+            "AuthorizationError",
+            "ValidationError",
+            "PostPublishingError",
+        ] {
+            let error = inspect_data_errors(
+                &json!({"createPost": {"__typename": kind, "message": "Refused"}}),
+            )
+            .unwrap_err();
             assert!(error.to_string().contains(kind));
             assert!(error.to_string().contains("Refused"));
         }
-        assert!(inspect_data_errors(&json!({"createPost": {"__typename": "PostActionSuccess", "post": {"id": "1"}}})).is_ok());
+        assert!(inspect_data_errors(
+            &json!({"createPost": {"__typename": "PostActionSuccess", "post": {"id": "1"}}})
+        )
+        .is_ok());
         assert!(parse_created_post(&json!({"post": {"status": "scheduled"}})).is_err());
     }
-
 }

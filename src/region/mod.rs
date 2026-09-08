@@ -221,7 +221,7 @@ impl PointRect {
     /// contents are already in this space and nothing converts back. Adding a
     /// `from_appkit` would be an untested second implementation of the same
     /// y-flip waiting to disagree with this one.
-    pub fn to_appkit(&self, geom: &DisplayGeometry) -> CGRect {
+    pub fn to_appkit(self, geom: &DisplayGeometry) -> CGRect {
         // AppKit y is measured up from the *primary* screen's bottom edge and
         // names the rect's bottom; Core Graphics y is measured down from the
         // primary's top edge and names its top. Flipping needs the primary's
@@ -248,7 +248,7 @@ impl PointRect {
     ///
     /// What `SCScreenshotManager::captureImageInRect:` takes — see
     /// [`crate::figure::shot`].
-    pub fn to_cg_global(&self, geom: &DisplayGeometry) -> CGRect {
+    pub fn to_cg_global(self, geom: &DisplayGeometry) -> CGRect {
         CGRect::new(
             CGPoint::new(self.x + geom.cg_origin.0, self.y + geom.cg_origin.1),
             CGSize::new(self.w, self.h),
@@ -260,7 +260,7 @@ impl PointRect {
     /// A separate method from the field access it happens to be, so the call
     /// site reads as a deliberate handoff into ScreenCaptureKit's units rather
     /// than as a rect being passed somewhere by luck.
-    pub fn to_source_rect(&self) -> CGRect {
+    pub fn to_source_rect(self) -> CGRect {
         CGRect::new(CGPoint::new(self.x, self.y), CGSize::new(self.w, self.h))
     }
 
@@ -363,7 +363,9 @@ impl PointRect {
             geom.points.1 - anchor.1
         };
 
-        let wanted = (point.0 - anchor.0).abs().max((point.1 - anchor.1).abs() * aspect);
+        let wanted = (point.0 - anchor.0)
+            .abs()
+            .max((point.1 - anchor.1).abs() * aspect);
         let max_w = room_x.min(room_y * aspect);
         // An anchor already off the display leaves no room in the drag's
         // direction, and the clamp below would then collapse the rect to 0x0
@@ -378,8 +380,16 @@ impl PointRect {
         let h = w / aspect;
 
         PointRect {
-            x: if point.0 < anchor.0 { anchor.0 - w } else { anchor.0 },
-            y: if point.1 < anchor.1 { anchor.1 - h } else { anchor.1 },
+            x: if point.0 < anchor.0 {
+                anchor.0 - w
+            } else {
+                anchor.0
+            },
+            y: if point.1 < anchor.1 {
+                anchor.1 - h
+            } else {
+                anchor.1
+            },
             w,
             h,
         }
@@ -397,12 +407,7 @@ impl PointRect {
     /// means the untouched coordinate is the rect's own current value rather
     /// than whatever the caller happened to have, so a constrained drag cannot
     /// quietly re-clamp the axis it is not moving.
-    pub fn moved_on(
-        &self,
-        axis: Axis,
-        origin: (f64, f64),
-        geom: &DisplayGeometry,
-    ) -> PointRect {
+    pub fn moved_on(&self, axis: Axis, origin: (f64, f64), geom: &DisplayGeometry) -> PointRect {
         let constrained = match axis {
             Axis::X => (origin.0, self.y),
             Axis::Y => (self.x, origin.1),

@@ -245,7 +245,10 @@ fn a_pointer_beyond_the_capture_shows_its_edge() {
     let cap = capture();
 
     let (x, _, _, _) = tracked_crop(rest, cap, (-4000.0, 900.0), 1.0, SLOT);
-    assert!((x - cap.0).abs() < 1e-9, "did not stop at the left edge: {x}");
+    assert!(
+        (x - cap.0).abs() < 1e-9,
+        "did not stop at the left edge: {x}"
+    );
 
     let (x, _, w, _) = tracked_crop(rest, cap, (cap.2 + 4000.0, 900.0), 1.0, SLOT);
     assert!(

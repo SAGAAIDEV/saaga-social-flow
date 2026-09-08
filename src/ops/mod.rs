@@ -64,10 +64,10 @@
 pub mod composite;
 pub mod crop;
 pub mod face_track;
-pub mod mouse_track;
 pub mod frame;
 pub mod graph;
 pub mod graphs;
+pub mod mouse_track;
 pub mod passthrough;
 pub mod preview;
 pub mod render;
@@ -88,11 +88,11 @@ pub use frame::{Frame, StreamId};
 #[allow(unused_imports)]
 pub use graph::{Flow, Graph, GraphBuilder, NodeId, StreamCtx};
 #[allow(unused_imports)]
-pub use sidecar::Sidecar;
-#[allow(unused_imports)]
 pub use preview::{PreviewPort, PreviewSpec};
 #[allow(unused_imports)]
 pub use render::Renderer;
+#[allow(unused_imports)]
+pub use sidecar::Sidecar;
 #[allow(unused_imports)]
 pub use sink::OutputSpec;
 #[allow(unused_imports)]

@@ -14,9 +14,9 @@
 //! region for everything it offers in turn made the vertical region's arrows
 //! unreachable behind the horizontal region.
 
+use super::draw::{arm_at, corner_at, knob_rect};
 use super::DrawnRegion;
 use crate::region::{Axis, Corner};
-use super::draw::{arm_at, corner_at, knob_rect};
 
 /// What a mouse-down started.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,7 +87,11 @@ pub(super) fn grab_in(region: &DrawnRegion, point: (f64, f64), tier: Tier) -> Op
 /// `None` means the overlay wants nothing at this point — which is also the
 /// signal that it should let the click through entirely. See
 /// [`RegionOverlay::track_cursor`].
-pub(super) fn grab_anywhere(regions: &[DrawnRegion], active: usize, point: (f64, f64)) -> Option<Grabbed> {
+pub(super) fn grab_anywhere(
+    regions: &[DrawnRegion],
+    active: usize,
+    point: (f64, f64),
+) -> Option<Grabbed> {
     Tier::ALL.into_iter().find_map(|tier| {
         std::iter::once(active)
             .chain(0..regions.len())

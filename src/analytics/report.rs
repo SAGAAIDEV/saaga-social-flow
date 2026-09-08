@@ -26,7 +26,10 @@ const PREFERRED: [&str; 9] = [
 pub fn render(rows: &[AnalyticsRow], project: &str, generated_at: &str) -> String {
     let mut out = format!("# Analytics — {project}\n\n");
     let posts: BTreeSet<&str> = rows.iter().map(|r| r.buffer_post_id.as_str()).collect();
-    let measured = rows.iter().filter(|r| r.window != Window::Sent.as_str()).count();
+    let measured = rows
+        .iter()
+        .filter(|r| r.window != Window::Sent.as_str())
+        .count();
     out.push_str(&format!(
         "_{measured} sample(s) across {} post(s) · generated {generated_at}_\n",
         posts.len()
@@ -124,9 +127,11 @@ fn push_pending(out: &mut String, rows: &[AnalyticsRow]) {
         .filter(|row| row.window == Window::Sent.as_str())
         .filter(|row| {
             let id = row.buffer_post_id.as_str();
-            Window::samples()
-                .iter()
-                .any(|w| !rows.iter().any(|r| r.buffer_post_id == id && r.window == w.as_str()))
+            Window::samples().iter().any(|w| {
+                !rows
+                    .iter()
+                    .any(|r| r.buffer_post_id == id && r.window == w.as_str())
+            })
         })
         .collect();
     if pending.is_empty() {
@@ -206,7 +211,12 @@ mod tests {
         MetricValue {
             name: name.into(),
             kind: name.into(),
-            unit: if name.ends_with("Rate") { "percentage" } else { "count" }.into(),
+            unit: if name.ends_with("Rate") {
+                "percentage"
+            } else {
+                "count"
+            }
+            .into(),
             value,
         }
     }
@@ -239,8 +249,18 @@ mod tests {
     #[test]
     fn a_week_table_ranks_best_first_and_names_the_winning_prompt() {
         let rows = vec![
-            row("chapter-01", "tiktok", Window::Week, vec![metric("impressions", 3400.0)]),
-            row("chapter-03", "tiktok", Window::Week, vec![metric("impressions", 8120.0)]),
+            row(
+                "chapter-01",
+                "tiktok",
+                Window::Week,
+                vec![metric("impressions", 3400.0)],
+            ),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("impressions", 8120.0)],
+            ),
         ];
         let out = render(&rows, "vd-42", "2026-08-16T09:00:00Z");
         let first = out.find("chapter-03").unwrap();
@@ -256,14 +276,27 @@ mod tests {
     #[test]
     fn columns_come_from_the_metrics_that_actually_arrived() {
         let rows = vec![
-            row("chapter-03", "tiktok", Window::Week, vec![metric("views", 8120.0), metric("saves", 210.0)]),
-            row("longform", "youtube", Window::Week, vec![metric("impressions", 1032.0)]),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("views", 8120.0), metric("saves", 210.0)],
+            ),
+            row(
+                "longform",
+                "youtube",
+                Window::Week,
+                vec![metric("impressions", 1032.0)],
+            ),
         ];
         let out = render(&rows, "vd-42", "now");
         assert!(out.contains("| impressions |"));
         assert!(out.contains(" views |"));
         assert!(out.contains(" saves |"));
-        assert!(out.contains(" — |"), "a missing metric is a dash, not a zero");
+        assert!(
+            out.contains(" — |"),
+            "a missing metric is a dash, not a zero"
+        );
         assert!(!out.contains("totalTimeWatched"));
     }
 
@@ -273,7 +306,10 @@ mod tests {
             "chapter-03",
             "tiktok",
             Window::Week,
-            vec![metric("impressions", 8120.0), metric("engagementRate", 6.83)],
+            vec![
+                metric("impressions", 8120.0),
+                metric("engagementRate", 6.83),
+            ],
         )];
         let out = render(&rows, "vd-42", "now");
         assert!(out.contains("| 8120 |"));
@@ -283,8 +319,18 @@ mod tests {
     #[test]
     fn both_windows_get_their_own_table() {
         let rows = vec![
-            row("chapter-03", "tiktok", Window::Week, vec![metric("views", 8120.0)]),
-            row("chapter-03", "tiktok", Window::Month, vec![metric("views", 19400.0)]),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("views", 8120.0)],
+            ),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Month,
+                vec![metric("views", 19400.0)],
+            ),
         ];
         let out = render(&rows, "vd-42", "now");
         assert!(out.contains("## 7 days after posting"));
@@ -298,7 +344,12 @@ mod tests {
         let mut sent = row("chapter-05", "instagram", Window::Sent, Vec::new());
         sent.sent_at = Some("2026-08-14T08:00:00Z".into());
         let rows = vec![
-            row("chapter-03", "tiktok", Window::Week, vec![metric("views", 10.0)]),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("views", 10.0)],
+            ),
             sent,
         ];
         let out = render(&rows, "vd-42", "now");
@@ -310,8 +361,18 @@ mod tests {
     fn a_fully_sampled_post_is_not_listed_as_maturing() {
         let rows = vec![
             row("chapter-03", "tiktok", Window::Sent, Vec::new()),
-            row("chapter-03", "tiktok", Window::Week, vec![metric("views", 10.0)]),
-            row("chapter-03", "tiktok", Window::Month, vec![metric("views", 20.0)]),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("views", 10.0)],
+            ),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Month,
+                vec![metric("views", 20.0)],
+            ),
         ];
         let out = render(&rows, "vd-42", "now");
         assert!(!out.contains("Still maturing"));
@@ -321,10 +382,20 @@ mod tests {
     /// oldest refresh in the table rather than implying everything is current.
     #[test]
     fn the_table_reports_its_stalest_refresh() {
-        let mut old = row("chapter-01", "tiktok", Window::Week, vec![metric("views", 5.0)]);
+        let mut old = row(
+            "chapter-01",
+            "tiktok",
+            Window::Week,
+            vec![metric("views", 5.0)],
+        );
         old.metrics_updated_at = Some("2026-08-12T06:00:00Z".into());
         let rows = vec![
-            row("chapter-03", "tiktok", Window::Week, vec![metric("views", 10.0)]),
+            row(
+                "chapter-03",
+                "tiktok",
+                Window::Week,
+                vec![metric("views", 10.0)],
+            ),
             old,
         ];
         let out = render(&rows, "vd-42", "now");

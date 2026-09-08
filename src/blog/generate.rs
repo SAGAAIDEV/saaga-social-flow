@@ -270,7 +270,12 @@ fn heading(raw: &str, title: &str) -> String {
 
 /// The four values the CMS enum accepts. Anything else is refused for the whole
 /// entry, so an invented intent would fail the create rather than the field.
-const INTENTS: [&str; 4] = ["informational", "commercial", "transactional", "navigational"];
+const INTENTS: [&str; 4] = [
+    "informational",
+    "commercial",
+    "transactional",
+    "navigational",
+];
 /// Past six the brief stops being a brief.
 const TARGETS_MAX: usize = 6;
 
@@ -349,11 +354,7 @@ fn asked(raw: Vec<ExtractedFaq>) -> Vec<super::schema::Faq> {
 /// and the same caption in two places, which reads as an editing mistake — and
 /// it is the failure a model makes when it wants to refer back to something it
 /// has already shown.
-fn placed(
-    raw: Vec<ExtractedBlock>,
-    available: &[u32],
-    requested: &[EmbedOffer],
-) -> Vec<Block> {
+fn placed(raw: Vec<ExtractedBlock>, available: &[u32], requested: &[EmbedOffer]) -> Vec<Block> {
     let mut used: Vec<u32> = Vec::new();
     let mut placed_ids: Vec<String> = Vec::new();
     let mut out = Vec::new();
@@ -421,11 +422,7 @@ fn block(raw: ExtractedBlock, available: &[u32], requested: &[EmbedOffer]) -> Op
             // Kept only when it is really in the quote. A highlight the reader
             // cannot find is silently invisible, which looks like a styling bug
             // rather than a bad field.
-            let highlight = raw
-                .highlight
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            let highlight = raw.highlight.unwrap_or_default().trim().to_string();
             let highlight = if !highlight.is_empty() && text.contains(&highlight) {
                 highlight
             } else {
@@ -453,7 +450,9 @@ fn block(raw: ExtractedBlock, available: &[u32], requested: &[EmbedOffer]) -> Op
             match !id.is_empty() && requested.iter().any(|offer| offer.id == id) {
                 true => Some(Block::Embed { id }),
                 false => {
-                    eprintln!("stream-recorder: dropping component {id:?}, which was not requested");
+                    eprintln!(
+                        "stream-recorder: dropping component {id:?}, which was not requested"
+                    );
                     None
                 }
             }
@@ -734,7 +733,10 @@ mod tests {
     }
 
     fn asks(question: &str, answer: &str) -> ExtractedFaq {
-        ExtractedFaq { question: question.into(), answer: answer.into() }
+        ExtractedFaq {
+            question: question.into(),
+            answer: answer.into(),
+        }
     }
 
     /// The heading is optional and a model asked for an optional field fills it
@@ -743,9 +745,18 @@ mod tests {
     /// string nobody maintains.
     #[test]
     fn a_heading_that_is_only_the_title_again_is_dropped() {
-        assert_eq!(heading("Why watermarking fails", "Why watermarking fails"), "");
-        assert_eq!(heading("  Why watermarking fails.  ", "Why watermarking fails"), "");
-        assert_eq!(heading("why watermarking FAILS", "Why watermarking fails"), "");
+        assert_eq!(
+            heading("Why watermarking fails", "Why watermarking fails"),
+            ""
+        );
+        assert_eq!(
+            heading("  Why watermarking fails.  ", "Why watermarking fails"),
+            ""
+        );
+        assert_eq!(
+            heading("why watermarking FAILS", "Why watermarking fails"),
+            ""
+        );
         assert_eq!(heading("   ", "Why watermarking fails"), "");
     }
 
@@ -827,8 +838,12 @@ mod tests {
     /// because the block itself is built and validated in the landing repo.
     #[test]
     fn a_requested_component_is_placed_by_id() {
-        let article = extraction(vec![text("<p>Body.</p>"), embed("retry_steps")])
-            .into_article(None, &resolved(), &[], &requests(&["retry_steps"]));
+        let article = extraction(vec![text("<p>Body.</p>"), embed("retry_steps")]).into_article(
+            None,
+            &resolved(),
+            &[],
+            &requests(&["retry_steps"]),
+        );
         assert_eq!(article.blocks.len(), 2);
         assert!(matches!(&article.blocks[1], Block::Embed { id } if id == "retry_steps"));
         assert_eq!(article.embeds(), vec!["retry_steps".to_string()]);
@@ -839,8 +854,12 @@ mod tests {
     /// surrounding prose still refers to.
     #[test]
     fn a_component_nobody_requested_is_dropped() {
-        let article = extraction(vec![embed("invented_thing")])
-            .into_article(None, &resolved(), &[], &requests(&["retry_steps"]));
+        let article = extraction(vec![embed("invented_thing")]).into_article(
+            None,
+            &resolved(),
+            &[],
+            &requests(&["retry_steps"]),
+        );
         assert!(article.blocks.is_empty(), "{:?}", article.blocks);
         assert!(article.embeds().is_empty());
     }
@@ -868,7 +887,10 @@ mod tests {
         assert!(prompt.contains("Components available (reference by id):"));
         assert!(prompt.contains("- retry_steps: A component showing retry_steps"));
         let at = prompt.find("Components available").expect("the list");
-        assert!(at < prompt.find("Transcript:").unwrap_or(usize::MAX), "before the transcript");
+        assert!(
+            at < prompt.find("Transcript:").unwrap_or(usize::MAX),
+            "before the transcript"
+        );
     }
 
     fn target(term: &str, priority: &str, intent: &str) -> ExtractedTarget {
@@ -900,7 +922,10 @@ mod tests {
     fn a_brief_with_no_primary_promotes_its_first_term() {
         let got = targeted(vec![target("ai watermarking", "secondary", "")]);
         assert_eq!(got[0].priority, "primary");
-        assert!(targeted(Vec::new()).is_empty(), "and nothing is still nothing");
+        assert!(
+            targeted(Vec::new()).is_empty(),
+            "and nothing is still nothing"
+        );
     }
 
     /// The enum is closed: a value outside it is refused for the whole entry,
@@ -914,13 +939,18 @@ mod tests {
         assert_eq!(got[0].intent, "informational", "trimmed and lowercased");
         assert_eq!(got[1].intent, "", "not one of the four");
         for intent in INTENTS {
-            assert_eq!(targeted(vec![target("t", "primary", intent)])[0].intent, intent);
+            assert_eq!(
+                targeted(vec![target("t", "primary", intent)])[0].intent,
+                intent
+            );
         }
     }
 
     #[test]
     fn a_brief_is_capped_and_a_termless_target_is_dropped() {
-        let many: Vec<_> = (0..9).map(|n| target(&format!("term {n}"), "secondary", "")).collect();
+        let many: Vec<_> = (0..9)
+            .map(|n| target(&format!("term {n}"), "secondary", ""))
+            .collect();
         assert_eq!(targeted(many).len(), TARGETS_MAX);
         assert!(targeted(vec![target("   ", "primary", "")]).is_empty());
     }
@@ -982,11 +1012,17 @@ mod tests {
         .into_article(None, &resolved(), &[], &[]);
         assert_eq!(
             got.blocks[0],
-            Block::Quote { text: "It could not.".into(), highlight: "could not".into() }
+            Block::Quote {
+                text: "It could not.".into(),
+                highlight: "could not".into()
+            }
         );
         assert_eq!(
             got.blocks[1],
-            Block::Quote { text: "It could not.".into(), highlight: String::new() }
+            Block::Quote {
+                text: "It could not.".into(),
+                highlight: String::new()
+            }
         );
     }
 
@@ -1009,7 +1045,12 @@ mod tests {
         ])
         .into_article(None, &resolved(), &[], &[]);
         assert_eq!(got.blocks.len(), 1);
-        assert_eq!(got.blocks[0], Block::Text { html: "<p>Real.</p>".into() });
+        assert_eq!(
+            got.blocks[0],
+            Block::Text {
+                html: "<p>Real.</p>".into()
+            }
+        );
     }
 
     #[test]
@@ -1018,7 +1059,10 @@ mod tests {
         odd.kind = "video".into();
         let got = extraction(vec![odd]).into_article(None, &resolved(), &[], &[]);
         assert!(got.blocks.is_empty());
-        assert!(!got.is_publishable(), "a body of nothing is not publishable");
+        assert!(
+            !got.is_publishable(),
+            "a body of nothing is not publishable"
+        );
     }
 
     /// The order of blocks is the order they publish in, so a quote stays under
@@ -1097,8 +1141,12 @@ mod tests {
     /// contract: the number survives and no caption is copied into the article.
     #[test]
     fn an_offered_figure_is_placed_by_number() {
-        let got = extraction(vec![text("<p>Body.</p>"), figure_block(2)])
-            .into_article(None, &resolved(), &offered(&[1, 2]), &[]);
+        let got = extraction(vec![text("<p>Body.</p>"), figure_block(2)]).into_article(
+            None,
+            &resolved(),
+            &offered(&[1, 2]),
+            &[],
+        );
         assert_eq!(got.blocks.len(), 2);
         assert_eq!(got.blocks[1], Block::Figure { n: 2 });
         assert_eq!(got.figures(), vec![2]);
@@ -1109,8 +1157,12 @@ mod tests {
     /// is invisible until then.
     #[test]
     fn a_figure_that_was_never_offered_is_dropped() {
-        let got = extraction(vec![text("<p>Body.</p>"), figure_block(9)])
-            .into_article(None, &resolved(), &offered(&[1, 2]), &[]);
+        let got = extraction(vec![text("<p>Body.</p>"), figure_block(9)]).into_article(
+            None,
+            &resolved(),
+            &offered(&[1, 2]),
+            &[],
+        );
         assert_eq!(got.blocks.len(), 1);
         assert!(got.figures().is_empty());
     }
@@ -1173,18 +1225,31 @@ mod tests {
             version: None,
             hash: "6f1467aaeaaabf7e".into(),
         };
-        let component = EmbedOffer { id: "steps".into(), brief: "How the retry works.".into() };
+        let component = EmbedOffer {
+            id: "steps".into(),
+            brief: "How the retry works.".into(),
+        };
 
         let note = stale_preamble(&stale, &offered(&[1]), &[]).expect("a stale prompt is noticed");
         assert!(note.contains("predates the figure block"), "{note}");
-        assert!(note.contains("unversioned (6f1467aa"), "names the prompt that ran: {note}");
-        assert!(note.contains("Edit Prompt"), "says what to do about it: {note}");
+        assert!(
+            note.contains("unversioned (6f1467aa"),
+            "names the prompt that ran: {note}"
+        );
+        assert!(
+            note.contains("Edit Prompt"),
+            "says what to do about it: {note}"
+        );
 
         let note = stale_preamble(&stale, &[], std::slice::from_ref(&component)).unwrap();
         assert!(note.contains("predates the embed block"), "{note}");
-        assert!(!note.contains("figure"), "nothing was said about figures: {note}");
+        assert!(
+            !note.contains("figure"),
+            "nothing was said about figures: {note}"
+        );
 
-        let both = stale_preamble(&stale, &offered(&[1]), std::slice::from_ref(&component)).unwrap();
+        let both =
+            stale_preamble(&stale, &offered(&[1]), std::slice::from_ref(&component)).unwrap();
         assert!(both.contains("figure and embed block"), "{both}");
     }
 
@@ -1201,7 +1266,10 @@ mod tests {
         };
         assert_eq!(stale_preamble(&stale, &[], &[]), None);
 
-        let component = EmbedOffer { id: "steps".into(), brief: "b".into() };
+        let component = EmbedOffer {
+            id: "steps".into(),
+            brief: "b".into(),
+        };
         let builtin = crate::agent::prompt::builtin_version(SYSTEM_PROMPT);
         assert_eq!(
             stale_preamble(&builtin, &offered(&[1]), std::slice::from_ref(&component)),
@@ -1223,12 +1291,21 @@ mod tests {
     /// embed, and the old overlay did, without describing an `embed` block.
     #[test]
     fn a_block_is_described_by_its_own_line_not_by_a_passing_mention() {
-        assert!(describes_block("  embed — an interactive component.", "embed"));
+        assert!(describes_block(
+            "  embed — an interactive component.",
+            "embed"
+        ));
         assert!(describes_block("figure: a screenshot", "figure"));
         assert!(describes_block("figure - a screenshot", "figure"));
-        assert!(!describes_block("if the\nembed fails, the article stands alone", "embed"));
+        assert!(!describes_block(
+            "if the\nembed fails, the article stands alone",
+            "embed"
+        ));
         assert!(!describes_block("Use each figure at most once.", "figure"));
-        assert!(!describes_block("figures — the plural is a different word", "figure"));
+        assert!(!describes_block(
+            "figures — the plural is a different word",
+            "figure"
+        ));
     }
 
     /// Most videos have no figures, and the prompt must not imply otherwise.

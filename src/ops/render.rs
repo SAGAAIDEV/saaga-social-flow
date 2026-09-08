@@ -44,9 +44,10 @@ use objc2_av_foundation::AVAssetWriterInputPixelBufferAdaptor;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_image::{CIContext, CIImage};
 use objc2_core_video::{
-    kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelBufferPoolMinimumBufferCountKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
-    kCVReturnSuccess, CVImageBuffer, CVPixelBufferPool,
+    kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferPoolMinimumBufferCountKey,
+    kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVReturnSuccess, CVImageBuffer,
+    CVPixelBufferPool,
 };
 use objc2_metal::MTLCreateSystemDefaultDevice;
 
@@ -165,7 +166,8 @@ impl Pool {
             ]
         };
         let buffer_values: [&CFType; 4] = [&format, &w, &h, &iosurface];
-        let buffer_attrs = CFDictionary::<CFString, CFType>::from_slices(&buffer_keys, &buffer_values);
+        let buffer_attrs =
+            CFDictionary::<CFString, CFType>::from_slices(&buffer_keys, &buffer_values);
 
         let min = CFNumber::new_i32(8);
         let pool_keys: [&CFString; 1] = unsafe { [kCVPixelBufferPoolMinimumBufferCountKey] };
@@ -217,8 +219,10 @@ mod tests {
             println!("skipping: no Metal device on this machine");
             return;
         };
-        let source = crate::ops::frame::test_support::pixel_buffer(64, 64, u32::from_be_bytes(*b"BGRA"), 64);
-        let target = crate::ops::frame::test_support::pixel_buffer(32, 32, u32::from_be_bytes(*b"BGRA"), 64);
+        let source =
+            crate::ops::frame::test_support::pixel_buffer(64, 64, u32::from_be_bytes(*b"BGRA"), 64);
+        let target =
+            crate::ops::frame::test_support::pixel_buffer(32, 32, u32::from_be_bytes(*b"BGRA"), 64);
 
         let image = image_from(&source);
         // Half size, so the render also exercises a scale rather than a blit.
