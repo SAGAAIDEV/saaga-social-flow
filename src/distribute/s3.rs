@@ -156,7 +156,7 @@ fn upload_one(
     Ok(stdout.lines().last().unwrap_or(&stdout).to_string())
 }
 
-fn screencast_home() -> PathBuf {
+pub(crate) fn screencast_home() -> PathBuf {
     std::env::var("SCREENCAST_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {

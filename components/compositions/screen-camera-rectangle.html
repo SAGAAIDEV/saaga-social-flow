@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;screenSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Screen Render Video&quot;,&quot;default&quot;:&quot;assets/placeholder-screen.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;speakerName&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Speaker Name&quot;,&quot;default&quot;:&quot;Andrew Melnychuk&quot;,&quot;maxLength&quot;:60},
+    {&quot;id&quot;:&quot;cameraPosition&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Framing (CSS object-position)&quot;,&quot;default&quot;:&quot;center top&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-f7ra" id="root" data-composition-id="screen-camera-rectangle" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+        <style>
+          /* Brand font. Vendored as woff2 under assets/fonts so renders are
+             deterministic and do not depend on a system-installed copy. */
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700; font-style: normal; font-display: block;
+          }
+          /* Figma "RectangleDemo" (1:7527) — full-bleed screen render with a rounded
+             camera card floating bottom-right.
+
+             Figma's screen art is 1920x1478.44 anchored at top, so the frame crops its
+             lower third: object-position:top reproduces that framing for video.
+
+             The card's camera slot in Figma is a 201x275.5 cutout portrait standing on a
+             patterned peach backdrop. A real camera movie is a filled rectangle, so the
+             video fills the card interior instead. The peach + ring pattern stay behind it
+             as a backdrop, so an alpha/keyed source still reads as the original design. */
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background: #ffffff;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          .rect-demo-bg {
+            position: absolute;
+            inset: 0;
+            background: #ffccb2;
+            z-index: 0;
+          }
+          .rect-demo-screen {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            object-fit: cover;
+            object-position: top;
+            z-index: 1;
+          }
+          .rect-demo-card {
+            position: absolute;
+            left: 1407.98px;
+            top: 739.22px;
+            width: 466.492px;
+            height: 285.419px;
+            box-sizing: border-box;
+            background: #fdeee6;
+            border: 4px solid #eb5201;
+            border-radius: 40px;
+            overflow: hidden;
+            z-index: 2;
+          }
+          .rect-demo-card-pattern {
+            position: absolute;
+            left: -57.66px;
+            top: -2.74px;
+            width: 581.813px;
+            height: 290.907px;
+          }
+          /* Card interior above the name bar: 4px border inset, down to the bar top. */
+          .rect-demo-camera {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 458.492px;
+            height: 239.42px;
+            object-fit: cover;
+            object-position: var(--cameraPosition, center top);
+          }
+          .rect-demo-name {
+            position: absolute;
+            left: 0;
+            top: 235.42px;
+            width: 458.492px;
+            height: 42px;
+            box-sizing: border-box;
+            background: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 30px;
+            border-radius: 0 0 36px 36px;
+          }
+          .rect-demo-name span {
+            font-weight: 600;
+            font-size: 16px;
+            line-height: 35.837px;
+            color: #eb5201;
+            white-space: nowrap;
+          }
+        </style>
+
+        <div data-hf-id="hf-zchr" id="rect-demo-bg" class="rect-demo-bg clip" data-start="0" data-duration="10" data-track-index="0"></div>
+
+        <video data-hf-id="hf-ftqz" id="rect-demo-screen-video" class="rect-demo-screen clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="screenSrc" src="assets/placeholder-screen.mp4" muted playsinline></video>
+
+        <div data-hf-id="hf-2tue" id="rect-demo-card" class="rect-demo-card">
+          <img data-hf-id="hf-ybre" id="rect-demo-card-pattern" class="rect-demo-card-pattern" src="assets/pattern-card-rings.svg" alt="">
+          <video data-hf-id="hf-tdmq" id="rect-demo-camera-video" class="rect-demo-camera clip" data-start="0" data-duration="10" data-track-index="2" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+          <div data-hf-id="hf-dyhu" id="rect-demo-name" class="rect-demo-name">
+            <span data-hf-id="hf-6b1e" id="rect-demo-name-text" data-var-text="speakerName">Andrew Melnychuk</span>
+          </div>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            tl.fromTo(
+              '#rect-demo-card',
+              { autoAlpha: 0, scale: 0.94 },
+              { autoAlpha: 1, scale: 1, duration: 0.6, ease: 'power3.out', transformOrigin: '50% 50%' },
+              0
+            );
+            window.__timelines['screen-camera-rectangle'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

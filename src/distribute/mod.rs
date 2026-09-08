@@ -10,6 +10,7 @@ use crate::session::Session;
 
 pub mod progress;
 mod s3;
+pub(crate) use s3::screencast_home;
 pub mod schema;
 
 pub use progress::Progress;

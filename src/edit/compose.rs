@@ -93,7 +93,31 @@ impl Plan {
     }
 }
 
+/// The HyperFrames library this crate renders from.
+///
+/// Vendored into `components/` rather than reached for in a sibling checkout.
+/// It used to resolve to `../screencast/components`, which lives inside a
+/// *private, personal* repo — so a new team member cloning this one got a
+/// working build and a render that died on a path they had no way to populate.
+/// The whole library is under 1.5 MB, which is a cheaper thing to carry than an
+/// onboarding step nobody outside one account can complete.
+///
+/// `CARGO_MANIFEST_DIR` for a checkout, the executable's own directory for an
+/// installed release, and the historical sibling path last so a machine still
+/// laid out the old way keeps working.
 pub fn components_root() -> PathBuf {
+    let vendored = Path::new(env!("CARGO_MANIFEST_DIR")).join("components");
+    if vendored.join("compositions/chapter-title-card.html").is_file() {
+        return vendored;
+    }
+    if let Some(beside_exe) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("components")))
+    {
+        if beside_exe.join("compositions/chapter-title-card.html").is_file() {
+            return beside_exe;
+        }
+    }
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../screencast/components")
 }
 
@@ -743,5 +767,106 @@ mod tests {
         let plan = prepare(&edit, &compose, &library, &[], "A video").unwrap();
         assert!(plan.h_segments.is_empty());
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+
+    /// Every file `prepare` copies has to exist in the vendored library.
+    ///
+    /// This is the check that was missing while `components_root` pointed at
+    /// `../screencast/components`: that library lives in a *different, private*
+    /// repo, so it was never present on a fresh clone and every test over it
+    /// skipped. The absence surfaced instead as a render dying at runtime, on a
+    /// recording someone had already made.
+    ///
+    /// The list is duplicated from `prepare` on purpose — sharing a helper with
+    /// the code under test would let both sides be wrong together.
+    #[test]
+    fn the_vendored_library_has_everything_prepare_copies() {
+        let library = components_root();
+        for rel in [
+            "compositions/chapter-title-card.html",
+            "compositions/talking-head-vertical.html",
+            "assets/pattern-rings.svg",
+            "assets/badge.svg",
+            "assets/silence.mp3",
+            "assets/fonts/Booton-Regular.woff2",
+            "assets/fonts/Booton-Semibold.woff2",
+            "assets/fonts/Booton-Bold.woff2",
+        ] {
+            assert!(
+                library.join(rel).is_file(),
+                "{rel} missing from {} — a render fails on this",
+                library.display()
+            );
+        }
+    }
+
+    /// `prepare` bails on exactly this file, so its absence is what becomes the
+    /// "HyperFrames library missing" message.
+    #[test]
+    fn the_library_resolves_inside_this_repo() {
+        let library = components_root();
+        assert!(
+            library.join("compositions/chapter-title-card.html").is_file(),
+            "library did not resolve to the vendored copy: {}",
+            library.display()
+        );
+        assert!(
+            !library.to_string_lossy().contains("screencast"),
+            "still resolving to the private sibling checkout: {}",
+            library.display()
+        );
+    }
+
+    /// Whatever a composition asks for by relative path has to be carried too.
+    /// `talking-head-vertical` names two placeholders `prepare` never copies,
+    /// because it rewrites those paths to the real media first — so the check
+    /// has to know about that substitution rather than flag it.
+    #[test]
+    fn every_asset_a_composition_references_is_vendored() {
+        let library = components_root();
+        let substituted = [
+            "assets/placeholder-camera.mp4",
+            "assets/placeholder-audio.mp3",
+            "assets/placeholder-screen.mp4",
+        ];
+        let Ok(entries) = std::fs::read_dir(library.join("compositions")) else { return };
+        for entry in entries.flatten() {
+            let Ok(html) = std::fs::read_to_string(entry.path()) else { continue };
+            for rel in referenced_assets(&html) {
+                if substituted.contains(&rel.as_str()) {
+                    continue;
+                }
+                assert!(
+                    library.join(&rel).is_file(),
+                    "{} references {rel}, which is not vendored",
+                    entry.file_name().to_string_lossy()
+                );
+            }
+        }
+    }
+
+    /// The `assets/...` paths a composition names.
+    ///
+    /// Hand-rolled rather than a regex dependency, and it stops at the first
+    /// character that cannot appear in a path: these files carry JSON inside
+    /// HTML attributes, so a reference is as likely to be followed by `&quot;`
+    /// as by a plain quote.
+    fn referenced_assets(html: &str) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        for (idx, _) in html.match_indices("assets/") {
+            let rel: String = html[idx..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | '_'))
+                .collect();
+            if rel.contains('.') && !found.iter().any(|f| *f == rel) {
+                found.push(rel);
+            }
+        }
+        found
     }
 }

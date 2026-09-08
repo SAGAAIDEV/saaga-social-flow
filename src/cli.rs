@@ -24,6 +24,9 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Check everything a render needs: the component library, the HyperFrames
+    /// renderer, and the S3 uploader. No GUI window.
+    Doctor,
     /// Report which API keys are set and where each one came from. No GUI window.
     ///
     /// The first thing to run on a new machine: it names the file it would

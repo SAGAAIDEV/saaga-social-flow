@@ -17,7 +17,9 @@ use super::compose::{Job, Kind, Plan, Segment};
 use super::cut;
 
 pub const QUALITY: &str = "draft";
-const HF_VERSION: &str = "0.7.107";
+/// Pinned so the cache path, the npx fallback and the preflight check cannot
+/// drift apart into three different renderers.
+pub const HF_VERSION: &str = "0.7.107";
 /// The assembled cut, in whichever orientation's directory it lands.
 pub const LONGFORM: &str = "longform.mp4";
 

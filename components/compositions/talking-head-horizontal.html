@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;cameraPosition&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Framing (CSS object-position)&quot;,&quot;default&quot;:&quot;center&quot;},
+    {&quot;id&quot;:&quot;chapterLabel&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Label&quot;,&quot;default&quot;:&quot;Chapter&quot;,&quot;maxLength&quot;:24},
+    {&quot;id&quot;:&quot;chapterNumber&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Number&quot;,&quot;default&quot;:&quot;01&quot;,&quot;maxLength&quot;:4},
+    {&quot;id&quot;:&quot;chapterTopic&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Topic&quot;,&quot;default&quot;:&quot;The New Workflow&quot;,&quot;maxLength&quot;:80},
+    {&quot;id&quot;:&quot;openerSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Opener Length&quot;,&quot;default&quot;:2.6,&quot;min&quot;:1.2,&quot;max&quot;:6,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;},
+    {&quot;id&quot;:&quot;audioSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Audio&quot;,&quot;default&quot;:&quot;assets/placeholder-audio.mp3&quot;},
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div data-hf-id="hf-thhrt" id="root" data-composition-id="talking-head-horizontal" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+        <style>
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background: #101010;
+            font-family: 'Booton', Inter, system-ui, sans-serif;
+          }
+          /* The landscape counterpart to talking-head-vertical: the camera is the
+             whole frame, no screen, no name bar.
+
+             Class names are prefixed rather than sharing the portrait pair's
+             `.ch-open*` set. Those two blocks are the only members of
+             edit-vertical, so they can safely define one shared opener; this one
+             ships in edit-horizontal alongside chapter-title-card, whose opener
+             furniture is a different size, and both blocks' <style> is injected
+             into the same document. Every landscape block already prefixes for
+             the same reason (`ctc-`, `scs-`).
+
+             Framing does no work here, which is the real difference from the
+             vertical twin. A 1920x1080 source covering a 1920x1080 frame scales
+             1:1 with no overflow on either axis, so `cover` crops nothing and
+             cameraPosition has nothing to place — it stays declared so the two
+             talking-head blocks take the same variables and the edit stage can
+             assign either without special-casing, but a wrong value here is
+             inert rather than cropping the speaker out of frame. */
+          .thh-camera {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            object-fit: cover;
+            object-position: var(--cameraPosition, center);
+            z-index: 0;
+          }
+          /* Chapter opener — same beats, easing and treatment as the portrait
+             pair, so a chapter reads the same however its template was assigned.
+             Untimed: the framework owns .clip visibility, and this has to animate
+             out. The defocus is the canonical `effects.blur` shader on the
+             camera, resolving to identity as the plate leaves — not a CSS
+             filter. */
+          .thh-open {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 120px;
+            box-sizing: border-box;
+            z-index: 5;
+          }
+          /* No plate: the title sits directly on the footage, legible because of
+             the defocus and exposure dip underneath, both on the canonical shader
+             and both resolving to identity as the title leaves. A DOM scrim would
+             have been the wrong tool: media treatments belong on the shader path.
+
+             The type sits between its two neighbours on purpose. chapter-title-card
+             is landscape too and runs 48/420/72px, but it is a standalone card
+             that owns its frame; this is an overlay over footage and a 420px
+             numeral would swallow the shot. The portrait twin's 40/260/58px is
+             the other bound, set on a canvas 840px taller. 44/300/64px lands the
+             opener block at roughly 45% of frame height, centred. */
+          .thh-open-plate {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 1280px;
+            padding: 0 40px;
+            text-align: center;
+          }
+          .thh-open-label {
+            color: #ff8a4d;
+            font-size: 44px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+          }
+          .thh-open-number {
+            margin-top: 16px;
+            color: #ffffff;
+            font-size: 300px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 0.86;
+            letter-spacing: -0.055em;
+          }
+          .thh-open-rule {
+            width: 100%;
+            max-width: 700px;
+            height: 30px;
+            margin: 38px auto 0;
+            display: grid;
+            grid-template-columns: 1fr 18px 1fr;
+            align-items: center;
+            gap: 22px;
+          }
+          .thh-open-rule-line {
+            display: block;
+            width: 100%;
+            height: 4px;
+            background: #ff8a4d;
+          }
+          .thh-open-rule-mark {
+            display: block;
+            transform: rotate(45deg);
+            width: 18px;
+            height: 18px;
+            background: #ff8a4d;
+          }
+          .thh-open-topic {
+            margin-top: 32px;
+            color: #ffffff;
+            font-size: 64px;
+            font-weight: 600;
+            line-height: 1.1;
+            letter-spacing: -0.02em;
+          }
+        </style>
+
+        <video style="--hf-color-grading-blur: 0.8; --hf-color-grading-exposure: -0.7" data-color-grading='{"adjust":{"exposure":-0.7},"effects":{"blur":0.8}}' data-hf-id="hf-thhcm" id="thh-camera-video" class="thh-camera clip" data-start="0" data-duration="10" data-track-index="0" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+
+        <!-- Audio is always its own element, even pointing at the same file as the
+             video. The authored src must stay a real file — render-time audio
+             extraction needs something valid to parse (lint:
+             media_variable_src_no_fallback) — but audioSrc does override it.
+             Without this the render has no audio stream at all, which the
+             screencast render stage rejects outright. -->
+        <audio data-hf-id="hf-thhaud" id="thh-audio" data-start="0" data-duration="10" data-track-index="9" data-var-src="audioSrc" src="assets/placeholder-audio.mp3" data-volume="1"></audio>
+
+        <div data-hf-id="hf-thhopen" id="thh-opener" class="thh-open">
+          <div data-layout-allow-overflow="true" data-hf-id="hf-thhopl" id="thh-opener-plate" class="thh-open-plate">
+            <div data-hf-id="hf-thhoplb" id="thh-opener-label" class="thh-open-label" data-var-text="chapterLabel">Chapter</div>
+            <div data-hf-id="hf-thhopnm" id="thh-opener-number" class="thh-open-number" data-var-text="chapterNumber">01</div>
+            <div data-hf-id="hf-thhoprl" id="thh-opener-rule" class="thh-open-rule" aria-hidden="true">
+              <span data-hf-id="hf-thhoprll" id="thh-opener-rule-left" class="thh-open-rule-line thh-open-rule-left"></span>
+              <span data-hf-id="hf-thhoprm" id="thh-opener-rule-mark" class="thh-open-rule-mark"></span>
+              <span data-hf-id="hf-thhoprlr" id="thh-opener-rule-right" class="thh-open-rule-line thh-open-rule-right"></span>
+            </div>
+            <div data-hf-id="hf-thhoptp" id="thh-opener-topic" class="thh-open-topic" data-var-text="chapterTopic">The New Workflow</div>
+          </div>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            var vars = (window.__hyperframes && window.__hyperframes.getVariables)
+              ? window.__hyperframes.getVariables() : {};
+
+            /* Chapter length. Every timed element takes it, or that element's
+               hardcoded duration ends its clip early and the frame goes blank
+               partway through a longer chapter. Resolves per instance from the
+               host slot's data-variable-values. */
+            var D = Number(vars.durationSeconds);
+            if (!isFinite(D) || D < 1 || D > 900) { D = 10; }
+            ['thh-camera-video', 'thh-audio'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) { el.setAttribute('data-duration', String(D)); }
+            });
+
+            /* ---- Chapter opener -------------------------------------------
+               Same beats and same easing as talking-head-vertical and
+               screen-camera-vertical, so a chapter opens identically whichever
+               template the edit assigned it. The plate lifts away while
+               `effects.blur` returns to identity, pulling the camera into focus
+               on the same beat. */
+            var OPEN = Number(vars.openerSeconds);
+            if (!isFinite(OPEN) || OPEN < 1.2 || OPEN > 6) { OPEN = 2.6; }
+
+            /* The title is NOT animated on. It is fully composed in frame one —
+               plate, label, number, rule and topic all at rest — holds for the
+               opener, then leaves. Nothing here sets an entrance state, so the
+               CSS is the first frame and a seek to 0 shows the finished title.
+
+               openerSeconds therefore means "how long the title holds", and the
+               exit plus the blur ramp are clamped to finish inside the chapter so
+               a short one is never left mid-fade or permanently defocused. */
+            var HOLD = Math.max(0.2, Math.min(OPEN, D));
+            var EXIT_DUR = Math.min(0.42, Math.max(0.15, D * 0.2));
+            var RAMP = 0.85;
+            var EXIT = Math.min(HOLD, Math.max(0, D - EXIT_DUR));
+            var ramp = Math.max(0.2, Math.min(RAMP, D - EXIT));
+
+            tl.to('#thh-opener-plate', { y: -64, autoAlpha: 0, duration: EXIT_DUR, ease: 'power3.in' }, EXIT);
+            tl.to('#thh-camera-video', { '--hf-color-grading-blur': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+            tl.to('#thh-camera-video', { '--hf-color-grading-exposure': 0, duration: ramp, ease: 'power2.out' }, EXIT);
+
+            window.__timelines['talking-head-horizontal'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

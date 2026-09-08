@@ -49,6 +49,7 @@ mod notes;
 mod ops;
 mod overlay;
 mod permissions;
+mod preflight;
 mod pointer;
 mod posts;
 mod titles;
@@ -125,6 +126,9 @@ pub(crate) fn load_dotenv() {
 fn main() -> Result<()> {
     load_dotenv();
     agent::init_tracing();
+    // Anything a render will hard-fail on, surfaced now rather than at the
+    // end of a recording. Silent when the machine is ready.
+    preflight::warn_once();
     let args = Args::parse();
 
     // Resolved before anything is opened: a typo in --layout should be a
@@ -142,6 +146,7 @@ fn main() -> Result<()> {
     if let Some(command) = &args.command {
         match command {
             Command::Credentials => return settings::report(&mut std::io::stdout()),
+        Command::Doctor => return preflight::report(&mut std::io::stdout()),
         Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,

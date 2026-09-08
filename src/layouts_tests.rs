@@ -155,11 +155,15 @@ fn the_camera_slots_have_the_aspects_cover_is_tested_against() {
     assert!((aspect(talk_v) - 9.0 / 16.0).abs() < 1e-9, "talking-head-vertical");
 }
 
-/// Where the sibling project's compositions live, or `None` when this crate
-/// is checked out on its own.
+/// Where the compositions live — the vendored `components/` in this repo, via
+/// the same resolution the renderer uses, so a test cannot pass against a
+/// different copy than the one that gets rendered.
+///
+/// Still an `Option`: an installed release has no crate root, and these are
+/// checks on the library rather than on the code, so having nothing to check is
+/// a skip rather than a failure.
 fn compositions_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../screencast/components/compositions");
+    let dir = crate::edit::compose::components_root().join("compositions");
     dir.is_dir().then_some(dir)
 }
 
@@ -270,7 +274,7 @@ fn rect_of_class(html: &str, class: &str) -> (f64, f64, f64, f64) {
 fn camera_slots_match_the_composition_css() {
     let Some(dir) = compositions_dir() else {
         println!(
-            "skipping: no screencast/ beside this crate, so there is no composition CSS \
+            "skipping: no components/ library resolved, so there is no composition CSS \
              to check the camera slots against"
         );
         return;
@@ -299,7 +303,7 @@ fn camera_slots_match_the_composition_css() {
 #[test]
 fn paint_order_matches_the_composition_css() {
     let Some(dir) = compositions_dir() else {
-        println!("skipping: no screencast/ beside this crate");
+        println!("skipping: no components/ library resolved");
         return;
     };
 
@@ -354,7 +358,7 @@ fn screen_rect_class(html: &str) -> String {
 fn slots_match_the_composition_css() {
     let Some(dir) = compositions_dir() else {
         println!(
-            "skipping: no screencast/ beside this crate, so there is no composition CSS \
+            "skipping: no components/ library resolved, so there is no composition CSS \
              to check the layout table against"
         );
         return;
