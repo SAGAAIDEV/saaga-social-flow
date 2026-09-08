@@ -133,6 +133,9 @@ impl App {
                 self.update_video_brief(&status);
                 if from_render {
                     self.set_render_status("Render ready — writing the title and description…");
+                    // A model call has no measurable middle, so the bar runs
+                    // rather than sitting at zero looking stuck.
+                    self.set_thumbnail_progress(None);
                 }
                 true
             }
@@ -186,6 +189,9 @@ impl App {
             self.update_video_brief(&status);
             if job.from_render {
                 self.set_render_status(&format!("Render ready — {status}"));
+                // The copy step is over either way; the artwork, if it follows,
+                // takes the bar from here.
+                self.set_thumbnail_progress(Some(0.0));
             }
             self.update_publish_summary();
             self.update_blog_view();

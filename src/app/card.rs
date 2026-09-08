@@ -41,6 +41,8 @@ impl App {
             let job = self.card_pending.as_ref().ok_or_else(|| anyhow::anyhow!("no artwork job"))?;
             let mtm = objc2::MainThreadMarker::new().ok_or_else(|| anyhow::anyhow!("render must run on the main thread"))?;
             let kind = job.kind();
+            // One picture of the set per hop, so the bar moves in thirds.
+            self.set_thumbnail_progress(Some(job.next as f64 / card::assets::Kind::ALL.len() as f64));
             self.set_thumbnail_status(&format!("Drawing {} artwork…", kind.name()));
             let size = kind.size();
             let html = card::render::html(&job.root, &job.design(), Some(&job.photo), size.0, size.1)?;
@@ -68,7 +70,7 @@ impl App {
                 RasterEvent::Drawn { jpeg } => match job.accept(&jpeg) {
                     Ok(false) => { self.card_pending = Some(job); self.draw_next_asset(); failed = self.card_pending.is_none(); }
                     Ok(true) => match job.commit() {
-                        Ok(()) => { committed = true; self.set_thumbnail_status("Artwork ready: horizontal, vertical and OG. YouTube, blog and social exports use this set."); }
+                        Ok(()) => { committed = true; self.set_thumbnail_progress(Some(1.0)); self.set_thumbnail_status("Artwork ready: horizontal, vertical and OG. YouTube, blog and social exports use this set."); }
                         Err(err) => { failed = true; self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")); }
                     },
                     Err(err) => { failed = true; self.set_thumbnail_status(&format!("Could not save artwork: {err:#}")); }

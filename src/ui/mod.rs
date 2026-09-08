@@ -16,7 +16,7 @@ use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAlert, NSAutoresizingMaskOptions, NSBorderType, NSBox, NSButton, NSButtonType,
-    NSControlStateValueOff, NSControlStateValueOn,
+    NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
     NSFont, NSFontWeight, NSLevelIndicator,
     NSLevelIndicatorStyle, NSPopUpButton, NSProgressIndicator,
     NSProgressIndicatorStyle, NSScrollView,
@@ -214,6 +214,9 @@ const TIMER_H: f64 = 22.0;
 const METER_W: f64 = 90.0;
 const BUTTON_GAP: f64 = 4.0;
 const GROUP_H: f64 = 114.0;
+/// One progress row under the render button: a caption and a small bar.
+const BAR_H: f64 = 14.0;
+const CAPTION_W: f64 = 72.0;
 const PROMPT_H: f64 = 52.0;
 
 pub struct ControlTargetIvars {
@@ -265,6 +268,9 @@ pub struct ControlTargetIvars {
     render_status: RefCell<Option<Retained<NSTextField>>>,
     thumbnail_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
+    /// The two bars under Render video and thumbnails — see `layout_left`.
+    render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
+    thumbnail_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
 
     // Post tab
     posts_model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
@@ -647,6 +653,8 @@ impl ControlTarget {
             render_status: RefCell::new(None),
             thumbnail_status: RefCell::new(None),
             render_summary: RefCell::new(None),
+            render_bar: RefCell::new(None),
+            thumbnail_bar: RefCell::new(None),
             posts_model_popup: RefCell::new(None),
             posts_provider_popup: RefCell::new(None),
             posts_prompt_view: RefCell::new(None),
@@ -969,6 +977,39 @@ impl ControlTarget {
         }
     }
 
+    /// The video bar: the cut, the compositions and the render, as a fraction.
+    pub fn set_render_progress(&self, fraction: f64) {
+        if let Some(bar) = self.ivars().render_bar.borrow().clone() {
+            Self::show_fraction(&bar, fraction);
+        }
+    }
+
+    /// The thumbnails bar. `None` while the copy is being written — a model
+    /// call with no measurable middle, so the bar runs indeterminate rather than
+    /// sitting at zero looking stuck — and a fraction once the artwork is being
+    /// drawn, one picture of the set at a time.
+    pub fn set_thumbnail_progress(&self, fraction: Option<f64>) {
+        if let Some(bar) = self.ivars().thumbnail_bar.borrow().clone() {
+            match fraction {
+                Some(fraction) => Self::show_fraction(&bar, fraction),
+                None => {
+                    bar.setIndeterminate(true);
+                    unsafe { bar.startAnimation(None) };
+                }
+            }
+        }
+    }
+
+    /// A determinate bar at `fraction` of the way along. Stops any indeterminate
+    /// run first: a bar switched to determinate while animating keeps spinning.
+    fn show_fraction(bar: &NSProgressIndicator, fraction: f64) {
+        if bar.isIndeterminate() {
+            unsafe { bar.stopAnimation(None) };
+            bar.setIndeterminate(false);
+        }
+        bar.setDoubleValue(fraction.clamp(0.0, 1.0) * 100.0);
+    }
+
     // Post tab updates
     pub fn set_posts_status(&self, text: &str) {
         if let Some(field) = self.ivars().posts_status.borrow().clone() {
@@ -1182,6 +1223,7 @@ pub struct Layout {
     prompt: (Retained<NSTextField>, Retained<NSTextField>),
     notes_group: (Retained<NSBox>, Vec<Retained<NSButton>>),
     render_status: Retained<NSTextField>,
+    progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)>,
     last: Cell<(u32, u32, u32, u32)>,
 }
 
@@ -1209,6 +1251,7 @@ impl Layout {
             &self.project_name,
             &self.left_groups,
             &self.render_status,
+            &self.progress_rows,
             preview,
         );
         layout_right(
@@ -1261,6 +1304,7 @@ fn layout_left(
     project_name: &NSTextField,
     groups: &[(Retained<NSBox>, Vec<Retained<NSButton>>)],
     render_status: &NSTextField,
+    progress_rows: &[(Retained<NSTextField>, Retained<NSProgressIndicator>)],
     preview: &PreviewHost,
 ) {
     let content_w = (width - PAD * 2.0).max(80.0);
@@ -1306,7 +1350,22 @@ fn layout_left(
         ));
         layout_group_buttons(frame, buttons);
     }
-    let progress_y = stack_bottom - SECTION_GAP - LABEL_H;
+    // Under the buttons: one row per bar, then the status line, and the preview
+    // takes whatever is left.
+    y = stack_bottom - SECTION_GAP;
+    for (caption, bar) in progress_rows {
+        y -= BAR_H;
+        caption.setFrame(NSRect::new(
+            NSPoint::new(PAD, y),
+            NSSize::new(CAPTION_W, BAR_H),
+        ));
+        bar.setFrame(NSRect::new(
+            NSPoint::new(PAD + CAPTION_W + GAP, y),
+            NSSize::new((content_w - CAPTION_W - GAP).max(40.0), BAR_H),
+        ));
+        y -= GAP;
+    }
+    let progress_y = y - LABEL_H;
     render_status.setFrame(row(progress_y, LABEL_H));
     preview.set_frame(NSRect::new(
         NSPoint::new(PAD, PAD),
@@ -1843,6 +1902,37 @@ pub fn attach_controls(
     );
     left.addSubview(&render_status);
     *target.ivars().render_status.borrow_mut() = Some(render_status.clone());
+
+    // Two bars for the two halves of the press. The cut and render run on one
+    // thread and report a fraction; the copy and artwork that follow run as a
+    // chain of hops on the main thread, which the status line alone never made
+    // legible as one wait. Always shown, empty until a run starts: a bar that
+    // appeared only mid-run would shift the preview under the pointer.
+    let progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)> = [
+        ("Video", &target.ivars().render_bar),
+        ("Thumbnails", &target.ivars().thumbnail_bar),
+    ]
+    .into_iter()
+    .map(|(caption, slot)| {
+        let label = NSTextField::labelWithString(&NSString::from_str(caption), mtm);
+        label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        left.addSubview(&label);
+        let bar = NSProgressIndicator::initWithFrame(
+            NSProgressIndicator::alloc(mtm),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+        );
+        bar.setStyle(NSProgressIndicatorStyle::Bar);
+        bar.setControlSize(NSControlSize::Small);
+        bar.setIndeterminate(false);
+        bar.setMinValue(0.0);
+        bar.setMaxValue(100.0);
+        bar.setDoubleValue(0.0);
+        left.addSubview(&bar);
+        *slot.borrow_mut() = Some(bar.clone());
+        (label, bar)
+    })
+    .collect();
 
     let left_groups = [("Record", &built[RECORD]), ("Session", &built[SESSION])]
         .into_iter()
@@ -2628,6 +2718,7 @@ pub fn attach_controls(
         prompt: (prompt_label, prompt_field),
         notes_group: (notes_box, notes_buttons.to_vec()),
         render_status,
+        progress_rows,
         last: Cell::new((0, 0, 0, 0)),
     };
     layout.sync(&preview, &notes);

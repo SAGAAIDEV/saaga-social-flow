@@ -30,7 +30,18 @@ struct Task<'a> {
     dest: PathBuf,
 }
 
-pub fn render_plan(plan: &Plan, publish: &Path) -> Result<PathBuf> {
+/// Renders what the plan needs and assembles both longforms.
+///
+/// `progress` is told `(done, total)` over every composition in the plan,
+/// current ones included — so a re-cut of one chapter reports most of the set
+/// done before a single render starts, which is the truth of it. It is called
+/// from the worker threads, hence `Sync`.
+pub fn render_plan(
+    plan: &Plan,
+    publish: &Path,
+    status: &dyn Fn(&str),
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<PathBuf> {
     std::fs::create_dir_all(publish)
         .with_context(|| format!("creating {}", publish.display()))?;
     let h_dir = publish.join("horizontal");
@@ -93,8 +104,13 @@ pub fn render_plan(plan: &Plan, publish: &Path) -> Result<PathBuf> {
                 .join(", ")
         );
     }
-    render_all(&pending)?;
+    let all = skipped.len() + pending.len();
+    progress(skipped.len(), all);
+    render_all(&pending, &|finished| progress(skipped.len() + finished, all))?;
 
+    // The one step after the renders with a wait worth naming: the cards are
+    // conformed to the footage and everything is joined.
+    status("Assembling the longform…");
     let joinable = conform_for_concat(plan, &h_out, &h_dir)?;
     join(&joinable, &h_dir.join(LONGFORM))?;
     // No `conform_for_concat` for the verticals, and that is not an oversight:
@@ -163,7 +179,9 @@ fn conform_for_concat(plan: &Plan, h_out: &[PathBuf], h_dir: &Path) -> Result<Ve
 
 /// Runs every task on a bounded pool, reporting *all* failures rather than the
 /// first. One broken chapter should not hide the state of the other nineteen.
-fn render_all(tasks: &[Task]) -> Result<()> {
+///
+/// `on_done` hears how many have finished, success or failure, as each one does.
+fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
     if tasks.is_empty() {
         return Ok(());
     }
@@ -182,6 +200,7 @@ fn render_all(tasks: &[Task]) -> Result<()> {
                 let Some(task) = tasks.get(index) else { break };
                 let outcome = render_job(task.workspace, task.job, &task.dest);
                 let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+                on_done(finished);
                 match outcome {
                     Ok(()) => eprintln!(
                         "stream-recorder: [{finished}/{total}] rendered {}",

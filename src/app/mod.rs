@@ -1006,6 +1006,9 @@ impl App {
         println!("stream-recorder: cutting disfluencies and rendering…");
         self.render_busy = true;
         self.pipeline = true;
+        // Both bars back to the start: the second is what this press owes next.
+        self.set_render_progress(0.0);
+        self.set_thumbnail_progress(Some(0.0));
         self.set_render_status(&format!("{photo}. Cutting disfluencies…"));
         self.set_thumbnail_status(&format!("{photo}. Rendering — the title, artwork and upload follow."));
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
@@ -1023,10 +1026,12 @@ impl App {
             return;
         }
         if crate::card::assets::ready(&self.session.root).is_ok() {
+            self.set_thumbnail_progress(Some(1.0));
             self.pipeline_status("Artwork already matches this photo and copy.");
             self.finish_pipeline_with_upload();
             return;
         }
+        self.set_thumbnail_progress(Some(0.0));
         self.pipeline_status("Copy written — drawing the artwork set…");
         // `draw_card` reports its own refusal — no title, no photo — into the
         // status line; the chain simply does not go on from there.
@@ -1091,6 +1096,21 @@ impl App {
     fn set_render_status(&self, text: &str) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_render_status(text);
+        }
+    }
+
+    /// The Video bar under the render button, 0.0 to 1.0.
+    fn set_render_progress(&self, fraction: f64) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_render_progress(fraction);
+        }
+    }
+
+    /// The Thumbnails bar. `None` runs it indeterminate — see
+    /// [`ui::ControlTarget::set_thumbnail_progress`].
+    fn set_thumbnail_progress(&self, fraction: Option<f64>) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_thumbnail_progress(fraction);
         }
     }
 
@@ -2080,6 +2100,7 @@ impl App {
             return;
         }
         self.render_busy = true;
+        self.set_render_progress(0.0);
         self.set_edit_status(&format!("Cutting chapter {chapter:02}…"));
         crate::edit::spawn_recut(self.session.clone(), vec![chapter], self.render_tx.clone());
         self.sync_controls();
@@ -2917,8 +2938,10 @@ impl App {
         for event in events {
             match event {
                 crate::edit::RenderEvent::Status(msg) => self.show_render_progress(&msg),
+                crate::edit::RenderEvent::Progress(fraction) => self.set_render_progress(fraction),
                 crate::edit::RenderEvent::Ready(dir) => {
                     self.render_busy = false;
+                    self.set_render_progress(1.0);
                     self.show_render_progress(&format!("Render ready — clips are under Video details. Files: {}", dir.display()));
                     // Every chapter has transcribed by now, which is what the
                     // title and description are written from. The artwork and
