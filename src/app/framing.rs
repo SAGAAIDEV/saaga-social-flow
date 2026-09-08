@@ -36,14 +36,14 @@ use std::time::Duration;
 use anyhow::Context;
 
 use crate::app::devices::screen_track;
+use crate::app::resolve::{centred_placement, slot_output};
 use crate::app::App;
-use crate::capture::screen_stream::{Capture, ScreenConnection};
 use crate::capture::screen;
+use crate::capture::screen_stream::{Capture, ScreenConnection};
 use crate::config::SavedPlacement;
 use crate::layouts::{Layout, Orientation, Pair, LAYOUTS};
 use crate::overlay::{ChildLink, DrawnRegion, RegionOverlay};
 use crate::region::placement::{self, Placement, MIN_ZOOM};
-use crate::app::resolve::{centred_placement, slot_output};
 use crate::region::PointRect;
 
 impl App {
@@ -160,9 +160,10 @@ impl App {
                 if layout.parent().is_some() != pass {
                     continue;
                 }
-                let (Some(output), Some(placement)) =
-                    (slot_output(layout), self.placements.get(layout.block).copied())
-                else {
+                let (Some(output), Some(placement)) = (
+                    slot_output(layout),
+                    self.placements.get(layout.block).copied(),
+                ) else {
                     continue;
                 };
                 let parent = layout
@@ -281,7 +282,12 @@ impl App {
 
     /// Show or hide the region overlay, building it on first use.
     pub(super) fn toggle_regions(&mut self) {
-        if self.live.as_ref().and_then(|l| l.overlay.as_ref()).is_some() {
+        if self
+            .live
+            .as_ref()
+            .and_then(|l| l.overlay.as_ref())
+            .is_some()
+        {
             if let Some(live) = self.live.as_mut() {
                 let visible = live.overlay.as_ref().is_some_and(RegionOverlay::is_visible);
                 if let Some(overlay) = live.overlay.as_mut() {
@@ -323,11 +329,9 @@ impl App {
     /// capture if it was the one being recorded.
     pub(super) fn region_placed(&mut self, orientation: Orientation, rect: PointRect) {
         let layout = Layout::get(self.pair, orientation);
-        let (Some(geometry), Some(uid), Some(output)) = (
-            self.geometry,
-            self.screen_uid.clone(),
-            slot_output(layout),
-        ) else {
+        let (Some(geometry), Some(uid), Some(output)) =
+            (self.geometry, self.screen_uid.clone(), slot_output(layout))
+        else {
             return;
         };
 

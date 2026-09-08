@@ -114,7 +114,10 @@ fn check(manifest: &crate::posts::schema::PostsManifest) -> Report {
                 }
             }
             if post.content.trim().is_empty() {
-                problems.push(format!("{} · {} has no body", video.video_id, post.platform));
+                problems.push(format!(
+                    "{} · {} has no body",
+                    video.video_id, post.platform
+                ));
             }
         }
     }
@@ -148,8 +151,7 @@ fn sample_contexts(session: &Session) -> Vec<VideoContext> {
         .notes_dir()
         .ok()
         .and_then(|dir| crate::notes::load_notes(&dir).ok());
-    let mut contexts =
-        crate::posts::generate::collect_video_contexts(&session.dir, notes.as_ref());
+    let mut contexts = crate::posts::generate::collect_video_contexts(&session.dir, notes.as_ref());
     contexts.truncate(SAMPLE);
     contexts
 }

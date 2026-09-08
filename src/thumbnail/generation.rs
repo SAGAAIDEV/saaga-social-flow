@@ -15,8 +15,8 @@ pub(super) fn run(
     let Some(still_path) = stills.first() else {
         anyhow::bail!("no camera still yet — press Retake photo first");
     };
-    let still_bytes = std::fs::read(still_path)
-        .with_context(|| format!("reading {}", still_path.display()))?;
+    let still_bytes =
+        std::fs::read(still_path).with_context(|| format!("reading {}", still_path.display()))?;
     let still_id = crate::agent::prompt::hash_of_bytes(&still_bytes);
 
     // Optional by nature: a talking-head layout has no screen to have caught.
@@ -75,10 +75,16 @@ pub(super) fn run(
             let mut variant = nth;
             let id = loop {
                 let id = schema::candidate_id(
-                    &model.id, &brief_hash, &still_id,
-                    screen_id.as_deref().unwrap_or_default(), &refs_id, variant,
+                    &model.id,
+                    &brief_hash,
+                    &still_id,
+                    screen_id.as_deref().unwrap_or_default(),
+                    &refs_id,
+                    variant,
                 );
-                if !schema::already_generated(&rows, &id) { break id; }
+                if !schema::already_generated(&rows, &id) {
+                    break id;
+                }
                 variant += 1;
             };
             status(format!("{} — candidate {}…", model.label, nth + 1));
@@ -150,4 +156,3 @@ fn write_candidate(
     schema::append(&session.root, &schema::Row::Candidate(row.clone()))?;
     Ok(row)
 }
-

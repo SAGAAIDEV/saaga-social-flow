@@ -77,7 +77,13 @@ pub fn payload(card: &Card, photo: Option<&Path>, width: u32, height: u32) -> se
 }
 
 /// Renders the card, returning the page.
-pub fn html(root: &Path, card: &Card, photo: Option<&Path>, width: u32, height: u32) -> Result<String> {
+pub fn html(
+    root: &Path,
+    card: &Card,
+    photo: Option<&Path>,
+    width: u32,
+    height: u32,
+) -> Result<String> {
     let script = script(root);
     let body = serde_json::to_vec(&payload(card, photo, width, height))
         .context("serializing the card payload")?;
@@ -178,7 +184,10 @@ mod tests {
         assert_eq!(value["focus"], 0.32);
         assert_eq!(value["width"], 1280);
         assert_eq!(value["height"], 720);
-        assert!(value.get("photo").is_none(), "a card with no still sends none");
+        assert!(
+            value.get("photo").is_none(),
+            "a card with no still sends none"
+        );
     }
 
     /// A bare path in an `<img src>` on a page loaded from a file URL resolves
@@ -240,7 +249,11 @@ mod tests {
             }
             Err(err) => panic!("{err:#}"),
         };
-        assert!(page.starts_with("<!doctype html>"), "{}", &page[..80.min(page.len())]);
+        assert!(
+            page.starts_with("<!doctype html>"),
+            "{}",
+            &page[..80.min(page.len())]
+        );
         assert!(page.contains("Ship it anyway"));
         assert!(page.contains("Why the queue fell over."));
         // The light theme's panel, so the theme reached the layout rather than

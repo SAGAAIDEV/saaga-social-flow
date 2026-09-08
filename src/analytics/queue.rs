@@ -229,7 +229,10 @@ mod tests {
     #[test]
     fn the_markdown_lists_every_project_with_work() {
         let queue = Queue {
-            projects: vec![project("Rust errors", 3, 1, 0), project("Walkthrough", 0, 6, 2)],
+            projects: vec![
+                project("Rust errors", 3, 1, 0),
+                project("Walkthrough", 0, 6, 2),
+            ],
         };
         let out = queue.as_markdown();
         assert!(out.starts_with("## Work queue — 10 sample(s) due across 2 project(s)"));

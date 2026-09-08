@@ -27,18 +27,29 @@ pub fn spawn_generate_posts(
     custom_prompt: Option<String>,
     tx: Sender<PostsEvent>,
 ) {
-    if let Err(err) = thread::Builder::new().name("posts-gen".into()).spawn(move || {
-        match run_posts_generation(&session, &model, provider.as_deref(), custom_prompt.as_deref(), &tx) {
-            Ok((path, manifest)) => {
-                eprintln!("stream-recorder: posts ready → {}", path.display());
-                let _ = tx.send(PostsEvent::Ready(path, manifest));
+    if let Err(err) = thread::Builder::new()
+        .name("posts-gen".into())
+        .spawn(move || {
+            match run_posts_generation(
+                &session,
+                &model,
+                provider.as_deref(),
+                custom_prompt.as_deref(),
+                &tx,
+            ) {
+                Ok((path, manifest)) => {
+                    eprintln!("stream-recorder: posts ready → {}", path.display());
+                    let _ = tx.send(PostsEvent::Ready(path, manifest));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: posts generation failed: {err:#}");
+                    let _ = tx.send(PostsEvent::Status(format!(
+                        "Post generation failed: {err:#}"
+                    )));
+                }
             }
-            Err(err) => {
-                eprintln!("stream-recorder: posts generation failed: {err:#}");
-                let _ = tx.send(PostsEvent::Status(format!("Post generation failed: {err:#}")));
-            }
-        }
-    }) {
+        })
+    {
         eprintln!("stream-recorder: could not start posts generation thread: {err}");
     }
 }
@@ -50,7 +61,9 @@ fn run_posts_generation(
     custom_prompt: Option<&str>,
     tx: &Sender<PostsEvent>,
 ) -> Result<(PathBuf, PostsManifest)> {
-    let _ = tx.send(PostsEvent::Status("Gathering project transcripts & render outputs…".into()));
+    let _ = tx.send(PostsEvent::Status(
+        "Gathering project transcripts & render outputs…".into(),
+    ));
 
     let notes = session
         .notes_dir()
@@ -61,7 +74,10 @@ fn run_posts_generation(
     publication::enrich(session, &mut contexts);
 
     if contexts.is_empty() {
-        bail!("no video or transcript contexts found in {}", session.dir.display());
+        bail!(
+            "no video or transcript contexts found in {}",
+            session.dir.display()
+        );
     }
 
     let project_title = session

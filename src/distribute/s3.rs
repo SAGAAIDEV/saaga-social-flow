@@ -24,7 +24,9 @@ pub fn upload_assets(
             index + 1,
             assets.len()
         ));
-        let url = upload_one(asset, project, version, &|update| progress(&asset.id, update))?;
+        let url = upload_one(asset, project, version, &|update| {
+            progress(&asset.id, update)
+        })?;
         items.push(DistributedAsset {
             id: asset.id.clone(),
             kind: match asset.kind {
@@ -159,9 +161,7 @@ fn upload_one(
 pub(crate) fn screencast_home() -> PathBuf {
     std::env::var("SCREENCAST_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../screencast")
-        })
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../screencast"))
 }
 
 impl AssetKind {

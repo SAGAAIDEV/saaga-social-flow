@@ -56,7 +56,10 @@ fn speech_during_a_break_is_not_the_chapters() {
     clock.tick(Some(snapshot(10.0, 1)));
     clock.pause();
     assert!(clock.is_paused());
-    assert!(!clock.readout().recording, "a paused chapter reads as recording");
+    assert!(
+        !clock.readout().recording,
+        "a paused chapter reads as recording"
+    );
     assert!(
         clock.readout().detail.contains("on a break"),
         "{}",
@@ -85,11 +88,17 @@ fn a_break_takes_no_time_off_the_chapter() {
     clock.pause();
     clock.backdate(Duration::from_secs(3));
     let during = clock.position().expect("open").1;
-    assert!((during - 5.0).abs() < 0.2, "the clock ran during the break: {during}");
+    assert!(
+        (during - 5.0).abs() < 0.2,
+        "the clock ran during the break: {during}"
+    );
 
     clock.resume();
     let after = clock.position().expect("open").1;
-    assert!((after - 5.0).abs() < 0.2, "the break was added back: {after}");
+    assert!(
+        (after - 5.0).abs() < 0.2,
+        "the break was added back: {after}"
+    );
 
     let closed = clock.close().expect("banked");
     assert!(
@@ -252,7 +261,10 @@ fn the_loudest_peak_between_paints_is_the_one_shown() {
     clock.tick(Some(quiet));
 
     let readout = clock.readout();
-    assert_eq!(readout.peak_dbfs, -6.0, "the transient survived the quiet tick");
+    assert_eq!(
+        readout.peak_dbfs, -6.0,
+        "the transient survived the quiet tick"
+    );
     assert!(readout.detail.contains("-6 dB pk"), "{}", readout.detail);
     // RMS is the latest, not the maximum: it is a loudness reading, not a catch.
     assert_eq!(readout.level_dbfs, -20.0);

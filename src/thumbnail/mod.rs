@@ -64,15 +64,23 @@ pub enum ThumbnailEvent {
     /// total made a run that skipped every candidate — the normal outcome when
     /// nothing about the brief changed — read exactly like one that drew a full
     /// set, which is indistinguishable from the button being broken.
-    Generated { made: usize, total: usize },
+    Generated {
+        made: usize,
+        total: usize,
+    },
     /// A dropped file, decoded and downscaled and ready to store.
     ///
     /// The library write deliberately does *not* happen on the worker: adding a
     /// reference also switches it on, and `selection.json` is read-modify-write.
     /// Dropping three files at once is three of these, and doing that write back
     /// on the main thread is what stops two of them from losing each other.
-    Prepared { name: String, bytes: Vec<u8> },
-    PortraitSaved { root: PathBuf },
+    Prepared {
+        name: String,
+        bytes: Vec<u8>,
+    },
+    PortraitSaved {
+        root: PathBuf,
+    },
     Failed(String),
 }
 
@@ -216,21 +224,28 @@ pub fn spawn_prepare_reference(name: String, data_url: String, tx: Sender<Thumbn
 /// Decode and store an imported portrait without blocking the UI thread.
 pub fn spawn_portrait(root: PathBuf, data: String, tx: Sender<ThumbnailEvent>) {
     let unstarted = tx.clone();
-    if let Err(err) = thread::Builder::new().name("portrait-import".into()).spawn(move || {
-        let result = image::decode_data_url(&data)
-            .and_then(|bytes| still::shrink(&bytes, 2048.0))
-            .and_then(|bytes| {
-                let path = still::write_bytes(&root, &bytes)?;
-                // Selecting a previously imported photo makes it newest again.
-                std::fs::write(&path, bytes)?;
-                Ok(())
-            });
-        let event = match result {
-            Ok(()) => ThumbnailEvent::PortraitSaved { root },
-            Err(err) => ThumbnailEvent::Failed(format!("Could not import photo: {err:#}")),
-        };
-        let _ = tx.send(event);
-    }) { let _ = unstarted.send(ThumbnailEvent::Failed(format!("Could not start photo import: {err}"))); }
+    if let Err(err) = thread::Builder::new()
+        .name("portrait-import".into())
+        .spawn(move || {
+            let result = image::decode_data_url(&data)
+                .and_then(|bytes| still::shrink(&bytes, 2048.0))
+                .and_then(|bytes| {
+                    let path = still::write_bytes(&root, &bytes)?;
+                    // Selecting a previously imported photo makes it newest again.
+                    std::fs::write(&path, bytes)?;
+                    Ok(())
+                });
+            let event = match result {
+                Ok(()) => ThumbnailEvent::PortraitSaved { root },
+                Err(err) => ThumbnailEvent::Failed(format!("Could not import photo: {err:#}")),
+            };
+            let _ = tx.send(event);
+        })
+    {
+        let _ = unstarted.send(ThumbnailEvent::Failed(format!(
+            "Could not start photo import: {err}"
+        )));
+    }
 }
 
 /// Records that a candidate is now the live thumbnail.
@@ -257,10 +272,8 @@ mod tests {
 
     #[test]
     fn a_brief_round_trips_with_its_provenance() {
-        let root = std::env::temp_dir().join(format!(
-            "stream-recorder-brief-{}-rt",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-brief-{}-rt", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let session = Session {
             root: root.clone(),
@@ -334,6 +347,9 @@ mod tests {
     #[test]
     fn an_empty_brief_is_never_remembered() {
         remember_brief(&Brief::default());
-        remember_brief(&Brief { title: "  ".into(), description: "\n".into() });
+        remember_brief(&Brief {
+            title: "  ".into(),
+            description: "\n".into(),
+        });
     }
 }

@@ -199,7 +199,9 @@ mod tests {
         let claude = picker
             .menu()
             .iter()
-            .position(|row| matches!(row, ModelMenuRow::Model { id, .. } if id.starts_with("anthropic")))
+            .position(
+                |row| matches!(row, ModelMenuRow::Model { id, .. } if id.starts_with("anthropic")),
+            )
             .expect("claude");
         assert!(picker.choose_model(claude));
         assert_eq!(picker.model(), "anthropic/claude-sonnet-4");
@@ -233,7 +235,10 @@ mod tests {
     fn re_choosing_the_same_provider_reports_no_change() {
         let providers = vec![AUTO_PROVIDER.to_string(), "Together".to_string()];
         let mut picker = Picker::from_parts(Some("Together"), "x/y", menu_of(&["x/y"]));
-        assert!(!picker.choose_provider(&providers, 1), "already on Together");
+        assert!(
+            !picker.choose_provider(&providers, 1),
+            "already on Together"
+        );
         // An index past the end is not a provider, and reads as Auto.
         assert!(picker.choose_provider(&providers, 99));
         assert_eq!(picker.provider(), None);
@@ -268,7 +273,9 @@ mod tests {
         let claude = posts
             .menu()
             .iter()
-            .position(|row| matches!(row, ModelMenuRow::Model { id, .. } if id.starts_with("anthropic")))
+            .position(
+                |row| matches!(row, ModelMenuRow::Model { id, .. } if id.starts_with("anthropic")),
+            )
             .expect("claude");
         assert!(posts.choose_model(claude));
         assert_ne!(posts.model(), notes.model(), "the Post tab moved alone");
@@ -298,7 +305,11 @@ mod live {
                 })
                 .collect::<std::collections::BTreeSet<_>>()
         };
-        println!("Auto      -> {} vendors, model {}", vendors(&picker).len(), picker.model());
+        println!(
+            "Auto      -> {} vendors, model {}",
+            vendors(&picker).len(),
+            picker.model()
+        );
         assert!(vendors(&picker).len() > 1, "Auto spans vendors");
 
         let idx = providers

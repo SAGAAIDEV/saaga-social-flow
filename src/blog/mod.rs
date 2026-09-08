@@ -42,11 +42,11 @@ use serde::{Deserialize, Serialize};
 pub mod chapters;
 pub mod compat;
 pub mod components;
+pub mod figures;
 pub mod generate;
 pub mod library;
-pub mod pane;
-pub mod figures;
 pub mod og;
+pub mod pane;
 pub mod payload;
 pub mod preview;
 pub mod schema;
@@ -193,7 +193,10 @@ pub enum BlogEvent {
     /// The author and category lists came back. Carries the counts only — the
     /// pane reads the lists themselves from the cache on disk, so there is one
     /// source of truth for what is on screen.
-    LibraryReady { authors: usize, categories: usize },
+    LibraryReady {
+        authors: usize,
+        categories: usize,
+    },
     /// A draft was written to disk and nothing was uploaded. Distinct from
     /// [`BlogEvent::Ready`], which means a live CMS entry exists — nothing is
     /// reversible after that one, and everything is after this one.
@@ -281,16 +284,18 @@ pub fn spawn_write(
     let unstarted = tx.clone();
     if let Err(err) = thread::Builder::new()
         .name("blog-write".into())
-        .spawn(move || match write_draft(&session, &model, provider.as_deref(), &tx) {
-            Ok(path) => {
-                eprintln!("stream-recorder: blog draft → {}", path.display());
-                let _ = tx.send(BlogEvent::Written(path));
-            }
-            Err(err) => {
-                eprintln!("stream-recorder: blog draft failed: {err:#}");
-                let _ = tx.send(BlogEvent::Failed(format!("Draft failed: {err:#}")));
-            }
-        })
+        .spawn(
+            move || match write_draft(&session, &model, provider.as_deref(), &tx) {
+                Ok(path) => {
+                    eprintln!("stream-recorder: blog draft → {}", path.display());
+                    let _ = tx.send(BlogEvent::Written(path));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: blog draft failed: {err:#}");
+                    let _ = tx.send(BlogEvent::Failed(format!("Draft failed: {err:#}")));
+                }
+            },
+        )
     {
         eprintln!("stream-recorder: could not start the blog draft: {err}");
         let _ = unstarted.send(BlogEvent::Failed(format!(
@@ -391,8 +396,7 @@ pub struct Previewed {
 /// and it is what the landing repo's `npm run content:validate` takes.
 pub fn preview(session: &Session) -> Result<Previewed> {
     let dir = session.blog_dir();
-    let article = schema::load(&dir)
-        .context("no draft to preview — press Write Article first")?;
+    let article = schema::load(&dir).context("no draft to preview — press Write Article first")?;
     // Best effort, and deliberately not fatal: the JSON is a second opinion on
     // the same draft, and a figure whose file has been moved should not cost
     // you the page you asked to read.
@@ -438,15 +442,17 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
     // The upload is the gate on a real publish, but not on this: seeing the
     // body before the video is up is most of the reason to look at it.
     let upload = crate::publish::load(session).into_iter().next_back();
-    let duration =
-        crate::edit::cut::probe_duration_seconds(&session.render_dir().join(LONGFORM))
-            .unwrap_or_default();
+    let duration = crate::edit::cut::probe_duration_seconds(&session.render_dir().join(LONGFORM))
+        .unwrap_or_default();
 
     let cfg = crate::config::load();
     let cached = library::load();
     let post = payload::NewVideoPost {
         date: payload::today(),
-        video_url: upload.as_ref().map(|row| row.url.clone()).unwrap_or_default(),
+        video_url: upload
+            .as_ref()
+            .map(|row| row.url.clone())
+            .unwrap_or_default(),
         video_id: upload.as_ref().map(|row| row.video_id.clone()),
         duration: duration.round().max(0.0) as u32,
         thumbnail_id: None,
@@ -491,16 +497,18 @@ pub fn spawn_publish(
     let unstarted = tx.clone();
     if let Err(err) = thread::Builder::new()
         .name("blog-publish".into())
-        .spawn(move || match run(&session, &model, provider.as_deref(), &tx) {
-            Ok(post) => {
-                eprintln!("stream-recorder: blog → {}", post.url);
-                let _ = tx.send(BlogEvent::Ready(post));
-            }
-            Err(err) => {
-                eprintln!("stream-recorder: blog publish failed: {err:#}");
-                let _ = tx.send(BlogEvent::Failed(format!("Blog failed: {err:#}")));
-            }
-        })
+        .spawn(
+            move || match run(&session, &model, provider.as_deref(), &tx) {
+                Ok(post) => {
+                    eprintln!("stream-recorder: blog → {}", post.url);
+                    let _ = tx.send(BlogEvent::Ready(post));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: blog publish failed: {err:#}");
+                    let _ = tx.send(BlogEvent::Failed(format!("Blog failed: {err:#}")));
+                }
+            },
+        )
     {
         eprintln!("stream-recorder: could not start the blog job: {err}");
         let _ = unstarted.send(BlogEvent::Failed(format!(
@@ -758,7 +766,6 @@ fn cta_image(
         .ok()
 }
 
-
 /// The most recent post made from this exact video, if there is one.
 pub fn posted(session: &Session, video_id: &str) -> Option<Post> {
     load(session)
@@ -802,7 +809,11 @@ pub fn edit_prompt() -> Result<PathBuf> {
         crate::agent::prompt::BLOG,
         generate::SYSTEM_PROMPT,
     )?;
-    if let Err(err) = std::process::Command::new("open").arg("-t").arg(&path).status() {
+    if let Err(err) = std::process::Command::new("open")
+        .arg("-t")
+        .arg(&path)
+        .status()
+    {
         eprintln!("stream-recorder: could not open {}: {err}", path.display());
     }
     Ok(path)
@@ -821,10 +832,8 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-blog-{}-{tag}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-blog-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -952,8 +961,7 @@ mod tests {
     fn an_env_override_matches_the_cache_when_it_can() {
         let entries = vec![entry(12, "Ahmed Raza")];
         temp_env("BLOG_AUTHOR_TEST_MATCH", "ahmed raza", || {
-            let chosen =
-                Chosen::resolve(&entries, Some(99), None, "BLOG_AUTHOR_TEST_MATCH");
+            let chosen = Chosen::resolve(&entries, Some(99), None, "BLOG_AUTHOR_TEST_MATCH");
             assert_eq!(chosen.id, Some(12), "the override beats the picked id");
             assert_eq!(chosen.name, None);
             assert!(chosen.label.contains("Ahmed Raza"));
@@ -977,7 +985,10 @@ mod tests {
     /// alternative is a default that names a row this CMS may not have.
     #[test]
     fn nothing_is_filed_under_a_category_nobody_picked() {
-        let chosen = chosen_category(&crate::config::Config::default(), &library::Library::default());
+        let chosen = chosen_category(
+            &crate::config::Config::default(),
+            &library::Library::default(),
+        );
         assert_eq!(chosen.id, None);
         assert!(!chosen.is_set());
         assert_eq!(chosen.label, "none chosen");
@@ -1022,8 +1033,12 @@ mod tests {
                     answer: "Not past the first retry.".into(),
                 }],
                 blocks: vec![
-                    schema::Block::Text { html: "<p>Body.</p>".into() },
-                    schema::Block::Embed { id: "retry_steps".into() },
+                    schema::Block::Text {
+                        html: "<p>Body.</p>".into(),
+                    },
+                    schema::Block::Embed {
+                        id: "retry_steps".into(),
+                    },
                 ],
                 ..Default::default()
             },
@@ -1043,7 +1058,11 @@ mod tests {
         .unwrap();
 
         let path = write_payload(&session).unwrap();
-        assert!(path.ends_with(payload::VIDEO_POST_JSON), "{}", path.display());
+        assert!(
+            path.ends_with(payload::VIDEO_POST_JSON),
+            "{}",
+            path.display()
+        );
         let body: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let data = body["data"].as_object().unwrap();
@@ -1052,8 +1071,14 @@ mod tests {
         // The two nothing can know before an upload, both absent rather than
         // guessed at — a body that has uploaded nothing must not read as if it
         // has.
-        assert_eq!(data["video"]["provider"], "upload", "nothing on youtube yet");
-        assert_eq!(data["h1"], "Why watermarking fails, and what enforcement really costs");
+        assert_eq!(
+            data["video"]["provider"], "upload",
+            "nothing on youtube yet"
+        );
+        assert_eq!(
+            data["h1"],
+            "Why watermarking fails, and what enforcement really costs"
+        );
         assert_eq!(data["faq"][0]["title"], "Does it scale?");
         // The component reached the zone as the stage validated it.
         assert_eq!(data["content"][1]["__component"], "content.embed");
@@ -1061,7 +1086,10 @@ mod tests {
         // Every field that only exists after an upload, absent together — the
         // dry run has uploaded nothing and must not read as though it has.
         for field in ["thumbnail", "ogImage", "videoVertical", "thumbnailVertical"] {
-            assert!(!data.contains_key(field), "{field} in a body that uploaded nothing");
+            assert!(
+                !data.contains_key(field),
+                "{field} in a body that uploaded nothing"
+            );
         }
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1079,7 +1107,9 @@ mod tests {
                 title: "Why watermarking fails".into(),
                 slug: "why-watermarking-fails".into(),
                 description: "A complete promise of the argument.".into(),
-                blocks: vec![schema::Block::Embed { id: "retry_steps".into() }],
+                blocks: vec![schema::Block::Embed {
+                    id: "retry_steps".into(),
+                }],
                 ..Default::default()
             },
         )
@@ -1090,7 +1120,8 @@ mod tests {
         // point pinned here is that the component check reads the article's own
         // placements rather than the ledger.
         assert!(
-            err.to_string().contains("not on YouTube yet") || err.to_string().contains("retry_steps"),
+            err.to_string().contains("not on YouTube yet")
+                || err.to_string().contains("retry_steps"),
             "{err}"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -1107,13 +1138,25 @@ mod tests {
             "Writing the article from 3 chapter(s) via m…"
         );
         let figured = drafting_status(3, 2, 1, "m", None);
-        assert!(figured.contains("with 2 figure(s) to place via m…"), "{figured}");
+        assert!(
+            figured.contains("with 2 figure(s) to place via m…"),
+            "{figured}"
+        );
         assert!(figured.contains("1 figure(s) have no blurb"), "{figured}");
-        assert!(figured.contains("press Write Blurbs"), "says which button: {figured}");
+        assert!(
+            figured.contains("press Write Blurbs"),
+            "says which button: {figured}"
+        );
 
         let stale = drafting_status(3, 2, 0, "m", Some("the standing blog prompt predates it"));
-        assert!(stale.ends_with("Note: the standing blog prompt predates it."), "{stale}");
-        assert!(!stale.contains("no blurb"), "nothing was left out for want of a blurb");
+        assert!(
+            stale.ends_with("Note: the standing blog prompt predates it."),
+            "{stale}"
+        );
+        assert!(
+            !stale.contains("no blurb"),
+            "nothing was left out for want of a blurb"
+        );
     }
 
     /// A draft is the prerequisite, and saying so is the difference between a

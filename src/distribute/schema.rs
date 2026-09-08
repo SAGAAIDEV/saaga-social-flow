@@ -77,7 +77,10 @@ mod tests {
         };
         save(&dir, &links).unwrap();
         let back = load(&dir).unwrap();
-        assert_eq!(back.url_for("longform"), Some("https://example.com/long.mp4"));
+        assert_eq!(
+            back.url_for("longform"),
+            Some("https://example.com/long.mp4")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

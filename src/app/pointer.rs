@@ -82,8 +82,7 @@ impl App {
         for orientation in Orientation::ALL {
             let layout = Layout::get(Pair::Split, orientation);
             let output = crate::app::resolve::slot_output(layout)?;
-            floors[orientation as usize] =
-                crate::region::placement::base_size(output, &geometry);
+            floors[orientation as usize] = crate::region::placement::base_size(output, &geometry);
         }
         Some(crate::overlay::Tracked {
             cell: tracker.cell(),
@@ -99,9 +98,7 @@ impl App {
     /// different slots, so there is no state where one is being driven and the
     /// other is free to drag.
     pub(super) fn pointer_holds(&self) -> bool {
-        self.pair == Pair::Split
-            && self.pointer_config.enabled
-            && self.pointer_tracker.is_some()
+        self.pair == Pair::Split && self.pointer_config.enabled && self.pointer_tracker.is_some()
     }
 
     pub(super) fn mouse_tracking_wanted(&self) -> bool {
@@ -272,9 +269,7 @@ impl App {
             println!("stream-recorder: mouse tracking is on, but no display is selected.");
             return;
         };
-        println!(
-            "stream-recorder: mouse tracking on — hold ⌃⌥⇧ to punch in, release to widen."
-        );
+        println!("stream-recorder: mouse tracking on — hold ⌃⌥⇧ to punch in, release to widen.");
         let crops = self.screen_crops();
         if crops.iter().any(|crop| crop.is_none()) {
             println!(
@@ -300,7 +295,11 @@ impl App {
                 output.w,
                 output.h,
                 room,
-                if room > 1.01 { "" } else { " (none: it will not zoom)" },
+                if room > 1.01 {
+                    ""
+                } else {
+                    " (none: it will not zoom)"
+                },
             );
         }
     }

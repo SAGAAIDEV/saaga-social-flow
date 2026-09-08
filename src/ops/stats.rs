@@ -159,9 +159,8 @@ fn luma_mean(buffer: &CVImageBuffer) -> Option<f64> {
             // SAFETY: the buffer is locked, plane 0 is `height` rows of
             // `stride` bytes, and only the first `width` bytes of each row are
             // pixels rather than padding.
-            let bytes = unsafe {
-                std::slice::from_raw_parts(base.cast::<u8>().add(row * stride), width)
-            };
+            let bytes =
+                unsafe { std::slice::from_raw_parts(base.cast::<u8>().add(row * stride), width) };
             sum += bytes.iter().map(|&value| u64::from(value)).sum::<u64>();
         }
         Some(sum as f64 / (width * height) as f64)
@@ -198,8 +197,9 @@ mod tests {
         let height = CVPixelBufferGetHeightOfPlane(buffer, 0);
         assert!(!base.is_null());
         for row in 0..height {
-            let bytes =
-                unsafe { std::slice::from_raw_parts_mut(base.cast::<u8>().add(row * stride), stride) };
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(base.cast::<u8>().add(row * stride), stride)
+            };
             bytes[..width].fill(pixel);
             bytes[width..].fill(padding);
         }

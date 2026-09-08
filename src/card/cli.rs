@@ -67,8 +67,7 @@ pub fn run(request: Request) -> Result<PathBuf> {
     let still = match request.still.as_deref() {
         Some(path) => {
             let copied = work.join("still.jpg");
-            std::fs::copy(path, &copied)
-                .with_context(|| format!("copying {}", path.display()))?;
+            std::fs::copy(path, &copied).with_context(|| format!("copying {}", path.display()))?;
             Some(copied)
         }
         None => None,
@@ -143,7 +142,10 @@ fn turn(app: &NSApplication) {
 
 /// Generate the same three-asset manifest as the desktop workflow.
 pub fn run_set(request: Request) -> Result<PathBuf> {
-    let still = request.still.as_deref().context("--all-formats requires --still")?;
+    let still = request
+        .still
+        .as_deref()
+        .context("--all-formats requires --still")?;
     let bytes = std::fs::read(still)?;
     crate::thumbnail::still::write_bytes(&request.out, &bytes)?;
     super::save(&request.out, &request.card)?;
@@ -155,9 +157,17 @@ pub fn run_set(request: Request) -> Result<PathBuf> {
         let kind = job.kind();
         // Drawn aside and handed over, because the job owns the set directory —
         // including whether these bytes are allowed into it at all.
-        let rendered = std::env::temp_dir()
-            .join(format!("stream-recorder-set-{}-{}.jpg", std::process::id(), kind.name()));
-        run(Request { out: rendered.clone(), card: job.design(), still: Some(job.photo.clone()), size: kind.size() })?;
+        let rendered = std::env::temp_dir().join(format!(
+            "stream-recorder-set-{}-{}.jpg",
+            std::process::id(),
+            kind.name()
+        ));
+        run(Request {
+            out: rendered.clone(),
+            card: job.design(),
+            still: Some(job.photo.clone()),
+            size: kind.size(),
+        })?;
         job.accept(&std::fs::read(&rendered)?)?;
         let _ = std::fs::remove_file(&rendered);
     }

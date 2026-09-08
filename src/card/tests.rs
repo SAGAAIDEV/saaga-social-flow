@@ -20,7 +20,7 @@ fn card() -> Card {
         kicker: "SAAGA".into(),
         theme: "light".into(),
         focus: 0.34,
-            format: Default::default(),
+        format: Default::default(),
     }
 }
 
@@ -39,7 +39,10 @@ fn a_project_with_no_card_reads_as_empty() {
     let root = scratch("missing");
     let blank = load(&root);
     assert!(blank.is_empty());
-    assert_eq!(blank.theme, "dark", "the default theme is the grid-proof one");
+    assert_eq!(
+        blank.theme, "dark",
+        "the default theme is the grid-proof one"
+    );
     assert_eq!(blank.focus, 0.5);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -70,23 +73,66 @@ fn a_card_with_only_a_title_still_loads() {
 /// A title is the whole requirement — the description is the optional half.
 #[test]
 fn a_title_alone_is_a_card() {
-    assert!(Card { title: "  ".into(), ..card() }.is_empty());
-    assert!(!Card { description: String::new(), ..card() }.is_empty());
+    assert!(Card {
+        title: "  ".into(),
+        ..card()
+    }
+    .is_empty());
+    assert!(!Card {
+        description: String::new(),
+        ..card()
+    }
+    .is_empty());
 }
 
 /// A hand-edited theme would otherwise reach the renderer as an index into a
 /// map that has no such key, and draw a card with no colours at all.
 #[test]
 fn an_unknown_theme_falls_back_to_dark() {
-    assert_eq!(Card { theme: "neon".into(), ..card() }.theme_or_default(), "dark");
-    assert_eq!(Card { theme: " light ".into(), ..card() }.theme_or_default(), "light");
+    assert_eq!(
+        Card {
+            theme: "neon".into(),
+            ..card()
+        }
+        .theme_or_default(),
+        "dark"
+    );
+    assert_eq!(
+        Card {
+            theme: " light ".into(),
+            ..card()
+        }
+        .theme_or_default(),
+        "light"
+    );
 }
 
 #[test]
 fn the_focus_is_held_inside_the_frame() {
-    assert_eq!(Card { focus: 4.0, ..card() }.focus_clamped(), 1.0);
-    assert_eq!(Card { focus: -1.0, ..card() }.focus_clamped(), 0.0);
-    assert_eq!(Card { focus: 0.34, ..card() }.focus_clamped(), 0.34);
+    assert_eq!(
+        Card {
+            focus: 4.0,
+            ..card()
+        }
+        .focus_clamped(),
+        1.0
+    );
+    assert_eq!(
+        Card {
+            focus: -1.0,
+            ..card()
+        }
+        .focus_clamped(),
+        0.0
+    );
+    assert_eq!(
+        Card {
+            focus: 0.34,
+            ..card()
+        }
+        .focus_clamped(),
+        0.34
+    );
 }
 
 /// The fingerprint is what the candidate id is built from, so an edit has to
@@ -103,11 +149,26 @@ fn the_fingerprint_moves_on_an_edit_and_not_on_whitespace() {
     assert_eq!(padded.fingerprint(), card().fingerprint());
 
     for edited in [
-        Card { title: "Ship it".into(), ..card() },
-        Card { description: "Else.".into(), ..card() },
-        Card { kicker: String::new(), ..card() },
-        Card { theme: "dark".into(), ..card() },
-        Card { focus: 0.35, ..card() },
+        Card {
+            title: "Ship it".into(),
+            ..card()
+        },
+        Card {
+            description: "Else.".into(),
+            ..card()
+        },
+        Card {
+            kicker: String::new(),
+            ..card()
+        },
+        Card {
+            theme: "dark".into(),
+            ..card()
+        },
+        Card {
+            focus: 0.35,
+            ..card()
+        },
     ] {
         assert_ne!(edited.fingerprint(), card().fingerprint(), "{edited:?}");
     }
@@ -120,7 +181,10 @@ fn an_empty_card_is_refused_before_anything_runs() {
     let root = scratch("ready");
     let err = ready(&root, &Card::default()).unwrap_err().to_string();
     assert!(err.contains("title"), "{err}");
-    assert!(ready(&root, &card()).is_ok(), "the renderer is missing from the crate");
+    assert!(
+        ready(&root, &card()).is_ok(),
+        "the renderer is missing from the crate"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -147,7 +211,10 @@ fn the_format_picker_is_persisted_without_retiring_the_artwork() {
     portrait.format = crate::thumbnail::format::Format::Vertical;
     save(&root, &portrait).unwrap();
     assert_eq!(load(&root).format.size(), (720, 1280));
-    assert_eq!(render::payload(&portrait, None, 720, 1280)["format"], "vertical");
+    assert_eq!(
+        render::payload(&portrait, None, 720, 1280)["format"],
+        "vertical"
+    );
     assert_eq!(portrait.fingerprint(), card().fingerprint());
     let legacy: Card = serde_json::from_str(r#"{"title":"Legacy"}"#).unwrap();
     assert_eq!(legacy.format.size(), (1280, 720));

@@ -699,7 +699,9 @@ impl Config {
 
 fn path() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME not set")?;
-    Ok(PathBuf::from(home).join(".stream-recorder").join("config.json"))
+    Ok(PathBuf::from(home)
+        .join(".stream-recorder")
+        .join("config.json"))
 }
 
 pub fn load() -> Config {
@@ -748,12 +750,19 @@ mod thumbnail_tests {
         };
         thumbnail.reconcile_models();
         let ids: Vec<&str> = thumbnail.models.iter().map(|m| m.id.as_str()).collect();
-        assert!(!ids.contains(&"bytedance/seedream-5-0-pro"), "the dead entry is gone");
+        assert!(
+            !ids.contains(&"bytedance/seedream-5-0-pro"),
+            "the dead entry is gone"
+        );
         assert_eq!(thumbnail.model, default_model());
         // And the menu grew rather than shrank: pruning alone left one entry and
         // no way to reach the models that had been added since.
         for shipped in default_models() {
-            assert!(ids.contains(&shipped.id.as_str()), "{} is missing", shipped.id);
+            assert!(
+                ids.contains(&shipped.id.as_str()),
+                "{} is missing",
+                shipped.id
+            );
         }
     }
 
@@ -770,8 +779,14 @@ mod thumbnail_tests {
             ..Thumbnail::default()
         };
         thumbnail.reconcile_models();
-        assert_eq!(thumbnail.models[0].label, "My Favourite", "kept, not overwritten");
-        assert_eq!(thumbnail.model, "google/gemini-3.1-flash-image", "still selected");
+        assert_eq!(
+            thumbnail.models[0].label, "My Favourite",
+            "kept, not overwritten"
+        );
+        assert_eq!(
+            thumbnail.model, "google/gemini-3.1-flash-image",
+            "still selected"
+        );
     }
 
     /// Both spellings are gone, and a menu of nothing but dead entries comes back
@@ -805,7 +820,11 @@ mod thumbnail_tests {
     #[test]
     fn the_shipped_defaults_are_not_themselves_retired() {
         for model in default_models() {
-            assert!(!RETIRED.contains(&model.id.as_str()), "{} is dead", model.id);
+            assert!(
+                !RETIRED.contains(&model.id.as_str()),
+                "{} is dead",
+                model.id
+            );
         }
         assert!(default_models().iter().any(|m| m.id == default_model()));
     }
@@ -927,17 +946,23 @@ mod tests {
         };
         let text = serde_json::to_string(&cfg).unwrap();
         let back: Config = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.posts_prompt.as_deref(), Some("Write for staff engineers"));
+        assert_eq!(
+            back.posts_prompt.as_deref(),
+            Some("Write for staff engineers")
+        );
         assert_eq!(back.thumbnail.brief.title, "SHIP IT ANYWAY");
-        assert!(back.thumbnail.brief.description.starts_with("Presenter grinning"));
+        assert!(back
+            .thumbnail
+            .brief
+            .description
+            .starts_with("Presenter grinning"));
     }
 
     /// A config written before either field existed still loads, and simply has
     /// neither. Both are `serde(default)` for exactly this.
     #[test]
     fn a_config_from_before_the_prompts_still_loads() {
-        let older: Config =
-            serde_json::from_str(r#"{"audio_device_uid":"mic-1"}"#).unwrap();
+        let older: Config = serde_json::from_str(r#"{"audio_device_uid":"mic-1"}"#).unwrap();
         assert_eq!(older.audio_device_uid.as_deref(), Some("mic-1"));
         assert_eq!(older.posts_prompt, None);
         assert!(older.thumbnail.brief.is_empty());

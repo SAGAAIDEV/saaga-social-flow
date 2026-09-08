@@ -21,7 +21,12 @@ fn capture(root: &Path, n: u32, chapter: Option<u32>, offset: Option<f64>) -> Ca
         file,
         chapter,
         offset,
-        rect: Snipped { x: 10.0, y: 20.0, w: 640.0, h: 360.0 },
+        rect: Snipped {
+            x: 10.0,
+            y: 20.0,
+            w: 640.0,
+            h: 360.0,
+        },
         width: 1280,
         height: 720,
     }
@@ -56,7 +61,10 @@ fn an_aside_row_brings_the_audio_and_what_was_said() {
     assert!(!figures[0].transcribing);
 
     let text = std::fs::read_to_string(log_path(&root)).unwrap();
-    assert!(text.contains("\"audio\":\"figures/figure-01.m4a\""), "{text}");
+    assert!(
+        text.contains("\"audio\":\"figures/figure-01.m4a\""),
+        "{text}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -94,7 +102,10 @@ fn a_failed_transcript_leaves_the_figure_unexplained() {
     let figure = &load(&root)[0];
     assert!(figure.audio.is_some());
     assert!(!figure.explained());
-    assert!(!figure.transcribing, "a skipped transcript is over, not pending");
+    assert!(
+        !figure.transcribing,
+        "a skipped transcript is over, not pending"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -139,7 +150,13 @@ fn a_blurb_row_lands_on_its_capture() {
     let second = capture(&root, 2, Some(3), Some(140.0));
     append_capture(&root, &first).unwrap();
     append_capture(&root, &second).unwrap();
-    append_blurb(&root, &second.file, "The retry storm.", "A log full of 429s").unwrap();
+    append_blurb(
+        &root,
+        &second.file,
+        "The retry storm.",
+        "A log full of 429s",
+    )
+    .unwrap();
 
     let figures = load(&root);
     assert_eq!(figures.len(), 2);

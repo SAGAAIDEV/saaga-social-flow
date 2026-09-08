@@ -72,16 +72,18 @@ fn fetch_display_infos() -> Result<Vec<DisplayInfo>> {
     let (tx, rx) = mpsc::channel::<std::result::Result<Vec<DisplayInfo>, String>>();
     // `dyn Fn`, not `FnOnce`: `Sender::send` takes `&self`, so the block stays
     // callable — ScreenCaptureKit only invokes it once regardless.
-    let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        let result = if let Some(error) = unsafe { error.as_ref() } {
-            Err(error.localizedDescription().to_string())
-        } else if let Some(content) = unsafe { content.as_ref() } {
-            Ok(read_displays(content))
-        } else {
-            Err("ScreenCaptureKit returned neither content nor an error".to_string())
-        };
-        let _ = tx.send(result);
-    });
+    let handler = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            let result = if let Some(error) = unsafe { error.as_ref() } {
+                Err(error.localizedDescription().to_string())
+            } else if let Some(content) = unsafe { content.as_ref() } {
+                Ok(read_displays(content))
+            } else {
+                Err("ScreenCaptureKit returned neither content nor an error".to_string())
+            };
+            let _ = tx.send(result);
+        },
+    );
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
 
     rx.recv_timeout(Duration::from_secs(10))
@@ -90,8 +92,7 @@ fn fetch_display_infos() -> Result<Vec<DisplayInfo>> {
 }
 
 fn read_displays(content: &SCShareableContent) -> Vec<DisplayInfo> {
-    let displays: Retained<objc2_foundation::NSArray<SCDisplay>> =
-        unsafe { content.displays() };
+    let displays: Retained<objc2_foundation::NSArray<SCDisplay>> = unsafe { content.displays() };
     displays
         .iter()
         .map(|d| DisplayInfo {
@@ -119,7 +120,10 @@ fn screen_names() -> Vec<(u32, String)> {
             let description = screen.deviceDescription();
             let number: Retained<AnyObject> = description.objectForKey(&key)?;
             let number = number.downcast::<NSNumber>().ok()?;
-            Some((number.unsignedIntValue(), screen.localizedName().to_string()))
+            Some((
+                number.unsignedIntValue(),
+                screen.localizedName().to_string(),
+            ))
         })
         .collect()
 }
@@ -186,8 +190,7 @@ pub fn display_geometry(display_uid: &str) -> Result<DisplayGeometry> {
     // for the displays Core Graphics declines to describe (virtual, sidecar),
     // which are not Retina, and it degrades to a softer capture rather than to
     // a stream configured at half size.
-    let pixels =
-        pixel_size(id).unwrap_or((points.0.round() as usize, points.1.round() as usize));
+    let pixels = pixel_size(id).unwrap_or((points.0.round() as usize, points.1.round() as usize));
 
     Ok(DisplayGeometry {
         cg_origin: (bounds.origin.x, bounds.origin.y),

@@ -36,8 +36,12 @@ pub const YOUTUBE_PRIVACY: &str = "public";
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlatformMeta {
     /// `type` and `shouldShareToFeed` are both non-null on the Buffer input.
-    Instagram { should_share_to_feed: bool },
-    Tiktok { title: Option<String> },
+    Instagram {
+        should_share_to_feed: bool,
+    },
+    Tiktok {
+        title: Option<String>,
+    },
     Youtube {
         title: Option<String>,
         /// YouTube's numeric category id. Buffer refuses a post without one, and
@@ -62,7 +66,9 @@ pub fn metadata_for(platform: &str, title: Option<&str>, youtube_category: &str)
 pub fn platform_meta(platform: &str, title: Option<&str>, youtube_category: &str) -> PlatformMeta {
     let title = title.map(str::to_string);
     match platform {
-        "instagram" => PlatformMeta::Instagram { should_share_to_feed: true },
+        "instagram" => PlatformMeta::Instagram {
+            should_share_to_feed: true,
+        },
         "tiktok" => PlatformMeta::Tiktok { title },
         "youtube" | "youtube_shorts" => PlatformMeta::Youtube {
             title,
@@ -78,7 +84,9 @@ pub fn platform_meta(platform: &str, title: Option<&str>, youtube_category: &str
 
 fn platform_metadata(meta: &PlatformMeta) -> Option<Value> {
     match meta {
-        PlatformMeta::Instagram { should_share_to_feed } => Some(json!({
+        PlatformMeta::Instagram {
+            should_share_to_feed,
+        } => Some(json!({
             "instagram": { "type": "reel", "shouldShareToFeed": should_share_to_feed }
         })),
         PlatformMeta::Tiktok { title } => {
@@ -95,7 +103,9 @@ fn platform_metadata(meta: &PlatformMeta) -> Option<Value> {
             made_for_kids,
             notify_subscribers,
         } => {
-            let privacy = trimmed(Some(privacy.as_str())).unwrap_or("private").to_lowercase();
+            let privacy = trimmed(Some(privacy.as_str()))
+                .unwrap_or("private")
+                .to_lowercase();
             let mut object = json!({
                 "privacy": privacy,
                 "madeForKids": made_for_kids,
@@ -119,7 +129,10 @@ fn insert_opt(object: &mut Value, key: &str, value: Option<&str>) {
 }
 
 fn non_empty(object: Value) -> Option<Value> {
-    let empty = object.as_object().map(serde_json::Map::is_empty).unwrap_or(true);
+    let empty = object
+        .as_object()
+        .map(serde_json::Map::is_empty)
+        .unwrap_or(true);
     if empty {
         Option::None
     } else {
@@ -133,7 +146,8 @@ mod tests {
 
     #[test]
     fn instagram_sends_both_required_fields() {
-        let meta = metadata_for("instagram", Some("Chapter One"), "28").expect("instagram metadata");
+        let meta =
+            metadata_for("instagram", Some("Chapter One"), "28").expect("instagram metadata");
         assert_eq!(meta["instagram"]["type"], "reel");
         assert_eq!(meta["instagram"]["shouldShareToFeed"], true);
         // The title rides the video asset, not the instagram metadata.
@@ -143,7 +157,8 @@ mod tests {
     #[test]
     fn youtube_and_shorts_share_one_public_notifying_channel() {
         for platform in ["youtube", "youtube_shorts"] {
-            let meta = metadata_for(platform, Some("The Long One"), "28").expect("youtube metadata");
+            let meta =
+                metadata_for(platform, Some("The Long One"), "28").expect("youtube metadata");
             let yt = &meta["youtube"];
             assert_eq!(yt["privacy"], "public", "{platform} privacy");
             assert_eq!(yt["title"], "The Long One");

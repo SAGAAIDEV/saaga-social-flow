@@ -81,8 +81,12 @@ pub fn create_composed_writer(
     let audio_input = if spec.audio() {
         let audio_type =
             unsafe { AVMediaTypeAudio }.ok_or_else(|| anyhow!("AVMediaTypeAudio unavailable"))?;
-        let settings = audio_settings
-            .ok_or_else(|| anyhow!("the {} sink asked for audio but no settings were given", spec.name()))?;
+        let settings = audio_settings.ok_or_else(|| {
+            anyhow!(
+                "the {} sink asked for audio but no settings were given",
+                spec.name()
+            )
+        })?;
         let input = unsafe {
             AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
                 &audio_type,

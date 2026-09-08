@@ -77,9 +77,7 @@ fn finish(
         anyhow::bail!("the window server refused the capture: {message}");
     }
     let image = unsafe { image.as_ref() }.ok_or_else(|| {
-        anyhow::anyhow!(
-            "the window server returned no image — is screen recording still granted?"
-        )
+        anyhow::anyhow!("the window server returned no image — is screen recording still granted?")
     })?;
 
     // Lossless, at its own size under the ceiling — see `encode`.

@@ -97,16 +97,7 @@ fn cut_segment(source: &Path, dest: &Path, edit: &Edit, fps: f64, audio: bool) -
         .args(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]);
     if audio {
         let af = format!("atrim=end={exact:.6},asetpts=PTS-STARTPTS");
-        cmd.args([
-            "-af",
-            &af,
-            "-c:a",
-            "pcm_s16le",
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-        ]);
+        cmd.args(["-af", &af, "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"]);
     } else {
         cmd.arg("-an");
     }
@@ -316,7 +307,14 @@ fn align_tracks(path: &Path) -> Result<()> {
     let aligned = path.with_extension("aligned.mp4");
     run(
         Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-itsoffset", &format!("-{offset:.6}"), "-i"])
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-itsoffset",
+                &format!("-{offset:.6}"),
+                "-i",
+            ])
             .arg(path)
             // The same file again, un-offset, so the audio keeps its own timing:
             // `-itsoffset` binds to the next input only.
@@ -401,17 +399,21 @@ fn run(cmd: &mut Command, what: &str) -> Result<()> {
         .with_context(|| format!("running ffmpeg ({what})"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        let tail: String = err.chars().rev().take(800).collect::<String>().chars().rev().collect();
+        let tail: String = err
+            .chars()
+            .rev()
+            .take(800)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         bail!("ffmpeg {what} failed: {tail}");
     }
     Ok(())
 }
 
 fn temp_dir(source: &Path) -> Result<PathBuf> {
-    let stem = source
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("cut");
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("cut");
     let dir = std::env::temp_dir().join(format!(
         "stream-recorder-cut-{}-{}-{}",
         std::process::id(),
@@ -461,10 +463,8 @@ mod tests {
         if !ffmpeg_ok() {
             return;
         }
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-cut-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-cut-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("src.mp4");

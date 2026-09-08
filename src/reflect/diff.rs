@@ -51,7 +51,11 @@ pub fn changes(before: &str, after: &str) -> Vec<Change> {
             j += 1;
         }
     }
-    out.extend(old[i..].iter().map(|line| Change::Removed(line.to_string())));
+    out.extend(
+        old[i..]
+            .iter()
+            .map(|line| Change::Removed(line.to_string())),
+    );
     out.extend(new[j..].iter().map(|line| Change::Added(line.to_string())));
     out
 }
@@ -60,7 +64,10 @@ pub fn changes(before: &str, after: &str) -> Vec<Change> {
 pub fn counts(before: &str, after: &str) -> (usize, usize) {
     let changes = changes(before, after);
     (
-        changes.iter().filter(|c| matches!(c, Change::Added(_))).count(),
+        changes
+            .iter()
+            .filter(|c| matches!(c, Change::Added(_)))
+            .count(),
         changes
             .iter()
             .filter(|c| matches!(c, Change::Removed(_)))
@@ -161,9 +168,7 @@ mod tests {
     /// A one-line change in a long prompt must read as a one-line change.
     #[test]
     fn distant_unchanged_lines_are_elided() {
-        let before: String = (0..40)
-            .map(|n| format!("rule {n}\n"))
-            .collect();
+        let before: String = (0..40).map(|n| format!("rule {n}\n")).collect();
         let after = before.replace("rule 20", "rule twenty");
         let out = render(&before, &after);
         assert!(out.contains("- rule 20"));

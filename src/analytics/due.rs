@@ -100,7 +100,11 @@ fn split_offset(rest: &str) -> Option<(&str, i64)> {
     // Look for a sign after the clock, e.g. "20:44:00+02:00".
     let at = rest.rfind(['+', '-'])?;
     let (clock, sign_and_offset) = rest.split_at(at);
-    let sign = if sign_and_offset.starts_with('-') { -1 } else { 1 };
+    let sign = if sign_and_offset.starts_with('-') {
+        -1
+    } else {
+        1
+    };
     let offset = &sign_and_offset[1..];
     let (hours, minutes) = match offset.split_once(':') {
         Some((h, m)) => (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?),

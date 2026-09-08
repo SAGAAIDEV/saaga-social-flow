@@ -53,7 +53,11 @@ impl SessionEntry {
             Some(name) if !name.trim().is_empty() => name.trim().to_string(),
             _ => format!("({})", self.folder),
         };
-        format!("{title} — {} files, {}", self.files, human_bytes(self.bytes))
+        format!(
+            "{title} — {} files, {}",
+            self.files,
+            human_bytes(self.bytes)
+        )
     }
 
     pub fn is_empty(&self) -> bool {
@@ -304,7 +308,12 @@ mod tests {
 
     #[test]
     fn a_named_project_shows_its_name() {
-        let named = entry(Some("Rust error handling"), "2026-08-15_02-19-20", 149, 731_000_000);
+        let named = entry(
+            Some("Rust error handling"),
+            "2026-08-15_02-19-20",
+            149,
+            731_000_000,
+        );
         assert_eq!(named.title(), "Rust error handling");
         assert_eq!(named.label(), "Rust error handling — 149 files, 697.1 MB");
     }

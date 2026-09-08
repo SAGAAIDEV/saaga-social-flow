@@ -104,11 +104,9 @@ fn open() -> Result<Connection> {
 
 fn open_at(path: &Path) -> Result<Connection> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let conn = Connection::open(path)
-        .with_context(|| format!("opening {}", path.display()))?;
+    let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
     // Matches saaga_auth.db.OAuthToken. `IF NOT EXISTS` so whichever side runs
     // first wins and the other finds what it expects.
     conn.execute_batch(
@@ -239,11 +237,18 @@ mod tests {
         let raw = expires_at_from(0);
         assert!(raw.contains('T'), "data_json wants isoformat, got {raw}");
         let fraction = raw.split('.').nth(1).unwrap_or_default();
-        assert_eq!(fraction.len(), 6, "Python 3.10 parses 3 or 6 digits, got {raw}");
+        assert_eq!(
+            fraction.len(),
+            6,
+            "Python 3.10 parses 3 or 6 digits, got {raw}"
+        );
         let parsed = NaiveDateTime::parse_from_str(&raw, ISO_PARSE);
         assert!(parsed.is_ok(), "cannot reparse what we wrote: {raw}");
         let db = parsed.unwrap().format(DB_TIME).to_string();
-        assert!(db.contains(' '), "the column wants a space separator, got {db}");
+        assert!(
+            db.contains(' '),
+            "the column wants a space separator, got {db}"
+        );
     }
 
     /// A payload written by the Python server carries keys this struct does not

@@ -40,7 +40,10 @@ struct Open {
 impl Open {
     /// How much of this chapter is in its files: wall clock less every break.
     fn recorded(&self) -> Duration {
-        let on_break = self.paused_since.map(|since| since.elapsed()).unwrap_or_default();
+        let on_break = self
+            .paused_since
+            .map(|since| since.elapsed())
+            .unwrap_or_default();
         self.started
             .elapsed()
             .saturating_sub(self.paused)
@@ -243,7 +246,11 @@ impl RecordClock {
         self.last_voiced = snap.voiced;
         // Not while on a break: that speech is the aside's, and the aside is
         // not in the chapter.
-        if let Some(open) = self.open.as_mut().filter(|open| open.paused_since.is_none()) {
+        if let Some(open) = self
+            .open
+            .as_mut()
+            .filter(|open| open.paused_since.is_none())
+        {
             open.voiced += voiced;
         }
     }
@@ -316,10 +323,10 @@ impl RecordClock {
             )
         };
 
-        let on_break = self
-            .open
-            .as_ref()
-            .and_then(|open| open.on_break().map(|since| (open.number, open.recorded(), since)));
+        let on_break = self.open.as_ref().and_then(|open| {
+            open.on_break()
+                .map(|since| (open.number, open.recorded(), since))
+        });
         let detail = if self.mic_gone() {
             "⚠ no mic input — check the microphone before this take goes further".to_string()
         } else if let Some((number, recorded, since)) = on_break {

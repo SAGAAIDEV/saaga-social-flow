@@ -166,10 +166,30 @@ pub(super) fn draw(state: &OverlayState) {
         let r = &state.recording_rect(active);
         color((0.0, 0.0, 0.0), 0.35).set();
         for band in [
-            PointRect { x: 0.0, y: 0.0, w: display_w, h: r.y },
-            PointRect { x: 0.0, y: r.y + r.h, w: display_w, h: (display_h - r.y - r.h).max(0.0) },
-            PointRect { x: 0.0, y: r.y, w: r.x, h: r.h },
-            PointRect { x: r.x + r.w, y: r.y, w: (display_w - r.x - r.w).max(0.0), h: r.h },
+            PointRect {
+                x: 0.0,
+                y: 0.0,
+                w: display_w,
+                h: r.y,
+            },
+            PointRect {
+                x: 0.0,
+                y: r.y + r.h,
+                w: display_w,
+                h: (display_h - r.y - r.h).max(0.0),
+            },
+            PointRect {
+                x: 0.0,
+                y: r.y,
+                w: r.x,
+                h: r.h,
+            },
+            PointRect {
+                x: r.x + r.w,
+                y: r.y,
+                w: (display_w - r.x - r.w).max(0.0),
+                h: r.h,
+            },
         ] {
             if band.w > 0.0 && band.h > 0.0 {
                 NSBezierPath::fillRect(rect(&band));
@@ -345,11 +365,7 @@ fn draw_handles(region: &PointRect, rgb: (f64, f64, f64), alpha: f64) {
 /// on Split-Horizontal's top-left corner, so both labels want the same point
 /// and one would be painted straight over the other — in the state the overlay
 /// opens in, which is precisely when telling the two frames apart matters most.
-pub(super) fn label_plate(
-    region: &PointRect,
-    size: (f64, f64),
-    placed: &[PointRect],
-) -> PointRect {
+pub(super) fn label_plate(region: &PointRect, size: (f64, f64), placed: &[PointRect]) -> PointRect {
     // Clear of the corner handle: the plate is opaque, and a label covering a
     // handle hides the control it is naming.
     let mut plate = PointRect {
@@ -388,11 +404,17 @@ fn draw_label(region: &DrawnRegion, is_active: bool, placed: &mut Vec<PointRect>
         region.zoom,
     ));
     let font = NSFont::boldSystemFontOfSize(15.0);
-    let foreground = color(frame_color(region.orientation), if is_active { 1.0 } else { 0.8 });
+    let foreground = color(
+        frame_color(region.orientation),
+        if is_active { 1.0 } else { 0.8 },
+    );
     let attributes: Retained<NSDictionary<NSString, AnyObject>> = unsafe {
         NSDictionary::from_slices(
             &[NSFontAttributeName, NSForegroundColorAttributeName],
-            &[font.as_ref() as &AnyObject, foreground.as_ref() as &AnyObject],
+            &[
+                font.as_ref() as &AnyObject,
+                foreground.as_ref() as &AnyObject,
+            ],
         )
     };
 
@@ -519,7 +541,12 @@ mod tests {
     /// which was which.
     #[test]
     fn two_labels_at_the_same_origin_are_stacked_not_overlaid() {
-        let shared = PointRect { x: 400.0, y: 200.0, w: 700.0, h: 540.0 };
+        let shared = PointRect {
+            x: 400.0,
+            y: 200.0,
+            w: 700.0,
+            h: 540.0,
+        };
         let size = (240.0, 18.0);
 
         let first = label_plate(&shared, size, &[]);
@@ -530,7 +557,10 @@ mod tests {
             "the second label was painted over the first: {first:?} vs {second:?}",
         );
         assert_eq!(first.x, second.x, "stacked labels should stay left-aligned");
-        assert!(second.y > first.y, "the second label should go below the first");
+        assert!(
+            second.y > first.y,
+            "the second label should go below the first"
+        );
         assert!(
             second.y + second.h < shared.y + shared.h,
             "both labels must stay inside the region they name",

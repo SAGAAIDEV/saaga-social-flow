@@ -94,7 +94,9 @@ pub fn build(session: &Session) -> Longform {
                     .map(str::to_string)
                     .or_else(|| deck.map(|chapter| chapter.title.clone()))
                     .unwrap_or_else(|| format!("Chapter {n}")),
-                points: deck.map(|chapter| chapter.points.clone()).unwrap_or_default(),
+                points: deck
+                    .map(|chapter| chapter.points.clone())
+                    .unwrap_or_default(),
                 transcript,
                 figures: Vec::new(),
             }
@@ -179,9 +181,9 @@ fn timestamps(edit_dir: &Path) -> Vec<(u32, String)> {
         crate::edit::compose::CARD_SECONDS,
         crate::edit::compose::CARD_SECONDS,
     )
-        .into_iter()
-        .map(|(n, seconds)| (n, fmt_timestamp(seconds)))
-        .collect()
+    .into_iter()
+    .map(|(n, seconds)| (n, fmt_timestamp(seconds)))
+    .collect()
 }
 
 /// The longform's shape, from [`crate::edit::compose::prepare`]: the video's own
@@ -251,7 +253,12 @@ mod tests {
             at: "2026-09-04T10:22:31.000000Z".into(),
             chapter,
             offset: Some(30.0),
-            rect: Snipped { x: 0.0, y: 0.0, w: 800.0, h: 450.0 },
+            rect: Snipped {
+                x: 0.0,
+                y: 0.0,
+                w: 800.0,
+                h: 450.0,
+            },
             width: 1600,
             height: 900,
             audio: None,
@@ -317,7 +324,11 @@ mod tests {
         let durations = vec![(1, 60.0), (2, 120.0), (3, 30.0)];
         let got = offsets(&durations, 3.0, 3.0);
         // The opening card, then chapter one with nothing between them.
-        assert_eq!(got[0], (1, 3.0), "the title card stands in for chapter one's");
+        assert_eq!(
+            got[0],
+            (1, 3.0),
+            "the title card stands in for chapter one's"
+        );
         assert_eq!(got[1], (2, 66.0));
         assert_eq!(got[2], (3, 189.0));
     }

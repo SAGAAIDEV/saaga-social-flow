@@ -28,12 +28,7 @@ pub fn post_input(item: &PlanItem) -> CreatePostInput {
 
 /// The ledger row for an item that just reached Buffer, keyed so the next plan can
 /// recognise the same copy on the same channel.
-pub fn row_for(
-    item: &PlanItem,
-    post_id: &str,
-    project: &str,
-    version: Option<u32>,
-) -> ScheduleRow {
+pub fn row_for(item: &PlanItem, post_id: &str, project: &str, version: Option<u32>) -> ScheduleRow {
     ScheduleRow {
         id: schema::row_id(&item.video_id, &item.platform, &item.copy_hash),
         buffer_post_id: post_id.to_string(),
@@ -70,7 +65,7 @@ mod tests {
             mode: "addToQueue".into(),
             scheduling_type: "notification".into(),
             needs_approval: false,
-        image: false,
+            image: false,
             metadata: meta::metadata_for(platform, title, "28"),
             reason: "vertical chapter".into(),
             prompt_id: "posts.social".into(),
@@ -88,7 +83,10 @@ mod tests {
         assert_eq!(input.channel_id, "6a3dbb795ab6d2f10671b945");
         assert_eq!(input.mode, "addToQueue");
         assert_eq!(input.scheduling_type, "notification");
-        assert_eq!(input.video_url, "https://cdn.example.com/vertical/chapter-01.mp4");
+        assert_eq!(
+            input.video_url,
+            "https://cdn.example.com/vertical/chapter-01.mp4"
+        );
         assert_eq!(input.video_title.as_deref(), Some("Chapter One"));
         assert!(input.ai_assisted, "every planned post is LLM-written");
         // The gate is the Schedule tab, so Buffer is never asked to hold anything.

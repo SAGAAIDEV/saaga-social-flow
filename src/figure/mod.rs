@@ -407,11 +407,7 @@ pub fn load(root: &Path) -> Vec<Figure> {
                     figure.audio = Some(audio);
                 }
             }
-            Row::Blurb {
-                file,
-                caption,
-                alt,
-            } => {
+            Row::Blurb { file, caption, alt } => {
                 let path = root.join(file);
                 // Last blurb wins, which is what makes rewriting one a matter of
                 // appending rather than editing.
@@ -463,7 +459,9 @@ pub fn copy_into(from: &Path, to: &Path) -> Result<()> {
 
 /// Now, as `2026-08-29T21:24:33.706060Z` — the shape [`crate::markers`] writes.
 fn iso8601_now() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.%6fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S.%6fZ")
+        .to_string()
 }
 
 #[cfg(test)]

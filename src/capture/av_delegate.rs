@@ -89,18 +89,18 @@ pub struct AvDelegateIvars {
     /// run concurrently on separate dispatch queues (separate OS threads).
     /// Wrapped in Arc so the Router can keep a reference to it for swapping.
     ///
-        /// `None` means capture is running with no writer attached: buffers are
-        /// counted (see the `*_seen` counters) and dropped. This is the warmup
-        /// state — the session runs writerless until both streams are flowing,
-        /// because writer inputs lock onto the format of the first buffers they
-        /// see, and external devices (USB audio interfaces especially) can
-        /// renegotiate their format while the session settles. A writer built
-        /// from cold-start buffers came out as full-chapter static once.
-        state: std::sync::Arc<Mutex<Option<AvState>>>,
-        /// Session-scoped preview graph. Runs on every video frame, including
-        /// while no chapter writer is installed, so the UI can show H/V before
-        /// the first New Chapter press.
-        preview: Mutex<Option<Graph>>,
+    /// `None` means capture is running with no writer attached: buffers are
+    /// counted (see the `*_seen` counters) and dropped. This is the warmup
+    /// state — the session runs writerless until both streams are flowing,
+    /// because writer inputs lock onto the format of the first buffers they
+    /// see, and external devices (USB audio interfaces especially) can
+    /// renegotiate their format while the session settles. A writer built
+    /// from cold-start buffers came out as full-chapter static once.
+    state: std::sync::Arc<Mutex<Option<AvState>>>,
+    /// Session-scoped preview graph. Runs on every video frame, including
+    /// while no chapter writer is installed, so the UI can show H/V before
+    /// the first New Chapter press.
+    preview: Mutex<Option<Graph>>,
     /// A figure's aside — see [`crate::figure::aside`] — while one is being
     /// recorded. Fed every audio buffer and nothing else, independently of
     /// `state`: the chapter is paused while this records, and the two never
@@ -241,7 +241,9 @@ impl AvDelegate {
         // the chapter began, during a break, or straggling in from one — see
         // `Pause::place`. Dropping here rather than letting the writer refuse
         // keeps the appended counters honest.
-        let Some(placed) = state.pause.place(pts) else { return };
+        let Some(placed) = state.pause.place(pts) else {
+            return;
+        };
         // Copied only once there is a shift to apply: before any break, every
         // buffer is appended exactly as it arrived.
         let shifted;

@@ -11,13 +11,13 @@
 //! 8. Analytics: sample sent posts at 7 and 30 days, then report.
 //! 9. Reflect: read every step, propose and validate better prompts.
 
+pub(crate) mod card;
 pub(crate) mod clock;
 mod devices;
-pub(crate) mod card;
 pub(crate) mod face;
 mod figures;
-pub(crate) mod pointer;
 pub(crate) mod framing;
+pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
 mod video_brief;
@@ -266,7 +266,6 @@ pub struct App {
     posts_manifest: Option<crate::posts::PostsManifest>,
 }
 
-
 impl App {
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<Live> {
         let attrs = Window::default_attributes()
@@ -502,7 +501,9 @@ impl App {
             Action::CaptureFigure => self.capture_figure(),
             Action::WriteBlurbs => self.write_blurbs(),
             Action::GenerateThumbnails => self.run_thumbnails(),
-            Action::DrawCard => { self.draw_card(); }
+            Action::DrawCard => {
+                self.draw_card();
+            }
             Action::ApplyRewrites => self.run_apply_rewrites(),
             Action::CollectAllAnalytics => self.run_analytics_collect_all(),
             Action::NewVersion => self.new_version(),
@@ -661,7 +662,9 @@ impl App {
                 }
             }
             UiEvent::ScreenSelected(idx) => {
-                let uid = idx.and_then(|i| self.displays.get(i)).map(|d| d.uid.clone());
+                let uid = idx
+                    .and_then(|i| self.displays.get(i))
+                    .map(|d| d.uid.clone());
                 if let Err(e) = self.select_screen(uid) {
                     eprintln!("stream-recorder: saving the screen choice failed: {:#}", e);
                 }
@@ -702,12 +705,22 @@ impl App {
             UiEvent::SaveSettings(fields) => self.save_settings(fields),
             UiEvent::TestSettings(service) => self.test_settings(&service),
             UiEvent::SettingsTested(outcome) => self.settings_tested(&outcome),
-            UiEvent::SaveCard(fields) => { self.save_card(&fields); },
-            UiEvent::GenerateArtwork(fields) => { if self.save_card(&fields) { self.draw_card(); } },
+            UiEvent::SaveCard(fields) => {
+                self.save_card(&fields);
+            }
+            UiEvent::GenerateArtwork(fields) => {
+                if self.save_card(&fields) {
+                    self.draw_card();
+                }
+            }
             UiEvent::ImportPortrait(data) => {
                 self.set_thumbnail_status("Importing your photo…");
-                crate::thumbnail::spawn_portrait(self.session.root.clone(), data, self.thumbnail_tx.clone());
-            },
+                crate::thumbnail::spawn_portrait(
+                    self.session.root.clone(),
+                    data,
+                    self.thumbnail_tx.clone(),
+                );
+            }
             UiEvent::SaveVideoBrief { fields, apply } => self.save_video_brief(&fields, apply),
             UiEvent::GenerateVideoCopy(fields) => self.generate_video_copy(&fields),
             UiEvent::SaveYoutube(fields) => {
@@ -719,9 +732,16 @@ impl App {
                     Ok(()) => {
                         self.update_publish_summary();
                         self.sync_controls();
-                        if let Some(live) = &self.live { live.control_target.set_publish_status("Video details saved."); }
+                        if let Some(live) = &self.live {
+                            live.control_target
+                                .set_publish_status("Video details saved.");
+                        }
                     }
-                    Err(err) => if let Some(live) = &self.live { live.control_target.set_publish_status(&format!("{err:#}")); },
+                    Err(err) => {
+                        if let Some(live) = &self.live {
+                            live.control_target.set_publish_status(&format!("{err:#}"));
+                        }
+                    }
                 }
             }
             UiEvent::SelectThumbnail(id) => self.select_thumbnail(&id),
@@ -738,9 +758,7 @@ impl App {
             UiEvent::ApplyEdit(chapter) => self.apply_edit(chapter),
             UiEvent::ResetEdit(chapter) => self.reset_edit(chapter),
             UiEvent::ToggleRegions => self.toggle_regions(),
-            UiEvent::RegionPlaced { orientation, rect } => {
-                self.region_placed(orientation, rect)
-            }
+            UiEvent::RegionPlaced { orientation, rect } => self.region_placed(orientation, rect),
             UiEvent::FigureSnipped { rect } => self.figure_snipped(rect),
             UiEvent::FigureSnipCancelled => self.figure_snip_cancelled(),
         }
@@ -791,15 +809,19 @@ impl App {
     /// the version popup out is how a resumed project came up reading as though
     /// no version were open while every tab was reading `v1`.
     fn refresh_project_controls(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         let folder = self
             .session
             .root
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        live.control_target
-            .set_projects(&crate::sessions::list_including(&self.session.root), &folder);
+        live.control_target.set_projects(
+            &crate::sessions::list_including(&self.session.root),
+            &folder,
+        );
         live.control_target
             .set_project_name(&self.session.name().unwrap_or_default());
         live.control_target
@@ -995,7 +1017,9 @@ impl App {
                 format!("{err} — drawing over the photo from before")
             }
             Err(err) => {
-                let reason = format!("Not rendering: {err}. The artwork needs your photo — is the camera running?");
+                let reason = format!(
+                    "Not rendering: {err}. The artwork needs your photo — is the camera running?"
+                );
                 self.set_render_status(&reason);
                 self.set_thumbnail_status(&reason);
                 return;
@@ -1010,7 +1034,9 @@ impl App {
         self.set_render_progress(0.0);
         self.set_thumbnail_progress(Some(0.0));
         self.set_render_status(&format!("{photo}. Cutting disfluencies…"));
-        self.set_thumbnail_status(&format!("{photo}. Rendering — the title, artwork and upload follow."));
+        self.set_thumbnail_status(&format!(
+            "{photo}. Rendering — the title, artwork and upload follow."
+        ));
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
         self.sync_controls();
     }
@@ -1151,7 +1177,8 @@ impl App {
             if changed {
                 self.save_posts_prompt();
             }
-            live.control_target.set_posts_status("Generating posts for 8 platforms…");
+            live.control_target
+                .set_posts_status("Generating posts for 8 platforms…");
         }
         crate::posts::spawn_generate_posts(
             self.session.clone(),
@@ -1163,7 +1190,9 @@ impl App {
     }
 
     fn save_edited_posts(&mut self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         // Keep the prompt attribution the generated manifest carried; an edit
         // changes the words, not which prompt wrote the first draft.
         let attribution = self
@@ -1176,10 +1205,12 @@ impl App {
         match crate::posts::save_manifest(&posts_dir, &manifest) {
             Ok(path) => {
                 self.posts_manifest = Some(manifest);
-                live.control_target.set_posts_status(&format!("Saved posts → {}", path.display()));
+                live.control_target
+                    .set_posts_status(&format!("Saved posts → {}", path.display()));
             }
             Err(e) => {
-                live.control_target.set_posts_status(&format!("Failed to save posts: {e:#}"));
+                live.control_target
+                    .set_posts_status(&format!("Failed to save posts: {e:#}"));
             }
         }
     }
@@ -1465,7 +1496,10 @@ impl App {
                     ));
                     self.sync_controls();
                 }
-                crate::blog::BlogEvent::LibraryReady { authors, categories } => {
+                crate::blog::BlogEvent::LibraryReady {
+                    authors,
+                    categories,
+                } => {
                     self.blog_busy = false;
                     // Repaint before the status line: the dropdowns are the
                     // point of the refresh, and the count is only a receipt.
@@ -1583,7 +1617,9 @@ impl App {
             &crate::sessions::list(),
             crate::analytics::due::now_unix(),
         );
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         live.control_target
             .set_analytics_badge(&queue.badge("Analytics"));
         let mut body = queue.as_markdown();
@@ -1609,7 +1645,9 @@ impl App {
     /// The Retake photo button: take a still and show it.
     fn capture_frame(&mut self) {
         match self.take_still() {
-            Ok(message) => self.set_thumbnail_status(&format!("{message}. Redraw artwork to use it.")),
+            Ok(message) => {
+                self.set_thumbnail_status(&format!("{message}. Redraw artwork to use it."))
+            }
             Err(err) => self.set_thumbnail_status(&err),
         }
         self.update_video_view();
@@ -1697,13 +1735,15 @@ impl App {
         let previous = crate::thumbnail::load_brief(&self.session);
         let mut brief = previous.clone().unwrap_or_default().brief;
         let take = |key: &str, current: &str| -> String {
-            fields.get(key).cloned().unwrap_or_else(|| current.to_string())
+            fields
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| current.to_string())
         };
         brief.title = take("title", &brief.title);
         brief.description = take("description", &brief.description);
 
-        let saved =
-            crate::thumbnail::pane::edited(brief, crate::schedule::ledger::now_rfc3339());
+        let saved = crate::thumbnail::pane::edited(brief, crate::schedule::ledger::now_rfc3339());
         // A human typed this, so it becomes the starting point for the next
         // project. Only here: the stage's own save must not rewrite global config.
         crate::thumbnail::remember_brief(&saved.brief);
@@ -1717,7 +1757,9 @@ impl App {
             .is_some_and(|before| before.prompt() == saved.prompt());
         match crate::thumbnail::save_brief(&self.session, &saved) {
             Ok(()) => self.set_thumbnail_status(match unchanged {
-                true => "Brief saved, but nothing changed — Regenerate would draw the same picture.",
+                true => {
+                    "Brief saved, but nothing changed — Regenerate would draw the same picture."
+                }
                 false => "Brief saved — press Regenerate Images to draw it.",
             }),
             Err(err) => self.set_thumbnail_status(&format!("Could not save the brief: {err:#}")),
@@ -1745,7 +1787,9 @@ impl App {
     }
 
     fn toggle_reference(&mut self, name: &str, value: bool) {
-        let Ok(root) = crate::thumbnail::references::library_root() else { return };
+        let Ok(root) = crate::thumbnail::references::library_root() else {
+            return;
+        };
         // As with selection: the tile already moved, so only a refusal — hitting
         // the active cap — needs the pane corrected from disk.
         if let Err(err) = crate::thumbnail::references::set_active(&root, name, value) {
@@ -1792,7 +1836,9 @@ impl App {
     /// Failing the cap is worth saying out loud and is not a failure to add: the
     /// reference is in the library either way.
     fn store_reference(&mut self, name: &str, bytes: &[u8]) {
-        let Ok(root) = crate::thumbnail::references::library_root() else { return };
+        let Ok(root) = crate::thumbnail::references::library_root() else {
+            return;
+        };
         let path = match crate::thumbnail::references::store(&root, name, bytes) {
             Ok(path) => path,
             Err(err) => {
@@ -1801,7 +1847,11 @@ impl App {
             }
         };
         // The stored name, not the dropped one: a collision renames it.
-        let stored = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let stored = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let message = match crate::thumbnail::references::set_active(&root, &stored, true) {
             Ok(()) => format!("Added {stored} — on, and it will shape the next generation"),
             Err(err) => format!("Added {stored}, but not switched on: {err:#}"),
@@ -1810,7 +1860,9 @@ impl App {
     }
 
     fn remove_reference(&mut self, name: &str) {
-        let Ok(root) = crate::thumbnail::references::library_root() else { return };
+        let Ok(root) = crate::thumbnail::references::library_root() else {
+            return;
+        };
         match crate::thumbnail::references::remove(&root, name) {
             Ok(()) => self.set_thumbnail_status(&format!("Removed {name}")),
             Err(err) => {
@@ -1861,7 +1913,9 @@ impl App {
             eprintln!("stream-recorder: settings pane asked to test unknown group {service:?}");
             return;
         };
-        let Some(tx) = self.live.as_ref().map(|live| live.ui_tx.clone()) else { return };
+        let Some(tx) = self.live.as_ref().map(|live| live.ui_tx.clone()) else {
+            return;
+        };
         std::thread::spawn(move || {
             let _ = tx.send(UiEvent::SettingsTested(crate::settings::check::run(group)));
         });
@@ -1870,7 +1924,9 @@ impl App {
     /// Put one test's verdict next to its section without redrawing the pane —
     /// a redraw here would throw away anything typed into the other boxes.
     fn settings_tested(&mut self, outcome: &crate::settings::check::Outcome) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         live.settings_pane.eval(&outcome.script());
     }
 
@@ -1896,7 +1952,12 @@ impl App {
             match event {
                 crate::thumbnail::ThumbnailEvent::Status(msg) => self.set_thumbnail_status(&msg),
                 crate::thumbnail::ThumbnailEvent::PortraitSaved { root } => {
-                    if root == self.session.root { self.set_thumbnail_status("Photo ready. Press Redraw artwork to draw with it."); repaint = true; }
+                    if root == self.session.root {
+                        self.set_thumbnail_status(
+                            "Photo ready. Press Redraw artwork to draw with it.",
+                        );
+                        repaint = true;
+                    }
                 }
                 crate::thumbnail::ThumbnailEvent::Prepared { name, bytes } => {
                     self.store_reference(&name, &bytes);
@@ -1936,7 +1997,9 @@ impl App {
     /// it runs wherever any of its parts change. It reloads the page, though,
     /// so nothing calls it per keystroke or per progress line.
     fn update_video_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         // The style library is the one thing on the page outside the project.
         // With no home to find it under, the project stands in and the
         // references simply read as empty — the rest of the pane still draws.
@@ -1986,8 +2049,12 @@ impl App {
     /// views do. It carries the gate's reason rather than deciding one itself:
     /// the pane and the button have to agree about why nothing can be generated.
     fn update_substack_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
-        let Some(view) = live.substack_pane.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        let Some(view) = live.substack_pane.as_ref() else {
+            return;
+        };
         let gate = self.stages().substack;
         let pane = crate::substack::pane::build(
             &self.session.root,
@@ -2006,7 +2073,9 @@ impl App {
     /// Repaints the Blog tab: the draft on disk, the ledger row if the post is
     /// already live, and the gate's reason when it is not ready.
     fn update_blog_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         let gate = self.stages().blog;
         // The newest upload is what the post would be about, so it is also the
         // one whose ledger row decides whether this has already been posted.
@@ -2045,8 +2114,12 @@ impl App {
     /// and a finished render are the three moments where losing that position is what
     /// the user asked for; a keep-list save is not one of them.
     fn update_edit_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
-        let Some(view) = live.edit_pane.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        let Some(view) = live.edit_pane.as_ref() else {
+            return;
+        };
         let pane = crate::edit::pane::build(
             &self.session.dir,
             &self.session.edit_dir(),
@@ -2251,7 +2324,9 @@ impl App {
     /// Whole-pane, every time: the HTML is a function of `reflect.json`, so the
     /// pane cannot show something the file does not say.
     fn update_reflect_view(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         let saved = crate::reflect::schema::load(&self.session.reflect_dir()).ok();
         let pane = crate::reflect::pane::build(saved.as_ref(), &self.session.root);
         live.reflect_pane
@@ -2317,7 +2392,9 @@ impl App {
     }
 
     fn approve_all_schedule(&mut self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         if live.schedule_form.approve_all() == 0 {
             self.set_schedule_status("Nothing to approve — press Build Plan first.");
             return;
@@ -2366,7 +2443,9 @@ impl App {
             self.set_schedule_status("A schedule job is already running…");
             return;
         }
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         // Counted from the ledger before the prompt, so the dialog can say how
         // many posts are about to go rather than asking for a blind yes.
         let queued = match crate::schedule::clear::count(
@@ -2460,7 +2539,10 @@ impl App {
                     // render chain is what usually started it: both places
                     // should read as finished without a tab switch.
                     self.update_blog_view();
-                    self.pipeline_status(&format!("On YouTube at {}{thumb}. The blog is ready when you are.", upload.url));
+                    self.pipeline_status(&format!(
+                        "On YouTube at {}{thumb}. The blog is ready when you are.",
+                        upload.url
+                    ));
                     self.sync_controls();
                 }
                 crate::publish::PublishEvent::Connected => {
@@ -2475,9 +2557,7 @@ impl App {
                     // the gate gets the last word, the way it does after an
                     // upload.
                     let status = match self.stages().publish {
-                        crate::stage::Gate::Ready => {
-                            "YouTube connected. Press Upload.".to_string()
-                        }
+                        crate::stage::Gate::Ready => "YouTube connected. Press Upload.".to_string(),
                         crate::stage::Gate::Missing(reason) => {
                             format!("YouTube connected. {reason}")
                         }
@@ -2504,8 +2584,8 @@ impl App {
             return Ok(0);
         };
         let dir = self.session.schedule_dir();
-        let mut plan = crate::schedule::load_plan(&dir)
-            .context("no saved plan — press Build Plan first")?;
+        let mut plan =
+            crate::schedule::load_plan(&dir).context("no saved plan — press Build Plan first")?;
         live.schedule_form.apply(&mut plan);
         let approved = plan.sendable().count();
         crate::schedule::save_plan(&dir, &plan)?;
@@ -2594,7 +2674,8 @@ impl App {
         let mut cfg = crate::config::load();
         cfg.notes_model = Some(self.notes_pick.model().to_string());
         cfg.notes_provider = self.notes_pick.provider().map(str::to_string);
-        cfg.notes_prompt = (!self.notes_prompt.trim().is_empty()).then(|| self.notes_prompt.clone());
+        cfg.notes_prompt =
+            (!self.notes_prompt.trim().is_empty()).then(|| self.notes_prompt.clone());
         if let Err(e) = crate::config::save(&cfg) {
             eprintln!("stream-recorder: could not save model choice: {e:#}");
         }
@@ -2617,9 +2698,7 @@ impl App {
                 // Figures travel too, and for a stronger reason than notes do:
                 // a figure is a moment on a screen that has since moved on, so
                 // a new version that started with none could not get them back.
-                if let Err(e) =
-                    crate::figure::copy_into(&self.session.root, &next.root)
-                {
+                if let Err(e) = crate::figure::copy_into(&self.session.root, &next.root) {
                     eprintln!(
                         "stream-recorder: could not copy figures into the new version: {e:#}"
                     );
@@ -2631,9 +2710,8 @@ impl App {
                 // guidance that used to be faked into the summary itself.
                 self.refresh_version_views();
                 if let Some(live) = self.live.as_ref() {
-                    live.control_target.set_render_status(
-                        "New version — record, then press Render video.",
-                    );
+                    live.control_target
+                        .set_render_status("New version — record, then press Render video.");
                 }
             }
             Err(e) => eprintln!("stream-recorder: new version failed: {e:#}"),
@@ -2641,7 +2719,9 @@ impl App {
     }
 
     fn update_render_summary(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         let edit_dir = self.session.edit_dir();
         let render_dir = self.session.render_dir();
         let mut summary = String::new();
@@ -2669,7 +2749,10 @@ impl App {
                     summary.push_str(&format!("- Words kept: {kept_words}\n"));
                 }
             }
-            if ch_dir.join(format!("chapter-{n:02}-horizontal.mp4")).exists() {
+            if ch_dir
+                .join(format!("chapter-{n:02}-horizontal.mp4"))
+                .exists()
+            {
                 summary.push_str("- Horizontal: cut\n");
             }
             if ch_dir.join(format!("chapter-{n:02}-vertical.mp4")).exists() {
@@ -2703,10 +2786,7 @@ impl App {
                     .metadata()
                     .map(|m| m.len() as f64 / (1024.0 * 1024.0))
                     .unwrap_or(0.0);
-                summary.push_str(&format!(
-                    "- Chapter {n:02}: {:.1} MB\n",
-                    size_mb
-                ));
+                summary.push_str(&format!("- Chapter {n:02}: {:.1} MB\n", size_mb));
             }
         }
         if count == 0 {
@@ -2716,7 +2796,9 @@ impl App {
     }
 
     fn update_distribute_summary(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         // A running upload is left to narrate itself: it reports per-file byte
         // counts, which is strictly more than this could say.
         match self.stages().distribute {
@@ -2728,7 +2810,10 @@ impl App {
                 .set_distribute_status("Ready to upload to S3."),
             crate::stage::Gate::Busy => {}
         }
-        let mut info = format!("# Distribute ({})\n\n", self.session.distribute_dir().display());
+        let mut info = format!(
+            "# Distribute ({})\n\n",
+            self.session.distribute_dir().display()
+        );
         if let Ok(links) = crate::distribute::load(&self.session.distribute_dir()) {
             info.push_str("## Public URLs\n");
             for item in &links.items {
@@ -2747,7 +2832,9 @@ impl App {
     /// token, a round trip and a spinner to answer a question the append-only
     /// row on disk already answers exactly.
     fn update_publish_summary(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         // A running upload narrates itself; leave its line alone.
         match self.stages().publish {
             crate::stage::Gate::Missing(reason) => live.control_target.set_publish_status(&reason),
@@ -2763,9 +2850,9 @@ impl App {
         // button and an unconnected account used to be indistinguishable.
         let mut info = String::new();
         match self.stages().publish.missing() {
-            Some(reason) => info.push_str(&format!(
-                "## Not ready\n- Upload is disabled: {reason}\n"
-            )),
+            Some(reason) => {
+                info.push_str(&format!("## Not ready\n- Upload is disabled: {reason}\n"))
+            }
             None => info.push_str("## Ready\n- Inputs are on disk.\n"),
         }
         match crate::publish::connected_channel() {
@@ -2801,16 +2888,23 @@ impl App {
             }
         }
         live.publish_pane.show_local(
-            &ui::render::page("youtube.html", minijinja::context! {
-                metadata => crate::publish::metadata::load(&self.session), info => info,
-            }),
-            &self.session.root, &self.session.root, ".youtube.html",
+            &ui::render::page(
+                "youtube.html",
+                minijinja::context! {
+                    metadata => crate::publish::metadata::load(&self.session), info => info,
+                },
+            ),
+            &self.session.root,
+            &self.session.root,
+            ".youtube.html",
         );
     }
 
     /// Renders the *saved* plan, so the tab always shows what Queue would send.
     fn update_schedule_summary(&self) {
-        let Some(live) = self.live.as_ref() else { return };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
         let schedule_dir = self.session.schedule_dir();
         let plan = crate::schedule::load_plan(&schedule_dir).ok();
         let hosted = crate::distribute::load(&self.session.distribute_dir()).ok();
@@ -2876,7 +2970,9 @@ impl App {
             }
             None => {
                 let count = hosted.map(|l| l.items.len()).unwrap_or(0);
-                info.push_str(&format!("No plan yet. {count} public URL(s) from Distribute.\n"));
+                info.push_str(&format!(
+                    "No plan yet. {count} public URL(s) from Distribute.\n"
+                ));
                 info.push_str("Press Build Plan to see what would be queued.\n");
             }
         }
@@ -2896,7 +2992,8 @@ impl App {
                 crate::titles::TitlesEvent::Ready(path, manifest) => {
                     live.control_target.set_render_status(&format!(
                         "{} titles saved. {}",
-                        manifest.chapters.len(), path.display()
+                        manifest.chapters.len(),
+                        path.display()
                     ));
                 }
             }
@@ -2942,7 +3039,10 @@ impl App {
                 crate::edit::RenderEvent::Ready(dir) => {
                     self.render_busy = false;
                     self.set_render_progress(1.0);
-                    self.show_render_progress(&format!("Render ready — clips are under Video details. Files: {}", dir.display()));
+                    self.show_render_progress(&format!(
+                        "Render ready — clips are under Video details. Files: {}",
+                        dir.display()
+                    ));
                     // Every chapter has transcribed by now, which is what the
                     // title and description are written from. The artwork and
                     // the upload follow from wherever that step ends.
@@ -2992,7 +3092,10 @@ impl App {
                     live.control_target.set_posts_status(&msg);
                 }
                 crate::posts::PostsEvent::Ready(path, manifest) => {
-                    live.control_target.set_posts_status(&format!("Posts generated and saved → {}", path.display()));
+                    live.control_target.set_posts_status(&format!(
+                        "Posts generated and saved → {}",
+                        path.display()
+                    ));
                     live.posts_form.show(&manifest);
                     self.posts_manifest = Some(manifest);
                     self.update_schedule_summary();
@@ -3108,7 +3211,6 @@ impl App {
         }
     }
 }
-
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -3260,5 +3362,8 @@ fn report_chapter(closed: Option<crate::app::clock::Closed>) {
 
 /// The leaf of a path, for naming a file in a status line.
 fn file_name(path: &std::path::Path) -> String {
-    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }

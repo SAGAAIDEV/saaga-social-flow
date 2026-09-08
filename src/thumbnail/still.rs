@@ -49,8 +49,7 @@ fn write_into(root: &Path, subdir: &str, prefix: &str, pixels: &CVImageBuffer) -
         crate::agent::prompt::hash_of_bytes(&jpeg)
     ));
     if !path.exists() {
-        std::fs::write(&path, &jpeg)
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(&path, &jpeg).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(path)
 }
@@ -120,10 +119,7 @@ pub fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-pub fn encode_cg(
-    image: &objc2_core_graphics::CGImage,
-    max_edge: f64,
-) -> Result<Vec<u8>> {
+pub fn encode_cg(image: &objc2_core_graphics::CGImage, max_edge: f64) -> Result<Vec<u8>> {
     let image = unsafe { CIImage::imageWithCGImage(image) };
     encode_image(&image, max_edge)
 }
@@ -136,15 +132,14 @@ fn encode_image(image: &CIImage, max_edge: f64) -> Result<Vec<u8>> {
     };
 
     let context = unsafe { CIContext::context() };
-    let space = objc2_core_graphics::CGColorSpace::new_device_rgb()
-        .context("device RGB colour space")?;
+    let space =
+        objc2_core_graphics::CGColorSpace::new_device_rgb().context("device RGB colour space")?;
     // Default quality: the options dictionary keys live in ImageIO, and a still
     // this size does not need a tuned encoder to be a usable reference.
     let options = NSDictionary::new();
-    let data = unsafe {
-        context.JPEGRepresentationOfImage_colorSpace_options(&scaled, &space, &options)
-    }
-    .context("encoding the camera frame as JPEG")?;
+    let data =
+        unsafe { context.JPEGRepresentationOfImage_colorSpace_options(&scaled, &space, &options) }
+            .context("encoding the camera frame as JPEG")?;
     Ok(data.to_vec())
 }
 
@@ -175,7 +170,10 @@ fn scale_for(extent: CGRect, max_edge: f64) -> Option<f64> {
 pub fn write_bytes(root: &Path, jpeg: &[u8]) -> Result<PathBuf> {
     let dir = root.join(STILLS_DIR);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let path = dir.join(format!("still-{}.jpg", crate::agent::prompt::hash_of_bytes(jpeg)));
+    let path = dir.join(format!(
+        "still-{}.jpg",
+        crate::agent::prompt::hash_of_bytes(jpeg)
+    ));
     if !path.exists() {
         std::fs::write(&path, jpeg).with_context(|| format!("writing {}", path.display()))?;
     }
@@ -221,7 +219,11 @@ mod tests {
     #[test]
     fn the_scale_transform_is_uniform_and_untranslated() {
         let matrix = scale_transform(0.5);
-        assert_eq!((matrix.a, matrix.d), (0.5, 0.5), "both axes, so aspect holds");
+        assert_eq!(
+            (matrix.a, matrix.d),
+            (0.5, 0.5),
+            "both axes, so aspect holds"
+        );
         assert_eq!((matrix.b, matrix.c), (0.0, 0.0), "no shear");
         assert_eq!((matrix.tx, matrix.ty), (0.0, 0.0), "no translation");
     }
@@ -256,7 +258,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let first = write_bytes(&root, b"pretend jpeg").unwrap();
         let again = write_bytes(&root, b"pretend jpeg").unwrap();
-        assert_eq!(first, again, "content-addressed, so the same frame is one file");
+        assert_eq!(
+            first, again,
+            "content-addressed, so the same frame is one file"
+        );
         let different = write_bytes(&root, b"another frame").unwrap();
         assert_ne!(first, different);
         assert_eq!(list(&root).len(), 2);
@@ -292,11 +297,19 @@ mod tests {
     fn a_jpeg_declares_its_size_and_anything_else_declares_nothing() {
         // An APP0 first, so the walk is proved to skip a segment by its length
         // rather than to find the frame by luck.
-        let app0 = [0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00,
-                    0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00];
+        let app0 = [
+            0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+            0x00, 0x01, 0x00, 0x00,
+        ];
         for marker in [0xC0, 0xC1, 0xC2] {
-            assert_eq!(jpeg_dimensions(&jpeg_header(marker, 1200, 630, &app0)), Some((1200, 630)));
-            assert_eq!(jpeg_dimensions(&jpeg_header(marker, 720, 1280, &[])), Some((720, 1280)));
+            assert_eq!(
+                jpeg_dimensions(&jpeg_header(marker, 1200, 630, &app0)),
+                Some((1200, 630))
+            );
+            assert_eq!(
+                jpeg_dimensions(&jpeg_header(marker, 720, 1280, &[])),
+                Some((720, 1280))
+            );
         }
         // 0xC4 sits inside the SOFn range and is a Huffman table, not a frame.
         assert_eq!(jpeg_dimensions(&jpeg_header(0xC4, 1200, 630, &[])), None);

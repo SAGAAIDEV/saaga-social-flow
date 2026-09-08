@@ -78,7 +78,9 @@ impl App {
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             return;
         };
-        let Some(live) = self.live.as_mut() else { return };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
 
         // Rebuilt whenever the display it was made for is no longer the one to
         // snip: the window is sized and positioned for one display's geometry,
@@ -306,9 +308,9 @@ impl App {
                         "Its blurb follows once the explanation has transcribed."
                     };
                     match figure::append_capture(&self.session.root, &capture) {
-                        Ok(()) => self.set_figure_status(&format!(
-                            "Figure {n:02} captured. {hint}"
-                        )),
+                        Ok(()) => {
+                            self.set_figure_status(&format!("Figure {n:02} captured. {hint}"))
+                        }
                         Err(err) => self.set_figure_status(&format!(
                             "Figure {n:02} was captured but not recorded: {err:#}"
                         )),

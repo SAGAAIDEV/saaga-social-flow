@@ -12,7 +12,9 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use block2::RcBlock;
 use objc2::runtime::Bool;
-use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaType, AVMediaTypeAudio, AVMediaTypeVideo};
+use objc2_av_foundation::{
+    AVAuthorizationStatus, AVCaptureDevice, AVMediaType, AVMediaTypeAudio, AVMediaTypeVideo,
+};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 /// Block until the user answers the microphone permission prompt, or return

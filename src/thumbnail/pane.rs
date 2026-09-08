@@ -144,10 +144,19 @@ pub fn build(root: &Path, library_root: &Path, default_brief: Brief) -> Pane {
 
     Pane {
         artwork_notice,
-        artwork: artwork.map(|set| set.assets.iter().map(|asset| Shot {
-            id: asset.kind.name().into(), url: file_url(&root.join(&asset.file)),
-            label: format!("{} · {}×{}", asset.kind.name(), asset.width, asset.height), selected: true,
-        }).collect()).unwrap_or_default(),
+        artwork: artwork
+            .map(|set| {
+                set.assets
+                    .iter()
+                    .map(|asset| Shot {
+                        id: asset.kind.name().into(),
+                        url: file_url(&root.join(&asset.file)),
+                        label: format!("{} · {}×{}", asset.kind.name(), asset.width, asset.height),
+                        selected: true,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         models,
         card: card_view(root, still.is_some()),
         // Both halves: a still to draw from, and something to draw.
@@ -214,7 +223,9 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
 
 fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
     match (card.is_empty(), has_still) {
-        (true, _) => "No title yet — the render writes one, or type one under Artwork design.".to_string(),
+        (true, _) => {
+            "No title yet — the render writes one, or type one under Artwork design.".to_string()
+        }
         // A set is a photograph with words beside it, so there is nothing to
         // draw without one. The button is disabled to match, rather than taking
         // the press and failing on it.
@@ -274,7 +285,10 @@ mod tests {
             url,
             "file:///Users/andrew/.stream-recorder/references/Frame%202085667299.jpg"
         );
-        assert!(!url.contains(' '), "a space ends the URL and breaks the image");
+        assert!(
+            !url.contains(' '),
+            "a space ends the URL and breaks the image"
+        );
     }
 
     #[test]
@@ -298,11 +312,8 @@ mod tests {
     }
 
     fn write_brief(root: &Path, brief: &Brief) {
-        crate::thumbnail::save_brief(
-            &fake_session(root),
-            &edited(brief.clone(), "now".into()),
-        )
-        .unwrap();
+        crate::thumbnail::save_brief(&fake_session(root), &edited(brief.clone(), "now".into()))
+            .unwrap();
     }
 
     #[test]
@@ -381,8 +392,21 @@ mod tests {
         let ids: Vec<&str> = pane.candidates.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["thumb-b", "thumb-a"], "newest first");
         assert_eq!(pane.active_id.as_deref(), Some("thumb-a"));
-        assert!(pane.candidates.iter().find(|c| c.id == "thumb-a").unwrap().selected);
-        assert!(!pane.candidates.iter().find(|c| c.id == "thumb-b").unwrap().selected);
+        assert!(
+            pane.candidates
+                .iter()
+                .find(|c| c.id == "thumb-a")
+                .unwrap()
+                .selected
+        );
+        assert!(
+            !pane
+                .candidates
+                .iter()
+                .find(|c| c.id == "thumb-b")
+                .unwrap()
+                .selected
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -395,8 +419,21 @@ mod tests {
         references::set_active(&library, "a.jpg", true).unwrap();
         let pane = build(&root, &library, Brief::default());
         assert_eq!(pane.references.len(), 2);
-        assert!(pane.references.iter().find(|r| r.name == "a.jpg").unwrap().active);
-        assert!(!pane.references.iter().find(|r| r.name == "b.jpg").unwrap().active);
+        assert!(
+            pane.references
+                .iter()
+                .find(|r| r.name == "a.jpg")
+                .unwrap()
+                .active
+        );
+        assert!(
+            !pane
+                .references
+                .iter()
+                .find(|r| r.name == "b.jpg")
+                .unwrap()
+                .active
+        );
         let _ = std::fs::remove_dir_all(&library);
     }
 
@@ -408,6 +445,9 @@ mod tests {
         let saved = edited(changed, "now".into());
         assert_eq!(saved.written_at, "now");
         assert_eq!(saved.brief.description, "Something else entirely");
-        assert_eq!(saved.brief.title, "SHIP IT", "the other box is not disturbed");
+        assert_eq!(
+            saved.brief.title, "SHIP IT",
+            "the other box is not disturbed"
+        );
     }
 }

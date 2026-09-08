@@ -236,7 +236,10 @@ impl NewVideoPost {
         // and `keywords` is what it falls back to — sending only the structured
         // one would leave anything still reading the flat list with nothing.
         if !self.article.keyword_targets.is_empty() {
-            object.insert("keywordTargets".into(), targets(&self.article.keyword_targets));
+            object.insert(
+                "keywordTargets".into(),
+                targets(&self.article.keyword_targets),
+            );
         }
         if !self.chapters.is_empty() {
             object.insert(
@@ -285,9 +288,9 @@ impl NewVideoPost {
     /// relation someone had set by hand.
     pub fn relations(&self) -> Vec<(&'static str, i64)> {
         [("author", self.author_id), ("category", self.category_id)]
-        .into_iter()
-        .filter_map(|(field, id)| id.map(|id| (field, id)))
-        .collect()
+            .into_iter()
+            .filter_map(|(field, id)| id.map(|id| (field, id)))
+            .collect()
     }
 }
 
@@ -402,8 +405,13 @@ mod tests {
             caption: "Four minutes on enforcement economics".into(),
             keywords: vec!["ai".into()],
             blocks: vec![
-                Block::Text { html: "<h2>Where it broke</h2><p>Body.</p>".into() },
-                Block::Quote { text: "It could not.".into(), highlight: "could not".into() },
+                Block::Text {
+                    html: "<h2>Where it broke</h2><p>Body.</p>".into(),
+                },
+                Block::Quote {
+                    text: "It could not.".into(),
+                    highlight: "could not".into(),
+                },
             ],
             ..Article::default()
         }
@@ -432,7 +440,12 @@ mod tests {
                 status: "completed",
                 language_code: "en",
                 text: "we said this".into(),
-                words: vec![TranscriptWord { text: "we".into(), start: 0, end: 10, confidence: 0.9 }],
+                words: vec![TranscriptWord {
+                    text: "we".into(),
+                    start: 0,
+                    end: 10,
+                    confidence: 0.9,
+                }],
                 chapters: Vec::new(),
                 audio_duration: 60.0,
             }),
@@ -450,10 +463,19 @@ mod tests {
         assert_eq!(data["title"], "Why watermarking fails");
         assert_eq!(data["slug"], "why-watermarking-fails");
         assert_eq!(data["date"], "2026-08-18");
-        assert_eq!(data["shortAndMetaDescription"], "A complete promise of the argument.");
+        assert_eq!(
+            data["shortAndMetaDescription"],
+            "A complete promise of the argument."
+        );
         assert_eq!(data["duration"], 238);
-        assert_eq!(data["video"]["url"], "https://www.youtube.com/watch?v=2-nJ8yH_L_8");
-        assert_eq!(data["video"]["caption"], "Four minutes on enforcement economics");
+        assert_eq!(
+            data["video"]["url"],
+            "https://www.youtube.com/watch?v=2-nJ8yH_L_8"
+        );
+        assert_eq!(
+            data["video"]["caption"],
+            "Four minutes on enforcement economics"
+        );
         assert_eq!(data["thumbnail"], 42);
         assert!(data["content"].is_array());
     }
@@ -474,7 +496,10 @@ mod tests {
         let body = post().body();
         let data = body["data"].as_object().unwrap();
         assert_eq!(data["author"], 7);
-        assert!(!data.contains_key("category"), "an unresolved lookup is absent");
+        assert!(
+            !data.contains_key("category"),
+            "an unresolved lookup is absent"
+        );
     }
 
     #[test]
@@ -492,13 +517,19 @@ mod tests {
         let body = filed.body();
         assert_eq!(body["data"]["category"], 9);
         assert!(
-            !body["data"].as_object().unwrap().contains_key("educationCategory"),
+            !body["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("educationCategory"),
             "the retired collection is not written to"
         );
         assert_eq!(filed.relations(), vec![("author", 7), ("category", 9)]);
         // Every one of them is asked to be echoed back, so a silent drop shows.
         for (field, _) in filed.relations() {
-            assert!(RELATIONS.contains(&field), "{field} is verified after create");
+            assert!(
+                RELATIONS.contains(&field),
+                "{field} is verified after create"
+            );
         }
         assert!(!RELATIONS.contains(&"educationCategory"));
     }
@@ -534,7 +565,10 @@ mod tests {
         assert_eq!(post().body()["data"]["keywords"][0], "ai");
         let mut bare = post();
         bare.article.keywords.clear();
-        assert!(!bare.body()["data"].as_object().unwrap().contains_key("keywords"));
+        assert!(!bare.body()["data"]
+            .as_object()
+            .unwrap()
+            .contains_key("keywords"));
     }
 
     /// The brief and the flat list both go, because the site reads the first
@@ -575,7 +609,10 @@ mod tests {
         assert_eq!(entry["title"], "Does it scale?");
         assert_eq!(entry["content"], "Not past the first retry.");
         let object = entry.as_object().unwrap();
-        assert!(!object.contains_key("question"), "the obvious pair is the wrong one");
+        assert!(
+            !object.contains_key("question"),
+            "the obvious pair is the wrong one"
+        );
         assert!(!object.contains_key("answer"));
     }
 
@@ -636,13 +673,36 @@ mod tests {
         let body = full.body();
         let data = body["data"].as_object().unwrap();
         for field in [
-            "title", "slug", "date", "shortAndMetaDescription", "description", "duration",
-            "video", "thumbnail", "content", "isFeatured", "videoChapters", "transcript",
-            "transcriptProvider", "author", "category", "keywords", "h1", "faq", "ogImage",
-            "videoVertical", "thumbnailVertical", "noIndex", "canonicalUrl", "magicLinkCta",
+            "title",
+            "slug",
+            "date",
+            "shortAndMetaDescription",
+            "description",
+            "duration",
+            "video",
+            "thumbnail",
+            "content",
+            "isFeatured",
+            "videoChapters",
+            "transcript",
+            "transcriptProvider",
+            "author",
+            "category",
+            "keywords",
+            "h1",
+            "faq",
+            "ogImage",
+            "videoVertical",
+            "thumbnailVertical",
+            "noIndex",
+            "canonicalUrl",
+            "magicLinkCta",
             "keywordTargets",
         ] {
-            assert!(data.contains_key(field), "{field} is not sent by any code path");
+            assert!(
+                data.contains_key(field),
+                "{field} is not sent by any code path"
+            );
         }
         // And nothing that was retired.
         assert!(!data.contains_key("educationCategory"));
@@ -674,7 +734,10 @@ mod tests {
         let object = data["data"].as_object().unwrap();
         assert!(!object.contains_key("noIndex"));
         assert!(!object.contains_key("canonicalUrl"));
-        assert!(!object.contains_key("description"), "no long description written");
+        assert!(
+            !object.contains_key("description"),
+            "no long description written"
+        );
         assert!(!object.contains_key("magicLinkCta"));
     }
 
@@ -683,7 +746,10 @@ mod tests {
     /// different" about an image that is not.
     #[test]
     fn a_post_with_no_social_card_omits_the_field() {
-        assert!(!post().body()["data"].as_object().unwrap().contains_key("ogImage"));
+        assert!(!post().body()["data"]
+            .as_object()
+            .unwrap()
+            .contains_key("ogImage"));
     }
 
     #[test]
@@ -715,8 +781,14 @@ mod tests {
         });
         let body = tall.body();
         let video = &body["data"]["videoVertical"];
-        assert_eq!(video["url"], "https://cms.saagasolve.com/uploads/longform_vertical.mp4");
-        assert_eq!(video["provider"], "upload", "hosted by the CMS, not YouTube");
+        assert_eq!(
+            video["url"],
+            "https://cms.saagasolve.com/uploads/longform_vertical.mp4"
+        );
+        assert_eq!(
+            video["provider"], "upload",
+            "hosted by the CMS, not YouTube"
+        );
         assert_eq!(video["caption"], "Four minutes on enforcement economics");
     }
 
@@ -730,7 +802,10 @@ mod tests {
             url: "https://cms.saagasolve.com/uploads/longform_vertical.mp4".into(),
         });
         assert!(
-            !tall.body()["data"].as_object().unwrap().contains_key("thumbnailVertical"),
+            !tall.body()["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("thumbnailVertical"),
             "a cut must not conjure a poster of its own"
         );
         tall.thumbnail_vertical_id = Some(88);
@@ -743,7 +818,10 @@ mod tests {
     fn a_body_with_no_upload_omits_the_thumbnail() {
         let mut dry = post();
         dry.thumbnail_id = None;
-        assert!(!dry.body()["data"].as_object().unwrap().contains_key("thumbnail"));
+        assert!(!dry.body()["data"]
+            .as_object()
+            .unwrap()
+            .contains_key("thumbnail"));
     }
 
     /// The pipeline never claims the featured slot.
@@ -775,7 +853,10 @@ mod tests {
     fn no_chapters_means_no_empty_chapter_list() {
         let mut bare = post();
         bare.chapters.clear();
-        assert!(!bare.body()["data"].as_object().unwrap().contains_key("videoChapters"));
+        assert!(!bare.body()["data"]
+            .as_object()
+            .unwrap()
+            .contains_key("videoChapters"));
     }
 
     #[test]
@@ -791,7 +872,10 @@ mod tests {
     fn blocks_become_the_components_the_dynamic_zone_accepts() {
         let got = zone(&article().blocks, &Default::default(), &Default::default());
         assert_eq!(got[0]["__component"], "content.text");
-        assert_eq!(got[0]["textBodyHtml"], "<h2>Where it broke</h2><p>Body.</p>");
+        assert_eq!(
+            got[0]["textBodyHtml"],
+            "<h2>Where it broke</h2><p>Body.</p>"
+        );
         assert_eq!(got[1]["__component"], "content.quote");
         assert_eq!(got[1]["quoteText"], "It could not.");
         assert_eq!(got[1]["quoteTextHighlighted"], "could not");
@@ -802,13 +886,17 @@ mod tests {
     /// silently become a new column downstream.
     #[test]
     fn a_table_is_flattened_the_way_the_reader_unflattens_it() {
-        let got = zone(&[Block::Table {
-            headers: vec!["Option".into(), "Cost".into()],
-            rows: vec![
-                vec!["Watermark".into(), "High".into()],
-                vec!["Restraint".into(), "Low".into()],
-            ],
-        }], &Default::default(), &Default::default());
+        let got = zone(
+            &[Block::Table {
+                headers: vec!["Option".into(), "Cost".into()],
+                rows: vec![
+                    vec!["Watermark".into(), "High".into()],
+                    vec!["Restraint".into(), "Low".into()],
+                ],
+            }],
+            &Default::default(),
+            &Default::default(),
+        );
         assert_eq!(got[0]["__component"], "content.table");
         assert_eq!(got[0]["tableHeaders"], "Option, Cost");
         assert_eq!(got[0]["tableContent"], "Watermark, High\n\nRestraint, Low");
@@ -849,7 +937,9 @@ mod tests {
     fn a_figure_with_no_upload_is_left_out_of_the_zone() {
         let got = zone(
             &[
-                Block::Text { html: "<p>Body.</p>".into() },
+                Block::Text {
+                    html: "<p>Body.</p>".into(),
+                },
                 Block::Figure { n: 4 },
             ],
             &Default::default(),
@@ -876,7 +966,9 @@ mod tests {
             }),
         );
         let got = zone(
-            &[Block::Embed { id: "retry_steps".into() }],
+            &[Block::Embed {
+                id: "retry_steps".into(),
+            }],
             &Default::default(),
             &embeds,
         );
@@ -892,8 +984,12 @@ mod tests {
     fn an_embed_with_nothing_built_for_it_is_left_out_of_the_zone() {
         let got = zone(
             &[
-                Block::Text { html: "<p>Body.</p>".into() },
-                Block::Embed { id: "never_built".into() },
+                Block::Text {
+                    html: "<p>Body.</p>".into(),
+                },
+                Block::Embed {
+                    id: "never_built".into(),
+                },
             ],
             &Default::default(),
             &Default::default(),
@@ -904,7 +1000,10 @@ mod tests {
     #[test]
     fn a_quote_with_no_highlight_still_sends_the_field() {
         let got = zone(
-            &[Block::Quote { text: "Said it.".into(), highlight: String::new() }],
+            &[Block::Quote {
+                text: "Said it.".into(),
+                highlight: String::new(),
+            }],
             &Default::default(),
             &Default::default(),
         );
@@ -931,5 +1030,4 @@ mod tests {
         assert_eq!(body["data"]["ogImage"], 12);
         assert!(body["data"].get("videoVertical").is_none());
     }
-
 }

@@ -13,7 +13,12 @@ fn figure(n: u32, caption: &str, alt: &str) -> Figure {
         at: "2026-09-04T10:22:31.000000Z".into(),
         chapter: Some(3),
         offset: Some(84.0),
-        rect: Snipped { x: 0.0, y: 0.0, w: 640.0, h: 480.0 },
+        rect: Snipped {
+            x: 0.0,
+            y: 0.0,
+            w: 640.0,
+            h: 480.0,
+        },
         width: 1280,
         height: 960,
         audio: None,
@@ -46,7 +51,10 @@ fn the_page_carries_the_title_slug_and_body() {
     );
     assert!(html.contains("<h1>Why watermarking fails</h1>"));
     assert!(html.contains("/blog/why-watermarking-fails"));
-    assert!(html.contains("<h2>Where it broke</h2>"), "text blocks render as HTML");
+    assert!(
+        html.contains("<h2>Where it broke</h2>"),
+        "text blocks render as HTML"
+    );
     assert!(html.contains("ai, watermarking"));
     assert!(html.contains("Local preview"), "it says what it is not");
 }
@@ -56,7 +64,9 @@ fn the_page_carries_the_title_slug_and_body() {
 /// anyone would ask.
 #[test]
 fn the_heading_and_the_faq_are_shown_on_the_page() {
-    let mut draft = article(vec![Block::Text { html: "<p>Body.</p>".into() }]);
+    let mut draft = article(vec![Block::Text {
+        html: "<p>Body.</p>".into(),
+    }]);
     draft.h1 = "Why watermarking fails, and what enforcement costs".into();
     draft.faq = vec![crate::blog::schema::Faq {
         question: "Does it scale?".into(),
@@ -75,7 +85,12 @@ fn the_heading_and_the_faq_are_shown_on_the_page() {
 /// line, no empty FAQ heading under the article.
 #[test]
 fn an_article_with_no_heading_and_no_faq_renders_neither() {
-    let html = page(&article(vec![Block::Text { html: "<p>Body.</p>".into() }]), &[]);
+    let html = page(
+        &article(vec![Block::Text {
+            html: "<p>Body.</p>".into(),
+        }]),
+        &[],
+    );
     assert!(html.contains("<h1>Why watermarking fails</h1>"));
     assert!(!html.contains("title: "), "no second title line");
     assert!(!html.contains("class=\"faq\""), "no empty accordion");
@@ -86,7 +101,9 @@ fn an_article_with_no_heading_and_no_faq_renders_neither() {
 /// that hands its ranking away. So the preview says so loudly.
 #[test]
 fn the_search_controls_are_called_out_on_the_page() {
-    let mut draft = article(vec![Block::Text { html: "<p>Body.</p>".into() }]);
+    let mut draft = article(vec![Block::Text {
+        html: "<p>Body.</p>".into(),
+    }]);
     draft.no_index = true;
     draft.canonical_url = "https://example.com/original".into();
     let html = page(&draft, &[]);
@@ -100,7 +117,12 @@ fn the_search_controls_are_called_out_on_the_page() {
 /// article is a banner nobody reads on the one that needs it.
 #[test]
 fn an_article_with_no_search_controls_draws_no_banner() {
-    let html = page(&article(vec![Block::Text { html: "<p>Body.</p>".into() }]), &[]);
+    let html = page(
+        &article(vec![Block::Text {
+            html: "<p>Body.</p>".into(),
+        }]),
+        &[],
+    );
     assert!(!html.contains("class=\"controls\""));
     assert!(!html.contains("noindex"));
 }
@@ -128,7 +150,10 @@ fn a_placed_figure_points_at_the_local_file() {
 #[test]
 fn a_figure_that_was_never_captured_is_shown_as_a_gap() {
     let html = page(&article(vec![Block::Figure { n: 7 }]), &[]);
-    assert!(html.contains("figure 07 is placed here but was never captured"), "{html}");
+    assert!(
+        html.contains("figure 07 is placed here but was never captured"),
+        "{html}"
+    );
     assert!(!html.contains("<img"), "no broken image is drawn");
 }
 
@@ -160,7 +185,10 @@ fn a_quote_highlights_in_brand_orange() {
         }]),
         &[],
     );
-    assert!(html.contains("<blockquote>It <mark>could not</mark> have worked.</blockquote>"), "{html}");
+    assert!(
+        html.contains("<blockquote>It <mark>could not</mark> have worked.</blockquote>"),
+        "{html}"
+    );
 }
 
 /// A hand-edited article.json can carry a highlight that is not in the quote.
@@ -174,7 +202,10 @@ fn a_highlight_that_is_not_in_the_quote_renders_plain() {
         }]),
         &[],
     );
-    assert!(html.contains("<blockquote>It could not.</blockquote>"), "{html}");
+    assert!(
+        html.contains("<blockquote>It could not.</blockquote>"),
+        "{html}"
+    );
     assert!(!html.contains("<mark>"));
 }
 
@@ -199,7 +230,10 @@ fn plain_text_fields_are_escaped() {
     let mut draft = article(vec![]);
     draft.title = "Trust & <safety>".into();
     let html = page(&draft, &[]);
-    assert!(html.contains("<h1>Trust &amp; &lt;safety&gt;</h1>"), "{html}");
+    assert!(
+        html.contains("<h1>Trust &amp; &lt;safety&gt;</h1>"),
+        "{html}"
+    );
 }
 
 /// A caption is a plain-text field too, and it arrives from a model.
@@ -209,15 +243,15 @@ fn a_caption_is_escaped() {
         &article(vec![Block::Figure { n: 1 }]),
         &[figure(1, "Ampersands & <angles>", "alt")],
     );
-    assert!(html.contains("<figcaption>Ampersands &amp; &lt;angles&gt;</figcaption>"), "{html}");
+    assert!(
+        html.contains("<figcaption>Ampersands &amp; &lt;angles&gt;</figcaption>"),
+        "{html}"
+    );
 }
 
 #[test]
 fn the_preview_lands_beside_the_article() {
-    let dir = std::env::temp_dir().join(format!(
-        "stream-recorder-preview-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("stream-recorder-preview-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let path = write(&dir, &article(vec![]), &[]).unwrap();
     assert_eq!(path.file_name().unwrap(), PREVIEW_HTML);

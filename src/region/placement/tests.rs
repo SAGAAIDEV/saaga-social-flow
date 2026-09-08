@@ -48,7 +48,10 @@ fn a_resolved_region_matches_its_output_aspect_exactly() {
             let base = base_size(output, &g);
             let resolved = resolve(
                 base,
-                Placement { offset: (10.0, 10.0), zoom },
+                Placement {
+                    offset: (10.0, 10.0),
+                    zoom,
+                },
                 None,
                 &g,
             );
@@ -157,8 +160,7 @@ fn zooming_the_parent_scales_the_child() {
     // The child's offset from the parent doubled too, because it is
     // normalized to a parent that doubled.
     assert!(
-        ((child_2x.rect.x - parent_2x.rect.x) / (child_1x.rect.x - parent_1x.rect.x) - 2.0)
-            .abs()
+        ((child_2x.rect.x - parent_2x.rect.x) / (child_1x.rect.x - parent_1x.rect.x) - 2.0).abs()
             < 1e-9,
         "the child kept a fixed point offset instead of a proportional one",
     );

@@ -46,11 +46,21 @@ pub struct Finding {
 
 impl Finding {
     fn ok(what: &'static str, detail: impl Into<String>) -> Self {
-        Self { what, ok: true, impact: Impact::Breaks, detail: detail.into() }
+        Self {
+            what,
+            ok: true,
+            impact: Impact::Breaks,
+            detail: detail.into(),
+        }
     }
 
     fn bad(what: &'static str, impact: Impact, detail: impl Into<String>) -> Self {
-        Self { what, ok: false, impact, detail: detail.into() }
+        Self {
+            what,
+            ok: false,
+            impact,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -162,7 +172,11 @@ fn renderer() -> Finding {
 /// breaks: everything up to and including the render works without it.
 fn uploader() -> Finding {
     let home = crate::distribute::screencast_home();
-    if home.join("src/screencast/platforms/upload_cli.py").is_file() && on_path("uv").is_some() {
+    if home
+        .join("src/screencast/platforms/upload_cli.py")
+        .is_file()
+        && on_path("uv").is_some()
+    {
         return Finding::ok("S3 uploader", format!("{}", home.display()));
     }
     if on_path("uv").is_none() {
@@ -211,7 +225,11 @@ pub fn warn_once() {
     }
     let mut out = String::new();
     for finding in breaking {
-        let _ = writeln!(out, "stream-recorder: {} — {}", finding.what, finding.detail);
+        let _ = writeln!(
+            out,
+            "stream-recorder: {} — {}",
+            finding.what, finding.detail
+        );
     }
     let _ = write!(
         out,
@@ -233,15 +251,24 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
         writeln!(out, "  {mark} {:<22} {}", finding.what, finding.detail)?;
     }
 
-    let broken = findings.iter().filter(|f| !f.ok && f.impact == Impact::Breaks).count();
-    let warned = findings.iter().filter(|f| !f.ok && f.impact == Impact::Degrades).count();
+    let broken = findings
+        .iter()
+        .filter(|f| !f.ok && f.impact == Impact::Breaks)
+        .count();
+    let warned = findings
+        .iter()
+        .filter(|f| !f.ok && f.impact == Impact::Degrades)
+        .count();
     writeln!(out)?;
     match (broken, warned) {
         (0, 0) => writeln!(out, "Everything a render needs is here.")?,
         (0, n) => writeln!(out, "Renders will work; {n} thing(s) degraded.")?,
         (n, _) => writeln!(out, "{n} dependency/dependencies will fail a render.")?,
     }
-    writeln!(out, "\nCredentials are reported separately: `saaga-social-flow credentials`.")?;
+    writeln!(
+        out,
+        "\nCredentials are reported separately: `saaga-social-flow credentials`."
+    )?;
     Ok(())
 }
 
@@ -265,10 +292,23 @@ mod tests {
             // An imperative the reader can act on. Broad on purpose: the point
             // is that a message never stops at the diagnosis, not that it uses
             // one blessed verb.
-            let says_how = ["Run ", "run `", "install", "brew ", "git checkout", "setup.sh", "Set ", "export "]
-                .iter()
-                .any(|hint| finding.detail.contains(hint));
-            assert!(says_how, "{} says what is wrong but not what to do: {}", finding.what, finding.detail);
+            let says_how = [
+                "Run ",
+                "run `",
+                "install",
+                "brew ",
+                "git checkout",
+                "setup.sh",
+                "Set ",
+                "export ",
+            ]
+            .iter()
+            .any(|hint| finding.detail.contains(hint));
+            assert!(
+                says_how,
+                "{} says what is wrong but not what to do: {}",
+                finding.what, finding.detail
+            );
         }
     }
 
@@ -278,7 +318,10 @@ mod tests {
     #[test]
     fn startup_only_speaks_up_about_hard_failures() {
         let findings = check();
-        let breaking = findings.iter().filter(|f| !f.ok && f.impact == Impact::Breaks).count();
+        let breaking = findings
+            .iter()
+            .filter(|f| !f.ok && f.impact == Impact::Breaks)
+            .count();
         assert_eq!(
             breaking, 0,
             "this checkout has a render-breaking dependency, so startup would warn"

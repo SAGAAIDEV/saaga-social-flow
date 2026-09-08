@@ -59,10 +59,7 @@ impl TitlesExtraction {
             .collect();
         // The project folder's name is the fallback, the same one the opening
         // card used before there was anything better to put on it.
-        let longform = self
-            .longform
-            .trim()
-            .to_string();
+        let longform = self.longform.trim().to_string();
         let longform = if longform.is_empty() {
             project.trim().to_string()
         } else {

@@ -62,7 +62,10 @@ impl QueueOutcome {
             parts.push(format!("{} already queued", self.already));
         }
         if !self.unrecorded.is_empty() {
-            parts.push(format!("{} NOT recorded in the ledger", self.unrecorded.len()));
+            parts.push(format!(
+                "{} NOT recorded in the ledger",
+                self.unrecorded.len()
+            ));
         }
         parts.join(", ")
     }
@@ -85,7 +88,11 @@ pub fn spawn_clear(session: Session, scope: clear::Scope, tx: Sender<ScheduleEve
         .name("schedule-clear".into())
         .spawn(move || match clear::run(&session, scope, &tx) {
             Ok(outcome) => {
-                eprintln!("stream-recorder: clear {} → {}", scope.label(), outcome.summary());
+                eprintln!(
+                    "stream-recorder: clear {} → {}",
+                    scope.label(),
+                    outcome.summary()
+                );
                 let _ = tx.send(ScheduleEvent::Cleared(outcome));
             }
             Err(err) => {
@@ -154,7 +161,10 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
         .context("no generated posts — run the Post tab first")?;
 
     let distribute_dir = session.distribute_dir();
-    status(format!("Reading S3 links from {}…", distribute_dir.display()));
+    status(format!(
+        "Reading S3 links from {}…",
+        distribute_dir.display()
+    ));
     let links = crate::distribute::load(&distribute_dir)
         .context("no public urls — run Distribute first")?;
 
@@ -167,7 +177,10 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
     status("Asking Buffer for connected channels…".to_string());
     let client = BufferClient::from_env()?;
     let channels = client.channels().context("listing buffer channels")?;
-    status(format!("{} channel(s) connected to Buffer.", channels.len()));
+    status(format!(
+        "{} channel(s) connected to Buffer.",
+        channels.len()
+    ));
 
     let project = project_name(session);
     let dir = session.schedule_dir();
@@ -189,7 +202,9 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
         approve::carry_approvals(&mut built, &prior);
         let kept = built.items.iter().filter(|item| item.approved).count();
         if kept > 0 {
-            status(format!("Carried {kept} approval(s) forward from the last plan."));
+            status(format!(
+                "Carried {kept} approval(s) forward from the last plan."
+            ));
         }
     }
 
@@ -250,7 +265,8 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
         let label = format!("{} → {}", item.video_id, item.platform);
         status(format!("[{}/{}] {label}…", step + 1, targets.len()));
 
-        if let Some(row) = ledger::queued_row(&rows, &item.video_id, &item.platform, &item.copy_hash)
+        if let Some(row) =
+            ledger::queued_row(&rows, &item.video_id, &item.platform, &item.copy_hash)
         {
             outcome.already += 1;
             let mark = format!("already queued {} on {}", row.buffer_post_id, row.queued_at);
@@ -292,7 +308,11 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
                 // rather than an automatic second send.
                 outcome.failed += 1;
                 status(format!("{label} failed: {err:#}"));
-                skip_item(&mut saved, *index, format!("failed: {err:#} — Build Plan to retry"));
+                skip_item(
+                    &mut saved,
+                    *index,
+                    format!("failed: {err:#} — Build Plan to retry"),
+                );
             }
         }
     }
@@ -302,7 +322,9 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
     // must not be reported as "Queue failed" when the posts are live.
     if let Err(err) = save_plan(&dir, &saved) {
         eprintln!("stream-recorder: queued posts but could not rewrite the plan: {err:#}");
-        status(format!("Queued, but the plan file was not updated: {err:#}"));
+        status(format!(
+            "Queued, but the plan file was not updated: {err:#}"
+        ));
     }
     Ok(outcome)
 }
@@ -323,7 +345,10 @@ fn version_mismatch(session: Option<u32>, posts: Option<u32>, links: u32) -> Opt
     if stale.is_empty() {
         return None;
     }
-    Some(format!("Warning: session is v{expected} but {}.", stale.join(" and ")))
+    Some(format!(
+        "Warning: session is v{expected} but {}.",
+        stale.join(" and ")
+    ))
 }
 
 /// Records on the saved plan what happened to one item, so it is neither offered
@@ -370,7 +395,11 @@ mod tests {
     }
 
     fn plan_with(items: Vec<PlanItem>) -> SchedulePlan {
-        SchedulePlan { project: "vd-42-demo".into(), version: Some(3), items }
+        SchedulePlan {
+            project: "vd-42-demo".into(),
+            version: Some(3),
+            items,
+        }
     }
 
     #[test]
@@ -387,11 +416,16 @@ mod tests {
 
     #[test]
     fn the_summary_names_every_non_zero_count() {
-        let mut outcome = QueueOutcome { queued: 12, ..QueueOutcome::default() };
+        let mut outcome = QueueOutcome {
+            queued: 12,
+            ..QueueOutcome::default()
+        };
         assert_eq!(outcome.summary(), "Queued 12 post(s)");
         outcome.failed = 2;
         outcome.already = 3;
-        outcome.unrecorded.push("chapter-01 → tiktok = post-9".into());
+        outcome
+            .unrecorded
+            .push("chapter-01 → tiktok = post-9".into());
         assert_eq!(
             outcome.summary(),
             "Queued 12 post(s), 2 failed, 3 already queued, 1 NOT recorded in the ledger"

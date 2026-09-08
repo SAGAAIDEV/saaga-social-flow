@@ -58,7 +58,10 @@ define_class!(
 );
 
 impl AudioDelegate {
-    pub fn new(writer: Retained<AVAssetWriter>, input: Retained<AVAssetWriterInput>) -> Retained<Self> {
+    pub fn new(
+        writer: Retained<AVAssetWriter>,
+        input: Retained<AVAssetWriterInput>,
+    ) -> Retained<Self> {
         let this = Self::alloc().set_ivars(AudioDelegateIvars {
             writer,
             input,

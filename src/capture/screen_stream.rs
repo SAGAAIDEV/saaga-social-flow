@@ -27,9 +27,7 @@ use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
 use objc2_core_media::CMClock;
 use objc2_foundation::NSError;
-use objc2_screen_capture_kit::{
-    SCDisplay, SCStream, SCStreamConfiguration, SCStreamOutputType,
-};
+use objc2_screen_capture_kit::{SCDisplay, SCStream, SCStreamConfiguration, SCStreamOutputType};
 
 use super::screen_delegate::ScreenDelegate;
 use super::screen_filter::{content_filter, fetch_content, find_display};
@@ -108,10 +106,7 @@ impl ScreenConnection {
     /// into this process. It is strictly cheaper than capturing everything and
     /// cropping later, which is why the recorder does its framing here rather
     /// than in the op graph.
-    pub fn start_capture(
-        display_uid: &str,
-        capture: Option<Capture>,
-    ) -> Result<ScreenConnection> {
+    pub fn start_capture(display_uid: &str, capture: Option<Capture>) -> Result<ScreenConnection> {
         let target: u32 = display_uid
             .parse()
             .with_context(|| format!("display id {display_uid} is not a CGDirectDisplayID"))?;
@@ -329,7 +324,6 @@ fn display_pixel_size(display: &SCDisplay, geometry: &DisplayGeometry) -> (usize
     (fallback_w, fallback_h)
 }
 
-
 fn start_stream(stream: &SCStream) -> Result<()> {
     await_completion(
         |handler| unsafe { stream.startCaptureWithCompletionHandler(Some(handler)) },
@@ -402,7 +396,8 @@ mod tests {
 
         let av = crate::capture::av::Connection::start_capture(&camera_uid, &audio_uid)
             .expect("start capture");
-        av.wait_for_warmup(Duration::from_secs(5)).expect("av warmup");
+        av.wait_for_warmup(Duration::from_secs(5))
+            .expect("av warmup");
         // No region: this measures clocks, and the whole display is the
         // simplest thing to get frames out of.
         let screen =
@@ -437,7 +432,11 @@ mod tests {
         report("screen stream   vs host  ", &screen_clock, &host);
         report("screen vs capture session", &screen_clock, &av_clock);
         let offset = offset_seconds(&screen_clock, &av_clock);
-        println!("screen frames: {} complete, {} skipped as idle", screen.delegate.frames_seen(), screen.delegate.frames_skipped());
+        println!(
+            "screen frames: {} complete, {} skipped as idle",
+            screen.delegate.frames_seen(),
+            screen.delegate.frames_skipped()
+        );
 
         screen.stop().expect("stop screen");
         unsafe { av.session.stopRunning() };

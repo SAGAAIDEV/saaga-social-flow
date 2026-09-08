@@ -18,8 +18,8 @@ use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_av_foundation::{
-    AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoDataOutput,
-    AVFileTypeMPEG4, AVMediaTypeVideo,
+    AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoDataOutput, AVFileTypeMPEG4,
+    AVMediaTypeVideo,
 };
 
 use super::device_picker::{self, CaptureDevice};
@@ -128,7 +128,11 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
         bail!("no camera devices found");
     }
 
-    let chosen_uid = match device_picker::resolve_default(cfg.camera_device_uid.as_deref(), &devices, reselect) {
+    let chosen_uid = match device_picker::resolve_default(
+        cfg.camera_device_uid.as_deref(),
+        &devices,
+        reselect,
+    ) {
         Some(uid) => uid,
         None => {
             if let Some(saved) = &cfg.camera_device_uid {
@@ -153,9 +157,7 @@ pub fn interactive_connect(reselect: bool) -> Result<()> {
 
     println!("stream-recorder: requesting camera access...");
     if !permissions::ensure_video_access()? {
-        bail!(
-            "camera access denied — enable it in System Settings > Privacy & Security > Camera"
-        );
+        bail!("camera access denied — enable it in System Settings > Privacy & Security > Camera");
     }
 
     let out_dir = crate::session::output_dir()?;

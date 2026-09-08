@@ -29,8 +29,10 @@ fn the_crop_rect_is_flipped_into_core_images_space() {
     );
     assert_eq!(rect.size.height, 200.0);
 
-    let bottom_band =
-        Crop::new((0.0, 880.0, 1920.0, 200.0), PixelSize::rounded(1920.0, 200.0));
+    let bottom_band = Crop::new(
+        (0.0, 880.0, 1920.0, 200.0),
+        PixelSize::rounded(1920.0, 200.0),
+    );
     assert_eq!(
         bottom_band.source_rect(1080.0).origin.y,
         0.0,
@@ -40,7 +42,10 @@ fn the_crop_rect_is_flipped_into_core_images_space() {
 
 #[test]
 fn a_full_frame_crop_is_the_whole_frame() {
-    let whole = Crop::new((0.0, 0.0, 1920.0, 1080.0), PixelSize::rounded(1920.0, 1080.0));
+    let whole = Crop::new(
+        (0.0, 0.0, 1920.0, 1080.0),
+        PixelSize::rounded(1920.0, 1080.0),
+    );
     let rect = whole.source_rect(1080.0);
     assert_eq!((rect.origin.x, rect.origin.y), (0.0, 0.0));
     assert_eq!((rect.size.width, rect.size.height), (1920.0, 1080.0));
@@ -74,12 +79,8 @@ fn an_op_that_was_never_opened_drops_rather_than_passing_through() {
     // the wrong aspect, which is the failure this guards.
     let mut op = Crop::new((0.0, 0.0, 100.0, 100.0), PixelSize::rounded(100.0, 100.0));
     let mut sidecar = Sidecar::default();
-    let pixels = crate::ops::frame::test_support::pixel_buffer(
-        64,
-        64,
-        u32::from_be_bytes(*b"420v"),
-        64,
-    );
+    let pixels =
+        crate::ops::frame::test_support::pixel_buffer(64, 64, u32::from_be_bytes(*b"420v"), 64);
     let mut frame = Frame::new(
         pixels,
         objc2_core_media::CMTime {
@@ -106,12 +107,8 @@ fn a_top_band_flips_the_same_way_as_crop() {
 fn an_unopened_cover_drops() {
     let mut op = Cover::for_canvas("cover-vertical", (1080.0, 1920.0), Framing::fixed());
     let mut sidecar = Sidecar::default();
-    let pixels = crate::ops::frame::test_support::pixel_buffer(
-        64,
-        64,
-        u32::from_be_bytes(*b"BGRA"),
-        64,
-    );
+    let pixels =
+        crate::ops::frame::test_support::pixel_buffer(64, 64, u32::from_be_bytes(*b"BGRA"), 64);
     let mut frame = Frame::new(
         pixels,
         objc2_core_media::CMTime {

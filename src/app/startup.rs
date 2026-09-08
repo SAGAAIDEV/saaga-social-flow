@@ -203,7 +203,10 @@ pub fn run_record_session(
     // Start the screen stream, if this layout and this display both call for
     // one, before the camera: a failure here should not leave a camera session
     // running headless.
-    let wanted = layout.needs_screen().then_some(screen_uid.as_deref()).flatten();
+    let wanted = layout
+        .needs_screen()
+        .then_some(screen_uid.as_deref())
+        .flatten();
     let screen = match wanted {
         Some(uid) => pair_capture(layout.pair, uid)
             .and_then(|capture| screen_stream::ScreenConnection::start_capture(uid, capture))
@@ -275,9 +278,7 @@ pub fn run_record_session(
     // already fetched instead of asking for a second one.
     let posts_pick = match (&cfg.posts_model, &cfg.posts_provider) {
         (None, None) => notes_pick.mirror(),
-        (model, provider) => {
-            crate::notes::Picker::restore(provider.clone(), model.clone())
-        }
+        (model, provider) => crate::notes::Picker::restore(provider.clone(), model.clone()),
     };
     let mut app = App {
         session,
@@ -358,8 +359,8 @@ pub fn run_record_session(
         face_config: cfg.face_tracking.clone(),
         face_tracker: None,
         face_loading: false,
-            pointer_config: cfg.mouse_tracking,
-            pointer_tracker: None,
+        pointer_config: cfg.mouse_tracking,
+        pointer_tracker: None,
         notes_pick,
         notes_providers,
         notes_prompt,
@@ -414,7 +415,10 @@ mod tests {
     #[test]
     fn the_first_listed_is_the_last_resort() {
         let devices = [device("loopback"), device("builtin")];
-        assert_eq!(resolve_device(Some("xlr"), &devices, None).uid(), "loopback");
+        assert_eq!(
+            resolve_device(Some("xlr"), &devices, None).uid(),
+            "loopback"
+        );
         // A default AVFoundation names but does not list is no better than none.
         assert_eq!(
             resolve_device(Some("xlr"), &devices, Some(&device("ghost"))).uid(),

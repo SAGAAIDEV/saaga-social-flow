@@ -71,8 +71,15 @@ fn a_still_subject_with_a_jittery_detector_holds_a_still_frame() {
         drift < 1e-6,
         "ten seconds of detector tremor moved the framing by {drift}"
     );
-    assert!(largest_step < 1e-6, "largest single-frame step was {largest_step}");
-    assert!(smoother.rejected_as_noise > 90, "the deadband should have absorbed nearly every sample, rejected {}", smoother.rejected_as_noise);
+    assert!(
+        largest_step < 1e-6,
+        "largest single-frame step was {largest_step}"
+    );
+    assert!(
+        smoother.rejected_as_noise > 90,
+        "the deadband should have absorbed nearly every sample, rejected {}",
+        smoother.rejected_as_noise
+    );
 }
 
 /// The deadband must not become a dead zone: a real move, even a slow one,
@@ -121,7 +128,10 @@ fn a_single_stray_detection_is_not_believed() {
         Some(if frame == 9 { (0.05, 0.05) } else { (0.5, 0.5) })
     });
 
-    assert_eq!(ended, before, "a stray detection moved the framing to {ended:?}");
+    assert_eq!(
+        ended, before,
+        "a stray detection moved the framing to {ended:?}"
+    );
     assert_eq!(smoother.rejected_as_jump, 1);
 }
 
@@ -148,7 +158,10 @@ fn a_confirmed_jump_is_followed() {
 fn losing_the_face_holds_the_framing_rather_than_recentring() {
     let (mut smoother, t) = settled(Damping::default(), (0.5, 0.5));
     let (t, parked, _) = run(&mut smoother, t, 90, |_| Some((0.28, 0.5)));
-    assert!(parked.0 < 0.29, "should have followed the face to 0.28, at {parked:?}");
+    assert!(
+        parked.0 < 0.29,
+        "should have followed the face to 0.28, at {parked:?}"
+    );
 
     // Two seconds with nothing found at all.
     let (_, after, _) = run(&mut smoother, t, 60, |_| None);
@@ -179,7 +192,10 @@ fn recentring_is_available_for_anyone_who_wants_it() {
 
     // Four seconds gone: home.
     let (_, home, _) = run(&mut smoother, t, 120, |_| None);
-    assert!((home.0 - 0.5).abs() < 0.01, "should be centred, at {home:?}");
+    assert!(
+        (home.0 - 0.5).abs() < 0.01,
+        "should be centred, at {home:?}"
+    );
 }
 
 /// The glide is defined in seconds, so the same configuration produces the same

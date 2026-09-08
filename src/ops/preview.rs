@@ -61,7 +61,10 @@ impl PreviewFrame {
     #[allow(dead_code)]
     pub fn size(&self) -> (usize, usize) {
         let buffer = self.pixels.get();
-        (CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer))
+        (
+            CVPixelBufferGetWidth(buffer),
+            CVPixelBufferGetHeight(buffer),
+        )
     }
 }
 

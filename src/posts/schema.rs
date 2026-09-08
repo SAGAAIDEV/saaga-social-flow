@@ -56,9 +56,8 @@ pub fn platform_label(platform: &str) -> &'static str {
 pub fn save_manifest(dir: &Path, manifest: &PostsManifest) -> Result<PathBuf> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let json_path = dir.join(POSTS_JSON);
-    let serialized = serde_json::to_string_pretty(manifest)
-        .context("serializing posts manifest")?
-        + "\n";
+    let serialized =
+        serde_json::to_string_pretty(manifest).context("serializing posts manifest")? + "\n";
     std::fs::write(&json_path, serialized)
         .with_context(|| format!("writing {}", json_path.display()))?;
 
@@ -79,7 +78,13 @@ pub fn save_manifest(dir: &Path, manifest: &PostsManifest) -> Result<PathBuf> {
                 let tags_str = post
                     .tags
                     .iter()
-                    .map(|t| if t.starts_with('#') { t.clone() } else { format!("#{t}") })
+                    .map(|t| {
+                        if t.starts_with('#') {
+                            t.clone()
+                        } else {
+                            format!("#{t}")
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(" ");
                 content.push_str(&tags_str);

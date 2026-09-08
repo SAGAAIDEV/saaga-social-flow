@@ -106,8 +106,7 @@ impl Sidecar {
             let path = dir.join(format!("{stem}.{op}.json"));
             let json = serde_json::to_string_pretty(value)
                 .with_context(|| format!("serializing the {op} sidecar"))?;
-            std::fs::write(&path, json)
-                .with_context(|| format!("writing {}", path.display()))?;
+            std::fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
             written.push(path);
         }
         Ok(written)

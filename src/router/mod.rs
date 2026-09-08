@@ -53,7 +53,6 @@ pub struct Router {
     marker_log: MarkerLog,
 }
 
-
 impl Router {
     /// Open `first_chapter` and install its writer, against a capture session
     /// that is already running.

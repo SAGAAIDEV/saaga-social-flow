@@ -137,10 +137,7 @@ mod tests {
     /// not — the two readings a silent-chapter check has to tell apart.
     #[test]
     fn silence_and_a_tone_measure_apart() {
-        let dir = std::env::temp_dir().join(format!(
-            "stream-recorder-peak-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("stream-recorder-peak-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let silent = dir.join("silent.mp3");

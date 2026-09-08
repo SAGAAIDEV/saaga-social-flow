@@ -145,14 +145,23 @@ fn the_camera_slots_have_the_aspects_cover_is_tested_against() {
     let talk_h = Layout::get(Pair::TalkingHead, Orientation::Horizontal);
     let talk_v = Layout::get(Pair::TalkingHead, Orientation::Vertical);
 
-    assert!((aspect(split_h) - 522.0 / 1080.0).abs() < 1e-9, "split column");
-    assert!((aspect(split_v) - 1080.0 / 640.0).abs() < 1e-9, "vertical panel");
+    assert!(
+        (aspect(split_h) - 522.0 / 1080.0).abs() < 1e-9,
+        "split column"
+    );
+    assert!(
+        (aspect(split_v) - 1080.0 / 640.0).abs() < 1e-9,
+        "vertical panel"
+    );
     assert!(
         (aspect(talk_h) - 16.0 / 9.0).abs() < 1e-9,
         "talking-head-horizontal must match a 16:9 camera exactly, or the \
          framing offset stops being inert there",
     );
-    assert!((aspect(talk_v) - 9.0 / 16.0).abs() < 1e-9, "talking-head-vertical");
+    assert!(
+        (aspect(talk_v) - 9.0 / 16.0).abs() < 1e-9,
+        "talking-head-vertical"
+    );
 }
 
 /// Where the compositions live — the vendored `components/` in this repo, via
@@ -211,14 +220,16 @@ fn slot_from_html(html: &str) -> (Option<(f64, f64)>, Option<(f64, f64, f64, f64
     else {
         return (canvas, None);
     };
-    let after = &line[line.find("class=\"").expect("the screen video has a class")
-        + "class=\"".len()..];
+    let after =
+        &line[line.find("class=\"").expect("the screen video has a class") + "class=\"".len()..];
     let class = after
         .split([' ', '"'])
         .next()
         .expect("the class attribute is not empty");
 
-    let style = &html[html.find("<style>").expect("a composition has a style block")
+    let style = &html[html
+        .find("<style>")
+        .expect("a composition has a style block")
         ..html.find("</style>").expect("the style block is closed")];
     let rule = css_rule(style, class).unwrap_or_else(|| panic!("no CSS rule for .{class}"));
     // Both Split layouts anchor their screen at the origin with explicit
@@ -255,10 +266,11 @@ fn camera_rect_class(block: &str) -> &'static str {
 /// The rect one named class declares, defaulting a missing `left`/`top` to
 /// zero the same way an `inset: 0` rule means.
 fn rect_of_class(html: &str, class: &str) -> (f64, f64, f64, f64) {
-    let style = &html[html.find("<style>").expect("a composition has a style block")
+    let style = &html[html
+        .find("<style>")
+        .expect("a composition has a style block")
         ..html.find("</style>").expect("the style block is closed")];
-    let rule =
-        css_rule(style, class).unwrap_or_else(|| panic!("no CSS rule for .{class}"));
+    let rule = css_rule(style, class).unwrap_or_else(|| panic!("no CSS rule for .{class}"));
     (
         css_px(rule, "left").unwrap_or(0.0),
         css_px(rule, "top").unwrap_or(0.0),

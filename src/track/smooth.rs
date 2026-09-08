@@ -248,10 +248,7 @@ impl Smoother {
         } else {
             1.0
         };
-        let moved = (
-            current.0 + delta.0 * scale,
-            current.1 + delta.1 * scale,
-        );
+        let moved = (current.0 + delta.0 * scale, current.1 + delta.1 * scale);
         self.current = Some(moved);
         Some(moved)
     }

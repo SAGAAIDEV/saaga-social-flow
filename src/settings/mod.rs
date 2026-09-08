@@ -54,8 +54,13 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Group; 5] =
-        [Group::Llm, Group::Social, Group::Blog, Group::Video, Group::Transcript];
+    pub const ALL: [Group; 5] = [
+        Group::Llm,
+        Group::Social,
+        Group::Blog,
+        Group::Video,
+        Group::Transcript,
+    ];
 
     /// The stable name the webview uses to ask for a test and to place the
     /// result. Spelled out rather than derived from [`Group::title`], so
@@ -93,10 +98,14 @@ impl Group {
                 "Thumbnail art, figure blurbs, notes and social copy. Nothing that writes \
                  text or draws an image works without this one."
             }
-            Group::Social => "Building and sending the Buffer schedule, and the S3 upload it links to.",
+            Group::Social => {
+                "Building and sending the Buffer schedule, and the S3 upload it links to."
+            }
             Group::Blog => "Publishing the article to the CMS.",
             Group::Video => "Uploading the render to YouTube and setting its thumbnail.",
-            Group::Transcript => "Chapter transcripts. Without it recording still works; transcripts are skipped.",
+            Group::Transcript => {
+                "Chapter transcripts. Without it recording still works; transcripts are skipped."
+            }
         }
     }
 }
@@ -291,7 +300,6 @@ pub enum Source {
     Unset,
 }
 
-
 /// Show enough of a secret to recognise it, and never enough to use it.
 fn preview(value: &str) -> String {
     let count = value.chars().count();
@@ -317,7 +325,11 @@ pub fn status() -> Vec<Status> {
             let live = std::env::var(f.key).unwrap_or_default();
             let live = live.trim();
             let on_file = stored.get(f.key).map(String::as_str).unwrap_or("").trim();
-            let from_team = sops::provided().get(f.key).map(String::as_str).unwrap_or("").trim();
+            let from_team = sops::provided()
+                .get(f.key)
+                .map(String::as_str)
+                .unwrap_or("")
+                .trim();
             // Local before team: the local file is loaded first and therefore
             // wins, so when both carry the same value it is the local one in
             // effect — and the local one is what this pane can actually change.
@@ -385,7 +397,10 @@ pub fn models() -> Vec<ModelChoice> {
         .unwrap_or_else(crate::notes::default_model);
     // Unset means the Post tab starts from the Notes choice, which is what
     // startup does — so showing the Notes model here is what will actually run.
-    let posts_model = cfg.posts_model.clone().unwrap_or_else(|| notes_model.clone());
+    let posts_model = cfg
+        .posts_model
+        .clone()
+        .unwrap_or_else(|| notes_model.clone());
     let posts_provider = cfg
         .posts_provider
         .clone()
@@ -478,7 +493,11 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
 
     writeln!(out, "\nModels")?;
     for choice in models() {
-        writeln!(out, "  {:<28} {} ({})", choice.stage, choice.model, choice.provider)?;
+        writeln!(
+            out,
+            "  {:<28} {} ({})",
+            choice.stage, choice.model, choice.provider
+        )?;
     }
 
     let missing = missing_required();
@@ -486,7 +505,12 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
     if missing.is_empty() {
         writeln!(out, "Every required key is set.")?;
     } else {
-        writeln!(out, "{} required key(s) missing: {}", missing.len(), missing.join(", "))?;
+        writeln!(
+            out,
+            "{} required key(s) missing: {}",
+            missing.len(),
+            missing.join(", ")
+        )?;
         writeln!(out, "Set them in the app's Settings tab, or in {path}.")?;
     }
     Ok(())
@@ -631,7 +655,11 @@ pub fn merge(text: &str, updates: &BTreeMap<String, String>) -> String {
             .map(|(key, _)| key.trim());
         match key.and_then(|key| pending.get(key).map(|value| (key, *value))) {
             Some((key, value)) => {
-                let prefix = if trimmed.starts_with("export ") { "export " } else { "" };
+                let prefix = if trimmed.starts_with("export ") {
+                    "export "
+                } else {
+                    ""
+                };
                 out.push_str(&format!("{prefix}{key}={value}\n"));
                 written.push(key);
             }
@@ -676,8 +704,7 @@ pub fn write(updates: &BTreeMap<String, String>) -> Result<PathBuf> {
 
     let path = env_path()?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let current = std::fs::read_to_string(&path).unwrap_or_default();
     let merged = merge(&current, &allowed);
@@ -726,8 +753,7 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("replacing {}", path.display()))
+    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
 #[cfg(test)]
@@ -760,7 +786,10 @@ mod tests {
     #[test]
     fn a_blank_field_leaves_the_stored_value_alone() {
         let before = "BUFFER_API_KEY=live\n";
-        let after = merge(&before, &updates(&[("BUFFER_API_KEY", ""), ("S3_BUCKET", "  ")]));
+        let after = merge(
+            &before,
+            &updates(&[("BUFFER_API_KEY", ""), ("S3_BUCKET", "  ")]),
+        );
         assert_eq!(after, before);
     }
 
@@ -820,8 +849,16 @@ mod tests {
     #[test]
     fn every_stage_names_a_model_and_a_provider() {
         for choice in models() {
-            assert!(!choice.model.trim().is_empty(), "{} has no model", choice.stage);
-            assert!(!choice.provider.trim().is_empty(), "{} has no provider", choice.stage);
+            assert!(
+                !choice.model.trim().is_empty(),
+                "{} has no model",
+                choice.stage
+            );
+            assert!(
+                !choice.provider.trim().is_empty(),
+                "{} has no provider",
+                choice.stage
+            );
             assert!(
                 !choice.where_to_change.trim().is_empty(),
                 "{} does not say where to change it",
@@ -841,9 +878,18 @@ mod tests {
             return; // This machine has made a choice; nothing to infer.
         }
         let rows = models();
-        let notes = rows.iter().find(|c| c.stage.starts_with("Notes")).expect("notes row");
-        let posts = rows.iter().find(|c| c.stage == "Social posts").expect("posts row");
-        assert_eq!(posts.model, notes.model, "posts should mirror notes when unset");
+        let notes = rows
+            .iter()
+            .find(|c| c.stage.starts_with("Notes"))
+            .expect("notes row");
+        let posts = rows
+            .iter()
+            .find(|c| c.stage == "Social posts")
+            .expect("posts row");
+        assert_eq!(
+            posts.model, notes.model,
+            "posts should mirror notes when unset"
+        );
     }
 
     /// The report is what a teammate runs when something is wrong, so it has to
@@ -860,7 +906,10 @@ mod tests {
         for field in FIELDS {
             assert!(text.contains(field.key), "the report omits {}", field.key);
         }
-        assert!(!text.contains("supersecret"), "the report printed a secret:\n{text}");
+        assert!(
+            !text.contains("supersecret"),
+            "the report printed a secret:\n{text}"
+        );
         assert!(text.contains("Local settings file:"), "{text}");
     }
 

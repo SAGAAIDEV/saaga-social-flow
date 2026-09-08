@@ -16,7 +16,12 @@ fn figure(chapter: Option<u32>, offset: Option<f64>) -> Figure {
         at: "2026-09-04T10:22:31.000000Z".into(),
         chapter,
         offset,
-        rect: Snipped { x: 0.0, y: 0.0, w: 800.0, h: 600.0 },
+        rect: Snipped {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        },
         width: 1600,
         height: 1200,
         audio: None,
@@ -26,12 +31,6 @@ fn figure(chapter: Option<u32>, offset: Option<f64>) -> Figure {
         alt: String::new(),
     }
 }
-
-
-
-
-
-
 
 /// A figure snipped while nothing was recording has no transcript to sit
 /// against, and the prompt has to say so rather than leave a gap the model
@@ -44,7 +43,10 @@ fn a_figure_with_no_chapter_says_the_transcript_is_missing() {
         "Retry storms".into(),
     );
     assert!(context.contains("Retry storms"));
-    assert!(context.contains("no explanation or transcript for this moment"), "{context}");
+    assert!(
+        context.contains("no explanation or transcript for this moment"),
+        "{context}"
+    );
 }
 
 /// The explanation is the point of the break, so it leads — and once there is
@@ -54,8 +56,13 @@ fn the_authors_explanation_leads_and_silences_the_missing_note() {
     let mut explained = figure(None, None);
     explained.said = "  This is the retry storm that took the queue down.  ".into();
     let context = context_for(Path::new("/nonexistent"), &explained, "Retry storms".into());
-    let explanation = context.find("They said:").expect("the explanation is offered");
-    assert!(context[explanation..].contains("retry storm that took the queue down"), "{context}");
+    let explanation = context
+        .find("They said:")
+        .expect("the explanation is offered");
+    assert!(
+        context[explanation..].contains("retry storm that took the queue down"),
+        "{context}"
+    );
     assert!(!context.contains("describe the picture alone"), "{context}");
 }
 
@@ -69,7 +76,10 @@ fn a_chapter_with_no_transcript_file_reads_the_same() {
         "Retry storms".into(),
     );
     assert!(context.contains("ch 03 · 1:24"), "{context}");
-    assert!(context.contains("no explanation or transcript for this moment"), "{context}");
+    assert!(
+        context.contains("no explanation or transcript for this moment"),
+        "{context}"
+    );
 }
 
 /// The window is what keeps a caption about the picture instead of about

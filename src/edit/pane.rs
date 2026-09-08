@@ -354,7 +354,11 @@ mod tests {
     fn an_unedited_chapter_shows_the_proposed_cut() {
         let root = temp("proposed");
         let (drafts, edits) = (root.join("drafts"), root.join("edit"));
-        record(&drafts, 1, &[("hello", 0, 500), ("um", 700, 900), ("world", 1400, 1800)]);
+        record(
+            &drafts,
+            1,
+            &[("hello", 0, 500), ("um", 700, 900), ("world", 1400, 1800)],
+        );
         cache_peaks(&edits, 1, 3.0);
 
         let pane = build(&drafts, &edits, None);
@@ -378,7 +382,11 @@ mod tests {
     fn a_hand_edit_wins_and_is_marked_on_the_rail() {
         let root = temp("hand");
         let (drafts, edits) = (root.join("drafts"), root.join("edit"));
-        record(&drafts, 1, &[("hello", 0, 500), ("um", 700, 900), ("world", 1400, 1800)]);
+        record(
+            &drafts,
+            1,
+            &[("hello", 0, 500), ("um", 700, 900), ("world", 1400, 1800)],
+        );
         cache_peaks(&edits, 1, 3.0);
         save_spans(&edits, &drafts, 1, &[[0, 1000]]).unwrap();
 
@@ -484,11 +492,21 @@ mod tests {
         cache_peaks(&edits, 2, 10.0);
         // Out of order, overlapping, and one sliver — all three are the pane's problem
         // to send and this function's problem to fix.
-        save_spans(&edits, &drafts, 2, &[[5000, 6000], [0, 1000], [900, 2000], [7000, 7005]])
-            .unwrap();
+        save_spans(
+            &edits,
+            &drafts,
+            2,
+            &[[5000, 6000], [0, 1000], [900, 2000], [7000, 7005]],
+        )
+        .unwrap();
         let saved = keep::load(&chapter_dir(&edits, 2)).unwrap();
         assert_eq!(
-            saved.spans.iter().copied().map(<[i64; 2]>::from).collect::<Vec<_>>(),
+            saved
+                .spans
+                .iter()
+                .copied()
+                .map(<[i64; 2]>::from)
+                .collect::<Vec<_>>(),
             [[0, 2000], [5000, 6000]]
         );
         assert_eq!(saved.duration_ms, 10_000);
@@ -504,4 +522,3 @@ mod tests {
         assert_eq!(clock(-1), "0:00");
     }
 }
-

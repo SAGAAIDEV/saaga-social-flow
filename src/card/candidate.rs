@@ -52,7 +52,13 @@ pub fn still_hash(photo: Option<&Path>) -> String {
 }
 
 /// Writes the JPEG into the candidates directory and appends its row.
-pub fn write(root: &Path, id: &str, jpeg: &[u8], card: &Card, still: &str) -> Result<schema::Candidate> {
+pub fn write(
+    root: &Path,
+    id: &str,
+    jpeg: &[u8],
+    card: &Card,
+    still: &str,
+) -> Result<schema::Candidate> {
     let dir = root.join(schema::CANDIDATES_DIR);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let file = format!("{}/{id}.jpg", schema::CANDIDATES_DIR);
@@ -101,11 +107,26 @@ mod tests {
     fn every_edit_moves_the_id() {
         let base = id(&card(), "abc");
         for edited in [
-            Card { title: "Ship it".into(), ..card() },
-            Card { description: "Something else.".into(), ..card() },
-            Card { kicker: String::new(), ..card() },
-            Card { theme: "light".into(), ..card() },
-            Card { focus: 0.31, ..card() },
+            Card {
+                title: "Ship it".into(),
+                ..card()
+            },
+            Card {
+                description: "Something else.".into(),
+                ..card()
+            },
+            Card {
+                kicker: String::new(),
+                ..card()
+            },
+            Card {
+                theme: "light".into(),
+                ..card()
+            },
+            Card {
+                focus: 0.31,
+                ..card()
+            },
         ] {
             assert_ne!(id(&edited, "abc"), base, "{edited:?} drew the old card");
         }
@@ -139,10 +160,8 @@ mod tests {
     /// `model` is the only thing that says which is which.
     #[test]
     fn the_row_files_under_the_card_model() {
-        let root = std::env::temp_dir().join(format!(
-            "stream-recorder-card-{}-row",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-card-{}-row", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let id = id(&card(), "abc");
         let row = write(&root, &id, b"pretend jpeg", &card(), "abc").unwrap();
@@ -151,7 +170,11 @@ mod tests {
         assert!(root.join(&row.file).is_file());
 
         let rows = schema::load(&root);
-        assert_eq!(schema::candidates(&rows).len(), 1, "it is in the shared list");
+        assert_eq!(
+            schema::candidates(&rows).len(),
+            1,
+            "it is in the shared list"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

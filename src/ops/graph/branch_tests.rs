@@ -159,8 +159,14 @@ fn run_ordinals_line_up_with_the_sink_specs() {
 fn duplicate_preview_names_are_rejected_at_build() {
     let mut builder = GraphBuilder::new(StreamId::Camera);
     let source = builder.source();
-    builder.preview(source, crate::ops::PreviewSpec::new("horizontal", 1920, 1080));
-    builder.preview(source, crate::ops::PreviewSpec::new("horizontal", 1080, 1920));
+    builder.preview(
+        source,
+        crate::ops::PreviewSpec::new("horizontal", 1920, 1080),
+    );
+    builder.preview(
+        source,
+        crate::ops::PreviewSpec::new("horizontal", 1080, 1920),
+    );
     let Err(error) = builder.build() else {
         panic!("two preview sinks must not share a name");
     };

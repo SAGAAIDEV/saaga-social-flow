@@ -211,7 +211,9 @@ pub fn artwork_note(metadata: &Metadata) -> Option<String> {
     let description = metadata.description.chars().count();
     let mut over: Vec<String> = Vec::new();
     if title > ARTWORK_TITLE {
-        over.push(format!("title is {title} characters (artwork fits {ARTWORK_TITLE})"));
+        over.push(format!(
+            "title is {title} characters (artwork fits {ARTWORK_TITLE})"
+        ));
     }
     if description > ARTWORK_DESCRIPTION {
         over.push(format!(
@@ -405,7 +407,10 @@ mod tests {
     #[test]
     fn the_prompt_states_both_budgets_and_its_example_obeys_them() {
         let prompt = copy_prompt();
-        assert!(prompt.contains(&ARTWORK_TITLE.to_string()), "no title budget: {prompt}");
+        assert!(
+            prompt.contains(&ARTWORK_TITLE.to_string()),
+            "no title budget: {prompt}"
+        );
         assert!(
             prompt.contains(&ARTWORK_DESCRIPTION.to_string()),
             "no description budget: {prompt}"
@@ -431,7 +436,10 @@ mod tests {
             description.chars().count()
         );
         let words = title.split_whitespace().count();
-        assert!((3..=8).contains(&words), "the example title is {words} words, outside 3-8");
+        assert!(
+            (3..=8).contains(&words),
+            "the example title is {words} words, outside 3-8"
+        );
     }
 
     fn long_copy_is_kept_rather_than_thrown_away() {
@@ -444,25 +452,36 @@ mod tests {
         })
         .expect("long copy is kept");
         assert_eq!(long.title.chars().count(), 61);
-        assert!(artwork_note(&long).is_some(), "the pane should say it overshot");
+        assert!(
+            artwork_note(&long).is_some(),
+            "the pane should say it overshot"
+        );
 
-        let empty_description =
-            validate_generated(Generated { title: "Short".into(), description: "  ".into() })
-                .expect("a missing description is still savable copy");
+        let empty_description = validate_generated(Generated {
+            title: "Short".into(),
+            description: "  ".into(),
+        })
+        .expect("a missing description is still savable copy");
         assert!(artwork_note(&empty_description).is_some());
 
         // YouTube's own limits stay enforced: past these the upload is refused,
         // so there is nothing to hand back.
-        assert!(validate_generated(Generated {
-            title: " ".into(),
-            description: "Short.".into()
-        })
-        .is_err(), "an empty title is rejected by YouTube");
-        assert!(validate_generated(Generated {
-            title: "x".repeat(101),
-            description: "Short.".into()
-        })
-        .is_err(), "a 101-character title is rejected by YouTube");
+        assert!(
+            validate_generated(Generated {
+                title: " ".into(),
+                description: "Short.".into()
+            })
+            .is_err(),
+            "an empty title is rejected by YouTube"
+        );
+        assert!(
+            validate_generated(Generated {
+                title: "x".repeat(101),
+                description: "Short.".into()
+            })
+            .is_err(),
+            "a 101-character title is rejected by YouTube"
+        );
 
         // And copy that fits draws no note at all.
         let fits = validate_generated(Generated {

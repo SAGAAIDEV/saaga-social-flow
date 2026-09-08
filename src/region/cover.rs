@@ -104,10 +104,7 @@ pub fn cover_zoom(src: (f64, f64), slot: (f64, f64), offset: (f64, f64), zoom: f
 
     let scale = (slot.0 / src.0).max(slot.1 / src.1) * clamp_zoom(zoom);
     let visible = (slot.0 / scale, slot.1 / scale);
-    let overflow = (
-        (src.0 - visible.0).max(0.0),
-        (src.1 - visible.1).max(0.0),
-    );
+    let overflow = ((src.0 - visible.0).max(0.0), (src.1 - visible.1).max(0.0));
     Cover {
         visible,
         origin: (
@@ -224,7 +221,11 @@ mod tests {
         for offset in [(0.0, 0.0), (0.5, 0.5), (1.0, 1.0)] {
             let fit = cover(CAMERA, TALKING_H_SLOT, offset);
             assert_eq!(fit.visible, CAMERA);
-            assert_eq!(fit.origin, (0.0, 0.0), "offset {offset:?} moved a full frame");
+            assert_eq!(
+                fit.origin,
+                (0.0, 0.0),
+                "offset {offset:?} moved a full frame"
+            );
             assert!(close(fit.scale, 1.0));
         }
     }
@@ -234,7 +235,10 @@ mod tests {
         let fit = cover(CAMERA, SPLIT_V_SLOT, (0.5, 0.5));
         // 640/1080 is the larger ratio, so height drives the scale.
         assert!(close(fit.scale, 640.0 / 1080.0));
-        assert!(close(fit.visible.1, 1080.0), "the driving axis fits exactly");
+        assert!(
+            close(fit.visible.1, 1080.0),
+            "the driving axis fits exactly"
+        );
         let overflow = fit.overflow(CAMERA);
         assert!(overflow.0 > 0.0 && overflow.0 < 120.0, "got {overflow:?}");
         assert!(close(overflow.1, 0.0));
@@ -243,7 +247,10 @@ mod tests {
     #[test]
     fn the_vertical_talking_head_crops_hardest() {
         let fit = cover(CAMERA, TALKING_V_SLOT, (0.5, 0.5));
-        assert!(close(fit.scale, 1920.0 / 1080.0), "height drives a 9:16 slot");
+        assert!(
+            close(fit.scale, 1920.0 / 1080.0),
+            "height drives a 9:16 slot"
+        );
         assert!(close(fit.visible.0, 607.5));
         assert!(close(fit.visible.1, 1080.0));
         assert!(close(fit.overflow(CAMERA).0, 1312.5));
@@ -273,8 +280,14 @@ mod tests {
     #[test]
     fn an_out_of_range_or_nonsense_offset_is_clamped_rather_than_refused() {
         let overflow = cover(CAMERA, SPLIT_H_SLOT, (0.0, 0.0)).overflow(CAMERA).0;
-        assert!(close(cover(CAMERA, SPLIT_H_SLOT, (-5.0, 0.0)).origin.0, 0.0));
-        assert!(close(cover(CAMERA, SPLIT_H_SLOT, (5.0, 0.0)).origin.0, overflow));
+        assert!(close(
+            cover(CAMERA, SPLIT_H_SLOT, (-5.0, 0.0)).origin.0,
+            0.0
+        ));
+        assert!(close(
+            cover(CAMERA, SPLIT_H_SLOT, (5.0, 0.0)).origin.0,
+            overflow
+        ));
         // NaN falls back to centred, not to an edge and not to NaN.
         let nan = cover(CAMERA, SPLIT_H_SLOT, (f64::NAN, f64::NAN));
         assert!(close(nan.origin.0, overflow / 2.0));
@@ -324,7 +337,8 @@ mod tests {
         for zoom in [0.5, 0.0, -3.0, f64::NAN] {
             let fit = cover_zoom(CAMERA, TALKING_V_SLOT, (0.5, 0.5), zoom);
             assert_eq!(
-                fit, cover(CAMERA, TALKING_V_SLOT, (0.5, 0.5)),
+                fit,
+                cover(CAMERA, TALKING_V_SLOT, (0.5, 0.5)),
                 "zoom {zoom} should be inert, not inverted"
             );
         }
@@ -361,11 +375,17 @@ mod tests {
                 (fit.origin.1 + fit.visible.1 / 2.0) / CAMERA.1,
             );
             if reach.0 > 0.0 {
-                assert!(close(centre.0, point.0), "{slot:?} x: {centre:?} vs {point:?}");
+                assert!(
+                    close(centre.0, point.0),
+                    "{slot:?} x: {centre:?} vs {point:?}"
+                );
                 assert!(offset.0 < 0.5, "{slot:?} should have slid left: {offset:?}");
             }
             if reach.1 > 0.0 {
-                assert!(close(centre.1, point.1), "{slot:?} y: {centre:?} vs {point:?}");
+                assert!(
+                    close(centre.1, point.1),
+                    "{slot:?} y: {centre:?} vs {point:?}"
+                );
                 assert!(offset.1 > 0.5, "{slot:?} should have slid down: {offset:?}");
             }
         }

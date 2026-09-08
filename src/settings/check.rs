@@ -31,11 +31,19 @@ pub struct Outcome {
 
 impl Outcome {
     fn ok(group: Group, message: impl Into<String>) -> Self {
-        Self { group: group.slug(), ok: true, message: message.into() }
+        Self {
+            group: group.slug(),
+            ok: true,
+            message: message.into(),
+        }
     }
 
     fn bad(group: Group, message: impl Into<String>) -> Self {
-        Self { group: group.slug(), ok: false, message: message.into() }
+        Self {
+            group: group.slug(),
+            ok: false,
+            message: message.into(),
+        }
     }
 
     /// The script that drops this verdict next to its section.
@@ -92,8 +100,12 @@ fn openrouter() -> Result<String> {
         .set("Authorization", &format!("Bearer {key}"))
         .call();
     let body: serde_json::Value = match response {
-        Ok(response) => response.into_json().context("parsing the OpenRouter reply")?,
-        Err(ureq::Error::Status(401, _)) => bail!("the key was rejected (401) — check it was copied whole"),
+        Ok(response) => response
+            .into_json()
+            .context("parsing the OpenRouter reply")?,
+        Err(ureq::Error::Status(401, _)) => {
+            bail!("the key was rejected (401) — check it was copied whole")
+        }
         Err(ureq::Error::Status(code, response)) => {
             let text = response.into_string().unwrap_or_default();
             bail!("OpenRouter http {code}: {}", text.trim());
@@ -121,7 +133,11 @@ fn buffer() -> Result<String> {
     if channels.is_empty() {
         bail!("the key works, but this workspace has no connected channels");
     }
-    let named: Vec<&str> = channels.iter().map(|c| c.service.as_str()).take(6).collect();
+    let named: Vec<&str> = channels
+        .iter()
+        .map(|c| c.service.as_str())
+        .take(6)
+        .collect();
     Ok(format!("{} channels: {}", channels.len(), named.join(", ")))
 }
 
@@ -229,11 +245,17 @@ mod tests {
         let json = &script[start..script.len() - 1];
         let parsed: serde_json::Value =
             serde_json::from_str(json).expect("the payload is valid JSON");
-        assert_eq!(parsed["message"], hostile, "the message did not survive intact");
+        assert_eq!(
+            parsed["message"], hostile,
+            "the message did not survive intact"
+        );
         assert_eq!(parsed["ok"], false);
 
         // And the raw text never appears unescaped, which is what would let it
         // close the literal and run.
-        assert!(!script.contains(r#"'"; alert"#), "unescaped payload: {script}");
+        assert!(
+            !script.contains(r#"'"; alert"#),
+            "unescaped payload: {script}"
+        );
     }
 }

@@ -185,8 +185,7 @@ fn run_pull(session: &Session, tx: &Sender<AnalyticsEvent>) -> Result<(PullOutco
                         outcome.waiting += 1;
                         continue;
                     }
-                    let sample =
-                        AnalyticsRow::new(row, item.window, &observed, iso_now());
+                    let sample = AnalyticsRow::new(row, item.window, &observed, iso_now());
                     append_row(&session.root, &sample)?;
                     if item.window == Window::Sent {
                         outcome.newly_sent += 1;

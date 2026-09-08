@@ -45,16 +45,18 @@ pub fn spawn_generate(
     let unstarted = tx.clone();
     if let Err(err) = thread::Builder::new()
         .name("substack-notes".into())
-        .spawn(move || match run(&session, &model, provider.as_deref(), &tx) {
-            Ok((path, notes)) => {
-                eprintln!("stream-recorder: substack notes → {}", path.display());
-                let _ = tx.send(SubstackEvent::Ready(path, notes));
-            }
-            Err(err) => {
-                eprintln!("stream-recorder: substack notes failed: {err:#}");
-                let _ = tx.send(SubstackEvent::Failed(format!("Notes failed: {err:#}")));
-            }
-        })
+        .spawn(
+            move || match run(&session, &model, provider.as_deref(), &tx) {
+                Ok((path, notes)) => {
+                    eprintln!("stream-recorder: substack notes → {}", path.display());
+                    let _ = tx.send(SubstackEvent::Ready(path, notes));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: substack notes failed: {err:#}");
+                    let _ = tx.send(SubstackEvent::Failed(format!("Notes failed: {err:#}")));
+                }
+            },
+        )
     {
         eprintln!("stream-recorder: could not start the substack job: {err}");
         let _ = unstarted.send(SubstackEvent::Failed(format!(

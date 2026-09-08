@@ -87,7 +87,10 @@ pub fn model_menu(list: &[ModelChoice]) -> Vec<ModelMenuRow> {
     let mut groups: std::collections::BTreeMap<String, Vec<&ModelChoice>> =
         std::collections::BTreeMap::new();
     for model in list {
-        groups.entry(category_of(&model.id)).or_default().push(model);
+        groups
+            .entry(category_of(&model.id))
+            .or_default()
+            .push(model);
     }
     let mut out = Vec::new();
     for (cat, mut models) in groups {
@@ -106,7 +109,11 @@ pub fn model_menu(list: &[ModelChoice]) -> Vec<ModelMenuRow> {
 pub fn menu_index_of(menu: &[ModelMenuRow], id: &str) -> usize {
     menu.iter()
         .position(|row| matches!(row, ModelMenuRow::Model { id: mid, .. } if mid == id))
-        .unwrap_or_else(|| menu.iter().position(|row| matches!(row, ModelMenuRow::Model { .. })).unwrap_or(0))
+        .unwrap_or_else(|| {
+            menu.iter()
+                .position(|row| matches!(row, ModelMenuRow::Model { .. }))
+                .unwrap_or(0)
+        })
 }
 
 pub fn menu_id_at(menu: &[ModelMenuRow], idx: usize) -> Option<String> {
@@ -223,10 +230,7 @@ pub(crate) fn parse_catalog(body: &serde_json::Value) -> Result<Vec<ModelChoice>
                 }
             }
         }
-        let name = item
-            .get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or(id);
+        let name = item.get("name").and_then(|n| n.as_str()).unwrap_or(id);
         out.push(ModelChoice {
             id: id.to_string(),
             label: name.to_string(),
@@ -242,7 +246,10 @@ pub fn load_providers() -> Vec<String> {
             names.dedup();
             let mut out = vec![AUTO_PROVIDER.to_string()];
             out.extend(names);
-            eprintln!("stream-recorder: loaded {} OpenRouter providers", out.len() - 1);
+            eprintln!(
+                "stream-recorder: loaded {} OpenRouter providers",
+                out.len() - 1
+            );
             out
         }
         Ok(_) | Err(_) => {
@@ -308,7 +315,9 @@ mod tests {
         ];
         let menu = model_menu(&list);
         assert!(matches!(&menu[0], ModelMenuRow::Header(h) if h == "Anthropic"));
-        assert!(matches!(&menu[1], ModelMenuRow::Model { label, .. } if label == "Claude Sonnet 4"));
+        assert!(
+            matches!(&menu[1], ModelMenuRow::Model { label, .. } if label == "Claude Sonnet 4")
+        );
         assert!(matches!(&menu[2], ModelMenuRow::Header(h) if h == "Google"));
         assert_eq!(menu_id_at(&menu, 0), None);
         assert_eq!(

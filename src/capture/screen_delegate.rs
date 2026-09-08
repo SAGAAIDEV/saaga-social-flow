@@ -178,7 +178,9 @@ impl ScreenDelegate {
 
         // Where the frame lands in the file, or nowhere: before this chapter's
         // anchor, during a break, or straggling in from one — see `Pause::place`.
-        let Some(placed) = state.pause.place(pts) else { return };
+        let Some(placed) = state.pause.place(pts) else {
+            return;
+        };
 
         // Run this chapter's op graph. Its `Run` is deliberately discarded
         // until the writers are per-sink — the append below is byte-for-byte

@@ -39,7 +39,7 @@
 
 use std::ptr::NonNull;
 
-use objc2_core_foundation::{CGAffineTransform, CGRect, CGPoint, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColorSpace;
 use objc2_core_image::kCIFormatRGBA8;
 use objc2_core_video::{CVImageBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth};
@@ -103,8 +103,7 @@ impl Sampler {
         );
 
         if self.shaped != Some(size) {
-            self.buffer
-                .resize(size.0 as usize * size.1 as usize * 4, 0);
+            self.buffer.resize(size.0 as usize * size.1 as usize * 4, 0);
             self.shaped = Some(size);
         }
 
@@ -134,14 +133,16 @@ impl Sampler {
         // borrowed for the call; `bounds` is the region being written and
         // matches that shape.
         unsafe {
-            self.renderer.context().render_toBitmap_rowBytes_bounds_format_colorSpace(
-                &scaled,
-                NonNull::new(self.buffer.as_mut_ptr().cast())?,
-                row_bytes,
-                bounds,
-                kCIFormatRGBA8,
-                self.color_space.as_deref(),
-            );
+            self.renderer
+                .context()
+                .render_toBitmap_rowBytes_bounds_format_colorSpace(
+                    &scaled,
+                    NonNull::new(self.buffer.as_mut_ptr().cast())?,
+                    row_bytes,
+                    bounds,
+                    kCIFormatRGBA8,
+                    self.color_space.as_deref(),
+                );
         }
 
         Some(Rgba {

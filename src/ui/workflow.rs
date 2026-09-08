@@ -11,12 +11,27 @@ pub const STEPS: [(&str, &str, &[&str]); 4] = [
     ("video", "Video recording", &["draft"]),
     ("youtube", "YouTube", &["youtube"]),
     ("blog", "Blog (Strapi)", &["blog"]),
-    ("socials", "Socials", &["post", "distribute", "schedule", "analytics", "reflect"]),
+    (
+        "socials",
+        "Socials",
+        &["post", "distribute", "schedule", "analytics", "reflect"],
+    ),
 ];
 
-pub fn attach(root: &NSTabView, bounds: NSRect, mtm: MainThreadMarker, panes: &[(&str, &NSTabViewItem)]) {
+pub fn attach(
+    root: &NSTabView,
+    bounds: NSRect,
+    mtm: MainThreadMarker,
+    panes: &[(&str, &NSTabViewItem)],
+) {
     for (id, label, children) in STEPS {
-        let pane = |key: &str| panes.iter().find(|(name, _)| *name == key).expect("workflow pane exists").1;
+        let pane = |key: &str| {
+            panes
+                .iter()
+                .find(|(name, _)| *name == key)
+                .expect("workflow pane exists")
+                .1
+        };
         if children.len() == 1 {
             let item = pane(children[0]);
             item.setLabel(&NSString::from_str(label));
@@ -25,9 +40,14 @@ pub fn attach(root: &NSTabView, bounds: NSRect, mtm: MainThreadMarker, panes: &[
             let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), bounds);
             super::fill_parent(&tabs);
             tabs.setTabViewType(NSTabViewType::TopTabsBezelBorder);
-            for child in children { tabs.addTabViewItem(pane(child)); }
+            for child in children {
+                tabs.addTabViewItem(pane(child));
+            }
             let item = unsafe {
-                NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str(id)))
+                NSTabViewItem::initWithIdentifier(
+                    NSTabViewItem::alloc(),
+                    Some(&NSString::from_str(id)),
+                )
             };
             item.setLabel(&NSString::from_str(label));
             item.setView(Some(&tabs));
@@ -41,8 +61,14 @@ mod tests {
     use super::*;
     #[test]
     fn the_workflow_has_four_ordered_steps_and_each_pane_once() {
-        assert_eq!(STEPS.map(|(id, _, _)| id), ["video", "youtube", "blog", "socials"]);
-        let children: Vec<_> = STEPS.iter().flat_map(|(_, _, children)| children.iter().copied()).collect();
+        assert_eq!(
+            STEPS.map(|(id, _, _)| id),
+            ["video", "youtube", "blog", "socials"]
+        );
+        let children: Vec<_> = STEPS
+            .iter()
+            .flat_map(|(_, _, children)| children.iter().copied())
+            .collect();
         assert_eq!(children.len(), 8);
         assert!(!children.contains(&"render"));
         let unique: std::collections::HashSet<_> = children.iter().collect();

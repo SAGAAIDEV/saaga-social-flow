@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Which kind of event a line in `chapters.jsonl` records.
 ///
@@ -153,7 +153,9 @@ mod wire_tests {
     #[test]
     fn closed_at_is_the_real_calendar_date() {
         use chrono::TimeZone;
-        let at = chrono::Utc.with_ymd_and_hms(2026, 8, 29, 21, 24, 33).unwrap()
+        let at = chrono::Utc
+            .with_ymd_and_hms(2026, 8, 29, 21, 24, 33)
+            .unwrap()
             + chrono::Duration::microseconds(706_060);
         assert_eq!(iso8601(at), "2026-08-29T21:24:33.706060Z");
         let now = iso8601_now();

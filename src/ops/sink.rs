@@ -110,7 +110,10 @@ mod tests {
         let spec = OutputSpec::new("pip", 1920, 1080);
         assert_eq!(spec.file_name(1), "chapter-01-pip.mp4");
         assert_eq!(spec.file_name(10), "chapter-10-pip.mp4");
-        assert_eq!(OutputSpec::new("screen", 3456, 2234).file_name(9), "chapter-09-screen.mp4");
+        assert_eq!(
+            OutputSpec::new("screen", 3456, 2234).file_name(9),
+            "chapter-09-screen.mp4"
+        );
     }
 
     #[test]

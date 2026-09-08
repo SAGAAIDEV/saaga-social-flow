@@ -289,7 +289,10 @@ fn handle(stream: TcpStream) -> Result<Option<(String, String)>> {
     }
 
     if let Some(reason) = denied {
-        respond(&stream, "Authorization was declined. You can close this window.");
+        respond(
+            &stream,
+            "Authorization was declined. You can close this window.",
+        );
         bail!("Google returned an error on the callback: {reason}");
     }
     match (code, state) {
@@ -298,7 +301,10 @@ fn handle(stream: TcpStream) -> Result<Option<(String, String)>> {
             Ok(Some((code, state)))
         }
         _ => {
-            respond(&stream, "That callback had no code. You can close this window.");
+            respond(
+                &stream,
+                "That callback had no code. You can close this window.",
+            );
             bail!("the Google callback carried no authorization code");
         }
     }

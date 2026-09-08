@@ -53,10 +53,10 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use crate::layouts::Orientation;
-use draw::draw;
-use hit::{grab_anywhere, Drag, Grabbed};
 use crate::region::{DisplayGeometry, PointRect};
 use crate::ui::UiEvent;
+use draw::draw;
+use hit::{grab_anywhere, Drag, Grabbed};
 
 /// How a region follows another one during a drag.
 ///

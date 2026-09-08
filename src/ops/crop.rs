@@ -196,10 +196,7 @@ impl Crop {
     /// frame, so it needs the frame's extent.
     pub fn source_rect(&self, source_height: f64) -> CGRect {
         let (x, y, w, h) = self.source;
-        CGRect::new(
-            CGPoint::new(x, source_height - y - h),
-            CGSize::new(w, h),
-        )
+        CGRect::new(CGPoint::new(x, source_height - y - h), CGSize::new(w, h))
     }
 }
 
@@ -266,7 +263,6 @@ impl VideoOp for Crop {
         Ok(())
     }
 }
-
 
 /// Cover a source frame into a fixed slot — `object-fit: cover` plus scale.
 ///

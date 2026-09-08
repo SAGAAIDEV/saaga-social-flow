@@ -42,14 +42,11 @@ pub fn render_plan(
     status: &dyn Fn(&str),
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<PathBuf> {
-    std::fs::create_dir_all(publish)
-        .with_context(|| format!("creating {}", publish.display()))?;
+    std::fs::create_dir_all(publish).with_context(|| format!("creating {}", publish.display()))?;
     let h_dir = publish.join("horizontal");
     let v_dir = publish.join("vertical");
-    std::fs::create_dir_all(&h_dir)
-        .with_context(|| format!("creating {}", h_dir.display()))?;
-    std::fs::create_dir_all(&v_dir)
-        .with_context(|| format!("creating {}", v_dir.display()))?;
+    std::fs::create_dir_all(&h_dir).with_context(|| format!("creating {}", h_dir.display()))?;
+    std::fs::create_dir_all(&v_dir).with_context(|| format!("creating {}", v_dir.display()))?;
 
     // Destinations are derived from the plan up front, so the concat below reads
     // them in chapter order no matter which worker finished first. A passthrough
@@ -106,7 +103,9 @@ pub fn render_plan(
     }
     let all = skipped.len() + pending.len();
     progress(skipped.len(), all);
-    render_all(&pending, &|finished| progress(skipped.len() + finished, all))?;
+    render_all(&pending, &|finished| {
+        progress(skipped.len() + finished, all)
+    })?;
 
     // The one step after the renders with a wait worth naming: the cards are
     // conformed to the footage and everything is joined.
@@ -413,7 +412,10 @@ mod tests {
                 capture_budget(cores)
             );
             assert!(pool_size(cores) >= 1, "{cores} cores renders nothing");
-            assert!(workers_per_render(cores) >= 1, "{cores} cores has no workers");
+            assert!(
+                workers_per_render(cores) >= 1,
+                "{cores} cores has no workers"
+            );
         }
     }
 
@@ -486,9 +488,7 @@ mod tests {
             .iter()
             .map(|s| match s {
                 Segment::Render(job) => job.id.clone(),
-                Segment::Passthrough(p) => {
-                    p.file_name().unwrap().to_string_lossy().into_owned()
-                }
+                Segment::Passthrough(p) => p.file_name().unwrap().to_string_lossy().into_owned(),
             })
             .collect();
         assert_eq!(
@@ -540,7 +540,10 @@ mod tests {
         let dest = dir.join("out.mp4");
         std::fs::write(&source, "x").unwrap();
         std::fs::write(&dest, "").unwrap();
-        assert!(!is_fresh(&dest, &[source]), "a zero-byte render is a failed render");
+        assert!(
+            !is_fresh(&dest, &[source]),
+            "a zero-byte render is a failed render"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -610,4 +613,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

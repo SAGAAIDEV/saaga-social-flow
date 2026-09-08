@@ -13,9 +13,8 @@ use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_av_foundation::{
-    AVCaptureAudioDataOutput, AVCaptureDeviceInput, AVCaptureSession,
-    AVCaptureVideoDataOutput, AVFileTypeAppleM4A, AVFileTypeMPEG4, AVMediaTypeAudio,
-    AVMediaTypeVideo,
+    AVCaptureAudioDataOutput, AVCaptureDeviceInput, AVCaptureSession, AVCaptureVideoDataOutput,
+    AVFileTypeAppleM4A, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo,
 };
 
 use std::time::Duration;
@@ -122,10 +121,12 @@ impl Connection {
             .ok_or_else(|| anyhow!("no audio device with uid {audio_uid}"))?;
 
         // Create inputs.
-        let video_input_dev = unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&video_device) }
-            .map_err(|e| anyhow!("could not open video input: {e:?}"))?;
-        let audio_input_dev = unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&audio_device) }
-            .map_err(|e| anyhow!("could not open audio input: {e:?}"))?;
+        let video_input_dev =
+            unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&video_device) }
+                .map_err(|e| anyhow!("could not open video input: {e:?}"))?;
+        let audio_input_dev =
+            unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&audio_device) }
+                .map_err(|e| anyhow!("could not open audio input: {e:?}"))?;
 
         // Create outputs.
         let video_output = unsafe { AVCaptureVideoDataOutput::new() };
@@ -260,13 +261,12 @@ impl Connection {
             pool: None,
         })?;
 
-        let state =
-            crate::capture::av_delegate::AvState::new_for_chapter(
-                chapter_writer,
-                Vec::new(),
-                anchor,
-                graph,
-            );
+        let state = crate::capture::av_delegate::AvState::new_for_chapter(
+            chapter_writer,
+            Vec::new(),
+            anchor,
+            graph,
+        );
         *self.delegate.state_arc().lock().unwrap() = Some(state);
         Ok(())
     }
@@ -432,8 +432,8 @@ pub fn create_audio_writer(
 ) -> Result<AudioWriter> {
     let audio_type =
         unsafe { AVMediaTypeAudio }.ok_or_else(|| anyhow!("AVMediaTypeAudio unavailable"))?;
-    let file_type = unsafe { AVFileTypeAppleM4A }
-        .ok_or_else(|| anyhow!("AVFileTypeAppleM4A unavailable"))?;
+    let file_type =
+        unsafe { AVFileTypeAppleM4A }.ok_or_else(|| anyhow!("AVFileTypeAppleM4A unavailable"))?;
 
     // Same reasoning as the chapter writer: the folder can have gone away, and
     // AVAssetWriter's error for that names neither the path nor the cause.
@@ -482,7 +482,11 @@ pub fn interactive_connect(reselect_camera: bool, reselect_mic: bool) -> Result<
         bail!("no camera devices found");
     }
 
-    let chosen_camera_uid = match device_picker::resolve_default(cfg.camera_device_uid.as_deref(), &camera_devices, reselect_camera) {
+    let chosen_camera_uid = match device_picker::resolve_default(
+        cfg.camera_device_uid.as_deref(),
+        &camera_devices,
+        reselect_camera,
+    ) {
         Some(uid) => uid,
         None => {
             if let Some(saved) = &cfg.camera_device_uid {
@@ -506,10 +510,7 @@ pub fn interactive_connect(reselect_camera: bool, reselect_mic: bool) -> Result<
         .iter()
         .find(|d| d.uid == chosen_camera_uid)
         .unwrap();
-    println!(
-        "stream-recorder: using camera \"{}\"",
-        chosen_camera.name
-    );
+    println!("stream-recorder: using camera \"{}\"", chosen_camera.name);
 
     // Select microphone.
     let audio_devices = list_audio_devices()?;
@@ -517,7 +518,11 @@ pub fn interactive_connect(reselect_camera: bool, reselect_mic: bool) -> Result<
         bail!("no audio input devices found");
     }
 
-    let chosen_audio_uid = match device_picker::resolve_default(cfg.audio_device_uid.as_deref(), &audio_devices, reselect_mic) {
+    let chosen_audio_uid = match device_picker::resolve_default(
+        cfg.audio_device_uid.as_deref(),
+        &audio_devices,
+        reselect_mic,
+    ) {
         Some(uid) => uid,
         None => {
             if let Some(saved) = &cfg.audio_device_uid {
@@ -546,9 +551,7 @@ pub fn interactive_connect(reselect_camera: bool, reselect_mic: bool) -> Result<
     // Request permissions.
     println!("stream-recorder: requesting camera access...");
     if !permissions::ensure_video_access()? {
-        bail!(
-            "camera access denied — enable it in System Settings > Privacy & Security > Camera"
-        );
+        bail!("camera access denied — enable it in System Settings > Privacy & Security > Camera");
     }
 
     println!("stream-recorder: requesting microphone access...");
@@ -608,7 +611,10 @@ mod devices_live {
         println!("\nconfig audio_device_uid = {saved:?}");
         match saved.as_deref() {
             Some(uid) if mics.iter().any(|d| d.uid == uid) => {
-                println!("  -> matches {:?}", mics.iter().find(|d| d.uid == uid).unwrap().name)
+                println!(
+                    "  -> matches {:?}",
+                    mics.iter().find(|d| d.uid == uid).unwrap().name
+                )
             }
             Some(_) => println!("  -> NO MATCH, falls back to [0] {:?}", mics[0].name),
             None => println!("  -> unset, falls back to [0] {:?}", mics[0].name),
@@ -642,7 +648,9 @@ mod capture_live {
             .filter(|uid| mics.iter().any(|d| &d.uid == uid))
             .unwrap_or_else(|| mics[0].uid.clone());
         let name = &mics.iter().find(|d| d.uid == uid).unwrap().name;
-        let camera = super::list_camera_devices().expect("cameras")[0].uid.clone();
+        let camera = super::list_camera_devices().expect("cameras")[0]
+            .uid
+            .clone();
         println!("opening mic {name:?}");
 
         let conn = super::Connection::start_capture(&camera, &uid).expect("capture");

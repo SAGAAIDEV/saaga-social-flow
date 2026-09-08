@@ -107,14 +107,20 @@ impl Plan {
 /// laid out the old way keeps working.
 pub fn components_root() -> PathBuf {
     let vendored = Path::new(env!("CARGO_MANIFEST_DIR")).join("components");
-    if vendored.join("compositions/chapter-title-card.html").is_file() {
+    if vendored
+        .join("compositions/chapter-title-card.html")
+        .is_file()
+    {
         return vendored;
     }
     if let Some(beside_exe) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("components")))
     {
-        if beside_exe.join("compositions/chapter-title-card.html").is_file() {
+        if beside_exe
+            .join("compositions/chapter-title-card.html")
+            .is_file()
+        {
             return beside_exe;
         }
     }
@@ -128,7 +134,10 @@ pub fn prepare(
     titles: &[(u32, String)],
     project_title: &str,
 ) -> Result<Plan> {
-    if !library.join("compositions/chapter-title-card.html").is_file() {
+    if !library
+        .join("compositions/chapter-title-card.html")
+        .is_file()
+    {
         bail!("HyperFrames library missing at {}", library.display());
     }
     let horizontal = compose_root.join("horizontal");
@@ -204,7 +213,10 @@ pub fn prepare(
     // asking for a *rendered* segment here meant a single-chapter video got no
     // title card at all, because chapter one no longer has a card of its own.
     if !h_segments.is_empty() {
-        h_segments.insert(0, Segment::Render(write_opener(&horizontal, project_title)?));
+        h_segments.insert(
+            0,
+            Segment::Render(write_opener(&horizontal, project_title)?),
+        );
     }
 
     let first_render = h_segments
@@ -237,10 +249,7 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
         "{{\n  \"name\": \"stream-recorder-compose\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"render\": \"npx --yes hyperframes@{HF_VERSION} render\"\n  }}\n}}\n"
     );
     std::fs::write(root.join("package.json"), package)?;
-    std::fs::write(
-        root.join("index.html"),
-        blank_index(width, height),
-    )?;
+    std::fs::write(root.join("index.html"), blank_index(width, height))?;
     Ok(())
 }
 
@@ -371,10 +380,7 @@ fn write_opener(workspace: &Path, project_title: &str) -> Result<Job> {
 fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<Job> {
     let block = "chapter-title-card";
     let library = workspace.join(format!("compositions/{block}.html"));
-    let baked = library
-        .parent()
-        .unwrap()
-        .join(format!("{id}.{block}.html"));
+    let baked = library.parent().unwrap().join(format!("{id}.{block}.html"));
     copy_if_changed(&library, &baked)?;
     let wrapper = write_wrapper(
         workspace,
@@ -529,8 +535,8 @@ fn write_wrapper(
 
 fn write_index(workspace: &Path, job: &Job) -> Result<()> {
     let src = workspace.join(&job.composition);
-    let body = std::fs::read_to_string(&src)
-        .with_context(|| format!("reading {}", src.display()))?;
+    let body =
+        std::fs::read_to_string(&src).with_context(|| format!("reading {}", src.display()))?;
     std::fs::write(workspace.join("index.html"), body)?;
     Ok(())
 }
@@ -596,9 +602,13 @@ mod tests {
     /// quietly produce another ten-second clip inside a two-minute chapter.
     #[test]
     fn a_block_without_the_declared_default_is_an_error() {
-        let err = bake_duration("<div data-duration=\"12\"></div>", 30.0, "talking-head-vertical")
-            .unwrap_err()
-            .to_string();
+        let err = bake_duration(
+            "<div data-duration=\"12\"></div>",
+            30.0,
+            "talking-head-vertical",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("talking-head-vertical"), "{err}");
         assert!(err.contains("goes blank"), "{err}");
     }
@@ -623,7 +633,8 @@ mod tests {
         )
         .unwrap();
         let html = std::fs::read_to_string(dir.join("compositions/seg-01-card.html")).unwrap();
-        assert!(html.contains("data-composition-src=\"compositions/seg-01-card.chapter-title-card.html\""));
+        assert!(html
+            .contains("data-composition-src=\"compositions/seg-01-card.chapter-title-card.html\""));
         assert!(html.contains("Hello"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -708,7 +719,14 @@ mod tests {
     #[test]
     fn the_badge_the_card_draws_travels_into_the_workspace() {
         let (library, edit, compose) = fixture("badge");
-        prepare(&edit, &compose, &library, &[(1u32, "Only".into())], "A video").unwrap();
+        prepare(
+            &edit,
+            &compose,
+            &library,
+            &[(1u32, "Only".into())],
+            "A video",
+        )
+        .unwrap();
         assert!(
             compose.join("horizontal/assets/badge.svg").is_file(),
             "the separator mark is missing from the workspace"
@@ -731,7 +749,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.h_segments.len(), 2, "the title and the one body");
-        assert_eq!(plan.h_segments[0].job().map(|j| j.id.as_str()), Some("seg-00-opener"));
+        assert_eq!(
+            plan.h_segments[0].job().map(|j| j.id.as_str()),
+            Some("seg-00-opener")
+        );
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
@@ -811,7 +832,9 @@ mod library_tests {
     fn the_library_resolves_inside_this_repo() {
         let library = components_root();
         assert!(
-            library.join("compositions/chapter-title-card.html").is_file(),
+            library
+                .join("compositions/chapter-title-card.html")
+                .is_file(),
             "library did not resolve to the vendored copy: {}",
             library.display()
         );
@@ -834,9 +857,13 @@ mod library_tests {
             "assets/placeholder-audio.mp3",
             "assets/placeholder-screen.mp4",
         ];
-        let Ok(entries) = std::fs::read_dir(library.join("compositions")) else { return };
+        let Ok(entries) = std::fs::read_dir(library.join("compositions")) else {
+            return;
+        };
         for entry in entries.flatten() {
-            let Ok(html) = std::fs::read_to_string(entry.path()) else { continue };
+            let Ok(html) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
             for rel in referenced_assets(&html) {
                 if substituted.contains(&rel.as_str()) {
                     continue;
@@ -858,8 +885,8 @@ mod library_tests {
     /// own could notice. This is the one that runs the real thing.
     #[test]
     fn prepare_succeeds_against_the_vendored_library() {
-        let root = std::env::temp_dir()
-            .join(format!("stream-recorder-vendored-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-vendored-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (edit, compose) = (root.join("edit"), root.join("compose"));
         for n in 1..=2 {

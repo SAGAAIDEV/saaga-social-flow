@@ -161,8 +161,16 @@ fn collect_assets(render_dir: &Path, drafts: &Path, root: &Path) -> Result<Vec<A
         if root.join(crate::card::assets::MANIFEST).exists() {
             let set = crate::card::assets::ready(root)?;
             for (kind, id, orientation) in [
-                (crate::card::assets::Kind::Horizontal, "thumbnail", "landscape"),
-                (crate::card::assets::Kind::Vertical, "thumbnail-vertical", "portrait"),
+                (
+                    crate::card::assets::Kind::Horizontal,
+                    "thumbnail",
+                    "landscape",
+                ),
+                (
+                    crate::card::assets::Kind::Vertical,
+                    "thumbnail-vertical",
+                    "portrait",
+                ),
                 (crate::card::assets::Kind::Og, "og-image", "landscape"),
             ] {
                 let source = set.path(root, kind)?;
@@ -171,8 +179,14 @@ fn collect_assets(render_dir: &Path, drafts: &Path, root: &Path) -> Result<Vec<A
                 std::fs::create_dir_all(&export_dir)?;
                 let path = export_dir.join(format!("{}-{}.jpg", set.id, kind.name()));
                 std::fs::copy(source, &path)?;
-                assets.push(Asset { id: id.into(), kind: AssetKind::Image, path,
-                    content_type: "image/jpeg", orientation: Some(orientation.into()), chapter: None });
+                assets.push(Asset {
+                    id: id.into(),
+                    kind: AssetKind::Image,
+                    path,
+                    content_type: "image/jpeg",
+                    orientation: Some(orientation.into()),
+                    chapter: None,
+                });
             }
         } else if let Some(thumbnail) = chosen_thumbnail(root) {
             assets.push(thumbnail);
@@ -211,7 +225,8 @@ fn chosen_thumbnail(root: &Path) -> Option<Asset> {
 
 fn chapter_transcript(drafts: &Path, n: u32) -> Option<String> {
     let path = drafts.join(format!("chapter-{n:02}.transcript.json"));
-    let parsed: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
     parsed
         .get("text")
         .and_then(|t| t.as_str())
@@ -276,8 +291,7 @@ mod tests {
     #[test]
     fn collect_empty_without_renders() {
         let root = temp("empty");
-        let assets =
-            collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
+        let assets = collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
         assert!(assets.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -330,7 +344,9 @@ mod tests {
             .expect("the activated thumbnail");
         assert_eq!(thumb.kind, AssetKind::Image);
         assert_eq!(thumb.content_type, "image/jpeg");
-        assert!(thumb.path.ends_with("thumbnails/candidates/thumb-abc123.jpg"));
+        assert!(thumb
+            .path
+            .ends_with("thumbnails/candidates/thumb-abc123.jpg"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -340,8 +356,7 @@ mod tests {
     fn a_thumbnail_alone_is_not_a_distribution() {
         let root = temp("thumbnail-only");
         activated_thumbnail(&root, "thumb-abc123");
-        let assets =
-            collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
+        let assets = collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
         assert!(assets.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -372,9 +387,13 @@ mod tests {
         for id in ["thumbnail", "thumbnail-vertical", "og-image"] {
             let asset = assets.iter().find(|asset| asset.id == id).unwrap();
             assert_eq!(asset.kind, AssetKind::Image);
-            assert!(asset.path.file_name().unwrap().to_string_lossy().contains(&set.id));
+            assert!(asset
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(&set.id));
         }
         std::fs::remove_dir_all(root).unwrap();
     }
-
 }

@@ -41,9 +41,9 @@ use std::thread;
 use anyhow::{Context, Result};
 
 pub mod auto;
-mod wire;
 #[cfg(test)]
 mod tests;
+mod wire;
 
 pub use wire::Blurb;
 
@@ -90,12 +90,7 @@ significance, and do not begin with "image of" or "screenshot of".
 "#;
 
 /// Write blurbs for every figure that has none, on a worker thread.
-pub fn spawn(
-    session: Session,
-    model: String,
-    provider: Option<String>,
-    tx: Sender<FigureEvent>,
-) {
+pub fn spawn(session: Session, model: String, provider: Option<String>, tx: Sender<FigureEvent>) {
     let _ = thread::Builder::new()
         .name("figure-blurbs".into())
         .spawn(move || {
@@ -177,7 +172,8 @@ pub fn context_for(root: &Path, figure: &Figure, title: String) -> String {
     let said = figure.said.trim();
     if !said.is_empty() {
         lines.push(String::new());
-        lines.push("The author paused the recording to explain this figure. They said:".to_string());
+        lines
+            .push("The author paused the recording to explain this figure. They said:".to_string());
         lines.push(said.to_string());
     }
     match spoken_around(root, figure) {

@@ -6,6 +6,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAutoresizingMaskOptions, NSButton, NSPopUpButton, NSSplitView, NSSplitViewDividerStyle,
@@ -20,11 +21,8 @@ use objc2_core_media::{
     CMVideoFormatDescription, CMVideoFormatDescriptionCreateForImageBuffer,
 };
 use objc2_core_video::CVImageBuffer;
-use objc2_foundation::{
-    NSMutableDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString,
-};
+use objc2_foundation::{NSMutableDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CAAutoresizingMask, CALayer};
-use objc2::runtime::ProtocolObject;
 
 use crate::ops::PreviewPort;
 
@@ -140,10 +138,8 @@ impl PreviewHost {
             NSSize::new(MOUSE_W, BAR_H),
         ));
         let split_h = (h - BAR_H - GAP).max(40.0);
-        self.split.setFrame(NSRect::new(
-            NSPoint::new(0.0, 0.0),
-            NSSize::new(w, split_h),
-        ));
+        self.split
+            .setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, split_h)));
         self.horizontal.fit();
         self.vertical.fit();
     }
@@ -178,12 +174,7 @@ impl PreviewHost {
 }
 
 impl PreviewSlot {
-    fn attach(
-        mtm: MainThreadMarker,
-        name: &'static str,
-        title: &str,
-        aspect: f64,
-    ) -> PreviewSlot {
+    fn attach(mtm: MainThreadMarker, name: &'static str, title: &str, aspect: f64) -> PreviewSlot {
         let pane = NSView::initWithFrame(
             NSView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(80.0, 80.0)),
@@ -269,7 +260,8 @@ impl PreviewSlot {
             return;
         };
         let pts = frame.pts;
-        if pts.value == self.last_pts_value.get() && pts.timescale == self.last_pts_timescale.get() {
+        if pts.value == self.last_pts_value.get() && pts.timescale == self.last_pts_timescale.get()
+        {
             return;
         }
         self.last_pts_value.set(pts.value);

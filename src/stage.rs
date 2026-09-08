@@ -120,7 +120,9 @@ impl Stages {
         // points — there is no separate tab to go and press.
         let artwork = crate::card::assets::ready(&session.root)
             .map(|_| ())
-            .map_err(|err| format!("Artwork is not ready: {err:#} — press Render video and thumbnails"));
+            .map_err(|err| {
+                format!("Artwork is not ready: {err:#} — press Render video and thumbnails")
+            });
         let artwork_reason = artwork.as_ref().err().map(String::as_str).unwrap_or("");
         let has_thumbnail = (artwork.is_ok(), artwork_reason);
         // Reads the same config the pane does, so the button and the dropdown
@@ -290,17 +292,31 @@ mod tests {
         let stages = Stages::read(&session(&root), Busy::default());
         // YouTube precedes social posts but requires its complete artwork set.
         assert!(!root.join("posts/posts.json").exists());
-        assert!(stages.publish.missing().unwrap().contains("Artwork is not ready"));
-        assert!(stages.publish.missing().unwrap().contains("Render video and thumbnails"));
+        assert!(stages
+            .publish
+            .missing()
+            .unwrap()
+            .contains("Artwork is not ready"));
+        assert!(stages
+            .publish
+            .missing()
+            .unwrap()
+            .contains("Render video and thumbnails"));
         crate::card::assets::fixture(&root);
-        assert!(Stages::read(&session(&root), Busy::default()).publish.is_ready());
+        assert!(Stages::read(&session(&root), Busy::default())
+            .publish
+            .is_ready());
         // A stale set is refused with the reason it went stale, rather than
         // reading the same as a set that was never drawn — the case that had
         // the blog saying "generate artwork" over artwork that was right there.
         let mut design = crate::card::load(&root);
         design.title = "A different title".into();
         crate::card::save(&root, &design).unwrap();
-        let reason = Stages::read(&session(&root), Busy::default()).publish.missing().unwrap().to_string();
+        let reason = Stages::read(&session(&root), Busy::default())
+            .publish
+            .missing()
+            .unwrap()
+            .to_string();
         assert!(reason.contains("Design changed"), "{reason}");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -325,8 +341,13 @@ mod tests {
         let stages = Stages::read(&session(&root), Busy::default());
         assert!(stages.substack.missing().unwrap().contains("No chapters"));
         write(root.join("drafts/chapter-01.mp4"));
-        assert!(Stages::read(&session(&root), Busy::default()).substack.is_ready());
-        let busy = Busy { substack: true, ..Busy::default() };
+        assert!(Stages::read(&session(&root), Busy::default())
+            .substack
+            .is_ready());
+        let busy = Busy {
+            substack: true,
+            ..Busy::default()
+        };
         assert_eq!(Stages::read(&session(&root), busy).substack, Gate::Busy);
         let _ = std::fs::remove_dir_all(&root);
     }
