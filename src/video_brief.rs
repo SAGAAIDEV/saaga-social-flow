@@ -143,19 +143,51 @@ pub fn generate(source: &Source, model: &str, provider: Option<&str>) -> Result<
     )?;
     validate_generated(copy)
 }
+/// The artwork's comfortable limits: 60 characters of title, 140 of
+/// description. Asked for in the prompt, and *not* enforced — see
+/// [`validate_generated`].
+pub const ARTWORK_TITLE: usize = 60;
+pub const ARTWORK_DESCRIPTION: usize = 140;
+
 fn validate_generated(copy: Generated) -> Result<Metadata> {
     let metadata = Metadata {
         title: copy.title.trim().into(),
         description: copy.description.trim().into(),
     };
+    // YouTube's own limits only — a title over 100 characters or a description
+    // over 5,000 is rejected by the API, so copy that breaks those is not copy
+    // anyone can use.
+    //
+    // The artwork limits above are deliberately *not* enforced. They used to
+    // be, and throwing the copy away over them was the wrong trade: a title
+    // three characters long is a few seconds of editing, while regenerating
+    // costs a model call and usually lands somewhere equally arbitrary. The
+    // model is asked for the shorter shape and the pane says when it overshot
+    // — trimming it is the author's call, not a reason to hand back nothing.
     metadata.validate()?;
-    if metadata.title.chars().count() > 60
-        || metadata.description.is_empty()
-        || metadata.description.chars().count() > 140
-    {
-        bail!("The generated copy was too long or incomplete. Try generating again or write the title and description yourself.");
-    }
     Ok(metadata)
+}
+
+/// How the copy sits against the artwork limits, or `None` when it fits.
+///
+/// A note for the pane, never an error. Nothing downstream refuses copy for
+/// being long; the description simply gets tight on the card.
+pub fn artwork_note(metadata: &Metadata) -> Option<String> {
+    let title = metadata.title.chars().count();
+    let description = metadata.description.chars().count();
+    let mut over: Vec<String> = Vec::new();
+    if title > ARTWORK_TITLE {
+        over.push(format!("title is {title} characters (artwork fits {ARTWORK_TITLE})"));
+    }
+    if description > ARTWORK_DESCRIPTION {
+        over.push(format!(
+            "description is {description} (artwork fits {ARTWORK_DESCRIPTION})"
+        ));
+    }
+    if metadata.description.is_empty() {
+        over.push("no description was written".into());
+    }
+    (!over.is_empty()).then(|| format!("Saved, but {} — trim it here.", over.join(", ")))
 }
 
 #[cfg(test)]
@@ -328,47 +360,42 @@ mod tests {
         std::fs::remove_dir_all(session.root).unwrap();
     }
     #[test]
-    fn generated_copy_must_fit_artwork_and_contain_both_fields() {
-        assert!(validate_generated(Generated {
+    fn long_copy_is_kept_rather_than_thrown_away() {
+        // Over the artwork limits on every axis, and still returned: a long
+        // title is a few seconds of editing, where discarding it costs a model
+        // call and lands somewhere equally arbitrary.
+        let long = validate_generated(Generated {
             title: "x".repeat(61),
-            description: "Short.".into()
+            description: "y".repeat(200),
         })
-        .is_err());
-        assert!(validate_generated(Generated {
-            title: "Short".into(),
-            description: "x".repeat(141)
-        })
-        .is_err());
-        assert!(validate_generated(Generated {
-            title: "Short".into(),
-            description: "  ".into()
-        })
-        .is_err());
+        .expect("long copy is kept");
+        assert_eq!(long.title.chars().count(), 61);
+        assert!(artwork_note(&long).is_some(), "the pane should say it overshot");
+
+        let empty_description =
+            validate_generated(Generated { title: "Short".into(), description: "  ".into() })
+                .expect("a missing description is still savable copy");
+        assert!(artwork_note(&empty_description).is_some());
+
+        // YouTube's own limits stay enforced: past these the upload is refused,
+        // so there is nothing to hand back.
         assert!(validate_generated(Generated {
             title: " ".into(),
             description: "Short.".into()
         })
-        .is_err());
-        let copy = validate_generated(Generated {
-            title: "  Clear title  ".into(),
-            description: " Clear description. ".into(),
+        .is_err(), "an empty title is rejected by YouTube");
+        assert!(validate_generated(Generated {
+            title: "x".repeat(101),
+            description: "Short.".into()
+        })
+        .is_err(), "a 101-character title is rejected by YouTube");
+
+        // And copy that fits draws no note at all.
+        let fits = validate_generated(Generated {
+            title: "A clear short title".into(),
+            description: "One sentence that comfortably fits the card.".into(),
         })
         .unwrap();
-        assert_eq!(copy.title, "Clear title");
-        assert_eq!(copy.description, "Clear description.");
-        assert!(
-            generate(
-                &Source {
-                    notes: String::new(),
-                    transcript: String::new(),
-                    completed: 0,
-                    total: 0
-                },
-                "unused",
-                None
-            )
-            .is_err(),
-            "empty notes need no model call"
-        );
+        assert_eq!(artwork_note(&fits), None);
     }
 }

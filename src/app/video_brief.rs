@@ -148,13 +148,17 @@ impl App {
         let job = self.video_copy_job.take().expect("active job");
         let status = match result {
             Ok(metadata) => {
+                // Over the artwork limits is a note, not a failure — the copy is
+                // saved either way and trimming it here is quicker than another
+                // model call.
+                let note = video_brief::artwork_note(&metadata);
                 let brief = Brief {
                     notes: job.brief.notes,
                     title: metadata.title,
                     description: metadata.description,
                 };
                 match video_brief::sync(&job.session, &brief) {
-                    Ok(true) => "Title and description written, and shared with thumbnails and YouTube. Generate a fresh artwork set in Thumbnails.".into(),
+                    Ok(true) => note.unwrap_or_else(|| "Title and description written, and shared with thumbnails and YouTube. Generate a fresh artwork set in Thumbnails.".into()),
                     Ok(false) => "Copy saved, but needs a valid title before it can update thumbnails and YouTube.".into(),
                     Err(err) => format!("Could not save generated copy: {err:#}"),
                 }

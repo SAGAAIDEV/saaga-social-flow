@@ -850,6 +850,54 @@ mod library_tests {
         }
     }
 
+    /// `prepare` against the **real** vendored library, not a stub.
+    ///
+    /// Every other test here builds a synthetic library in a temp dir, which is
+    /// right for exercising the planning logic and useless for the failure that
+    /// actually happened: the library was absent, and no test that supplies its
+    /// own could notice. This is the one that runs the real thing.
+    #[test]
+    fn prepare_succeeds_against_the_vendored_library() {
+        let root = std::env::temp_dir()
+            .join(format!("stream-recorder-vendored-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (edit, compose) = (root.join("edit"), root.join("compose"));
+        for n in 1..=2 {
+            let chapter = edit.join(format!("chapter-{n:02}"));
+            std::fs::create_dir_all(&chapter).unwrap();
+            std::fs::write(chapter.join(format!("chapter-{n:02}-horizontal.mp4")), b"v").unwrap();
+        }
+
+        let plan = prepare(
+            &edit,
+            &compose,
+            &components_root(),
+            &[(1, "First".into()), (2, "Second".into())],
+            "A real video",
+        )
+        .expect("prepare against the vendored library");
+
+        // The exact files a render reads out of the workspace. `copy_library`
+        // skips a source that is not there rather than failing, so checking the
+        // destination is what proves the library actually carried them.
+        for rel in [
+            "horizontal/compositions/chapter-title-card.html",
+            "horizontal/assets/badge.svg",
+            "horizontal/assets/pattern-rings.svg",
+            "horizontal/assets/silence.mp3",
+            "horizontal/assets/fonts/Booton-Regular.woff2",
+            "vertical/compositions/talking-head-vertical.html",
+            "vertical/assets/fonts/Booton-Bold.woff2",
+        ] {
+            assert!(
+                compose.join(rel).is_file(),
+                "{rel} never reached the workspace — the library is incomplete"
+            );
+        }
+        assert!(plan.render_count() > 0, "nothing to render");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The `assets/...` paths a composition names.
     ///
     /// Hand-rolled rather than a regex dependency, and it stops at the first
