@@ -24,6 +24,12 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Report which API keys are set and where each one came from. No GUI window.
+    ///
+    /// The first thing to run on a new machine: it names the file it would
+    /// write, whether the team's shared credentials decrypted, and what is
+    /// still missing — without printing any secret.
+    Credentials,
     /// Build interactive article components from a recorded session. No publishing.
     BlogComponents(crate::blog::components::Args),
     /// Select a microphone and prove the connection works. No GUI window.

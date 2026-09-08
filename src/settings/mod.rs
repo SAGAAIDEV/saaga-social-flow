@@ -35,6 +35,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 pub mod check;
+pub mod sops;
 
 /// Which part of the workflow a credential unlocks — the pane's grouping, and
 /// the order it draws them in.
@@ -268,11 +269,28 @@ pub struct Status {
     /// For a secret: last four characters, or a length hint when it is too short
     /// to reveal any of. For a plain field: the whole value, so it can be edited.
     pub preview: String,
-    /// True when the live value came from the surrounding shell rather than the
-    /// file this pane edits. Saving still writes the file, but the shell wins on
-    /// next launch — so the pane says so rather than letting an edit look lost.
-    pub shadowed: bool,
+    /// Where the live value came from. With the shared credentials committed to
+    /// `dev.sops.env`, most values are not typed by the reader at all, and a
+    /// pane that showed them as "set" without saying by whom would invite
+    /// someone to retype a key they already have.
+    pub source: Source,
 }
+
+/// Which layer supplied a live value. Ordered as they are loaded, first wins —
+/// see [`crate::load_dotenv`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Source {
+    /// Exported in the shell the app was launched from. Beats everything, and
+    /// survives no edit made here.
+    Shell,
+    /// The `.env` this pane writes.
+    Local,
+    /// The team's committed `dev.sops.env`, decrypted at startup.
+    Team,
+    /// Nothing supplied it.
+    Unset,
+}
+
 
 /// Show enough of a secret to recognise it, and never enough to use it.
 fn preview(value: &str) -> String {
@@ -299,6 +317,19 @@ pub fn status() -> Vec<Status> {
             let live = std::env::var(f.key).unwrap_or_default();
             let live = live.trim();
             let on_file = stored.get(f.key).map(String::as_str).unwrap_or("").trim();
+            let from_team = sops::provided().get(f.key).map(String::as_str).unwrap_or("").trim();
+            // Local before team: the local file is loaded first and therefore
+            // wins, so when both carry the same value it is the local one in
+            // effect — and the local one is what this pane can actually change.
+            let source = if live.is_empty() {
+                Source::Unset
+            } else if on_file == live {
+                Source::Local
+            } else if from_team == live {
+                Source::Team
+            } else {
+                Source::Shell
+            };
             Status {
                 key: f.key,
                 label: f.label,
@@ -314,10 +345,78 @@ pub fn status() -> Vec<Status> {
                 } else {
                     live.to_string()
                 },
-                shadowed: !live.is_empty() && !on_file.is_empty() && live != on_file,
+                source,
             }
         })
         .collect()
+}
+
+/// Print what is set and where it came from, without printing a secret.
+///
+/// The headless twin of the Settings tab, for the case the tab cannot help
+/// with: something is wrong at launch, or the app is being set up over a
+/// terminal. Writes to `out` rather than stdout so the shape of the report can
+/// be asserted in a test.
+pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
+    let path = env_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "<no HOME>".into());
+    writeln!(out, "Local settings file: {path}")?;
+
+    match sops::path() {
+        Some(team) => {
+            let count = sops::provided().len();
+            if count == 0 {
+                writeln!(
+                    out,
+                    "Team credentials:    {} — NOT decrypted (see the message above)",
+                    team.display()
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "Team credentials:    {} — {count} keys decrypted",
+                    team.display()
+                )?;
+            }
+        }
+        None => writeln!(out, "Team credentials:    none in this directory")?,
+    }
+    writeln!(out)?;
+
+    let status = status();
+    for group in Group::ALL {
+        writeln!(out, "{}", group.title())?;
+        for (field, state) in FIELDS.iter().zip(&status) {
+            if field.group != group {
+                continue;
+            }
+            let mark = if state.set {
+                "ok"
+            } else if state.need == Need::Required {
+                "MISSING"
+            } else {
+                "--"
+            };
+            let from = match state.source {
+                Source::Team => "team",
+                Source::Local => "local",
+                Source::Shell => "shell",
+                Source::Unset => "",
+            };
+            writeln!(out, "  {mark:<8} {:<24} {from}", field.key)?;
+        }
+    }
+
+    let missing = missing_required();
+    writeln!(out)?;
+    if missing.is_empty() {
+        writeln!(out, "Every required key is set.")?;
+    } else {
+        writeln!(out, "{} required key(s) missing: {}", missing.len(), missing.join(", "))?;
+        writeln!(out, "Set them in the app's Settings tab, or in {path}.")?;
+    }
+    Ok(())
 }
 
 /// One heading in the pane, with the fields under it.
@@ -640,6 +739,24 @@ mod tests {
         assert_eq!(parsed.get("B").map(String::as_str), Some("two"));
         assert_eq!(parsed.get("C"), None);
         assert_eq!(parsed.get("D").map(String::as_str), Some("four"));
+    }
+
+    /// The report is what a teammate runs when something is wrong, so it has to
+    /// name every key and never print a value.
+    #[test]
+    fn the_report_names_every_key_and_leaks_none() {
+        // SAFETY: single-threaded test.
+        unsafe { std::env::set_var("STRAPI_API_TOKEN", "tok-supersecret-do-not-print") };
+        let mut out = Vec::new();
+        report(&mut out).expect("the report writes");
+        unsafe { std::env::remove_var("STRAPI_API_TOKEN") };
+
+        let text = String::from_utf8(out).expect("utf8");
+        for field in FIELDS {
+            assert!(text.contains(field.key), "the report omits {}", field.key);
+        }
+        assert!(!text.contains("supersecret"), "the report printed a secret:\n{text}");
+        assert!(text.contains("Local settings file:"), "{text}");
     }
 
     /// Every field the pane draws has to be one the app actually reads, or the

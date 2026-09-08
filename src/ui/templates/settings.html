@@ -43,6 +43,10 @@
   {% endif %}
   <p class="help" style="margin-top:6px">
     Editing <span class="path">{{ env_path }}</span>
+    {% if team_count %}
+      · {{ team_count }} shared {% if team_count == 1 %}key{% else %}keys{% endif %}
+      decrypted from <span class="path">dev.sops.env</span>
+    {% endif %}
   </p>
 </div>
 
@@ -66,15 +70,16 @@
     <div class="field">
       <div class="name">
         <label for="f-{{ field.key }}">{{ field.label }}</label>
-        {% if field.set %}
-          <span class="tag ok">set</span>
+        {% if field.source == "Team" %}
+          <span class="tag ok">from the team</span>
+        {% elif field.source == "Shell" %}
+          <span class="tag warn">from your shell</span>
+        {% elif field.set %}
+          <span class="tag ok">set here</span>
         {% elif field.need == "Required" %}
           <span class="tag bad">required</span>
         {% else %}
           <span class="tag">optional</span>
-        {% endif %}
-        {% if field.shadowed %}
-          <span class="tag warn">overridden by your shell</span>
         {% endif %}
       </div>
       <input
@@ -93,10 +98,15 @@
         {{ field.help }}
         {% if field.url %}<a href="{{ field.url }}" target="_blank">Get one →</a>{% endif %}
       </p>
-      {% if field.shadowed %}
+      {% if field.source == "Team" %}
         <p class="help">
-          A different value for this is exported in the shell you launched from, and that one
-          wins for this session. Saving still updates the file.
+          Comes from the team\'s <span class="path">dev.sops.env</span> — you do not need to
+          set it. Typing here creates a personal override that wins on this machine only.
+        </p>
+      {% elif field.source == "Shell" %}
+        <p class="help">
+          Exported in the shell you launched from, and that wins for this session. Saving
+          still updates the file.
         </p>
       {% endif %}
     </div>

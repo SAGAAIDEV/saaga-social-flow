@@ -116,6 +116,10 @@ pub(crate) fn load_dotenv() {
             }
         }
     }
+    // Last, so every `.env` above wins over it: the team file holds the shared
+    // saaga credentials, and a personal key or a shell export is an override of
+    // those rather than something they should silently replace.
+    settings::sops::load();
 }
 
 fn main() -> Result<()> {
@@ -137,7 +141,8 @@ fn main() -> Result<()> {
 
     if let Some(command) = &args.command {
         match command {
-            Command::BlogComponents(request) => return blog::components::run(request),
+            Command::Credentials => return settings::report(&mut std::io::stdout()),
+        Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,
                 format,

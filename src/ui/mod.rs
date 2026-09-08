@@ -1456,6 +1456,7 @@ pub fn settings_page(note: Option<&str>) -> String {
             sections => crate::settings::sections(),
             missing => crate::settings::missing_required(),
             env_path => path,
+            team_count => crate::settings::sops::provided().len(),
             saved => note.unwrap_or(""),
         },
     )
@@ -2713,6 +2714,8 @@ mod settings_pane_tests {
         unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
         assert!(!html.contains("topsecretvalue"), "the pane leaked a stored key");
         assert!(html.contains("…9999"), "the tail hint is missing: {html}");
+        // Not supplied by the team file in this test, so it must not claim to be.
+        assert!(!html.contains("from the team"), "misattributed a local value");
     }
 }
 

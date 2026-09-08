@@ -46,25 +46,60 @@ cargo run
 
 ## Configuration
 
-Open the app and go to the **Settings** tab. Every key the app needs is listed
-there, grouped by what it unlocks, with a link to where you get one and a
-**Test** button that makes a real call to the service and reports what came
-back. Saving applies straight away — no restart.
+### New machine
 
-Settings writes an ordinary `.env` file and names the one it is editing at the
-top of the tab:
+```bash
+aws sso login --profile dev
+cargo run -- credentials      # shows what resolved, and from where
+```
 
-| where you are | file it edits |
+That is the whole setup. The team's shared API keys live in `dev.sops.env`,
+committed to this repo with every value encrypted under the saaga dev KMS key —
+the same arrangement `saaga`, `strapi-cms` and the other repos use. The app
+decrypts it at startup, so there is no key to be handed to you and nothing to
+paste.
+
+Access is an IAM question, not a file-sharing one: granting someone `kms:Decrypt`
+on the dev key lets them run the app, and removing it takes their access away
+without anyone re-encrypting or redistributing anything.
+
+`cargo run -- credentials` prints every key, whether it is set, and which layer
+supplied it — without printing any secret. It is the first thing to run when
+something is not working.
+
+### Editing a shared key
+
+```bash
+sops dev.sops.env             # opens decrypted in $EDITOR, re-encrypts on save
+```
+
+Values are encrypted individually and variable names stay in plaintext, so
+`git diff` shows *which* key changed rather than one unreadable blob. Never
+`git add` the file without confirming it still contains `ENC[`.
+
+### Personal overrides
+
+The **Settings** tab in the app writes a local `.env` that takes precedence over
+the team file, for anything you want to differ on your machine — your own
+OpenRouter key, a local Strapi. The tab labels each field with where its current
+value came from (`from the team`, `set here`, `from your shell`) so a value you
+already have is never one you retype.
+
+Where that local file lives:
+
+| where you are | file the Settings tab edits |
 |---|---|
 | working in a checkout | that checkout's `.env` |
 | running an installed release | `~/.stream-recorder/.env` (created on first save) |
 
-Keys already exported in the shell you launched from win over the file for that
-session; the tab flags any field where that is happening, so an edit that looks
-lost is labelled rather than silent.
+Precedence, first wins: **shell export → local `.env` → `dev.sops.env`**.
 
-Prefer to edit by hand? `cp .env.example .env` still works — the tab reads and
-writes the same format, preserving comments and any unrelated keys in the file.
+YouTube is the one credential that stays personal in all cases — the OAuth
+client is shared, but each person signs in as themselves with **Connect** on the
+YouTube tab, and the token is stored per-account in `~/.saaga/auth.db`.
+
+Without AWS access the app still runs; it prints one line saying the team
+credentials could not be read and falls back to whatever is set locally.
 
 ### Required keys
 

@@ -31,3 +31,10 @@ debug/
 
 # Process id files
 *.pid
+
+# SOPS: the encrypted *.sops.env files ARE committed. These are the decrypted
+# forms — sops' own temp file, and the usual names for a hand-decrypted copy.
+*.sops.env.decrypted
+*.decrypted.env
+dev.env
+prd.env
