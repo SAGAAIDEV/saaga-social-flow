@@ -194,9 +194,11 @@ pub const FIELDS: &[Field] = &[
         key: "STRAPI_API_URL",
         label: "Strapi URL",
         group: Group::Blog,
-        need: Need::Required,
+        need: Need::Optional,
         secret: false,
-        help: "https://cms.saagasolve.com for production, http://localhost:1337 for local.",
+        help: "Where the blog publishes. The team file sets https://cms.saagasolve.com, which \
+               is also the default when unset. Only set it here to override the team on \
+               this machine — the token must belong to the same CMS.",
         url: None,
     },
     Field {
@@ -205,8 +207,10 @@ pub const FIELDS: &[Field] = &[
         group: Group::Blog,
         need: Need::Required,
         secret: true,
-        help: "Strapi Admin → Settings → API Tokens. Needs find/create on the video-post \
-               collection; a read-only token fails at publish, not at save.",
+        help: "Strapi Admin → Settings → API Tokens, on the CMS named above. Needs find, \
+               create and update on video-post, create on upload, and find on authors and \
+               categories; a read-only token fails at publish, not at save. The team's is in \
+               dev.sops.env; set one here only to override it on this machine.",
         url: None,
     },
     Field {
@@ -942,7 +946,6 @@ mod tests {
                 "OPENROUTER_API_KEY",
                 "BUFFER_API_KEY",
                 "S3_BUCKET",
-                "STRAPI_API_URL",
                 "STRAPI_API_TOKEN",
                 "YOUTUBE_CLIENT_ID",
                 "YOUTUBE_CLIENT_SECRET",

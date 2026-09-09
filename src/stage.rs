@@ -113,7 +113,7 @@ impl Stages {
         let has_plan = (planned, "No plan yet — press Build Plan");
         // The blog needs the YouTube URL, not the render: the article is built
         // around an embed, and there is no embed before the upload.
-        let uploaded = !crate::publish::load(session).is_empty();
+        let uploaded = crate::publish::longform(session).is_some();
         // The reason, not a flag: a set that is on disk but stale reads the
         // same as one that was never drawn if all the gate can say is "no".
         // The render button draws the set, so that is where a blocked stage
@@ -171,9 +171,11 @@ impl Stages {
                 &[
                     (uploaded, "Not on YouTube yet — upload it on the YouTube tab first"),
                     has_thumbnail,
+                    // The URL has a default — production — so only the token
+                    // can be missing. See `blog::strapi::PRODUCTION`.
                     (
-                        env_set("STRAPI_API_URL") && env_set("STRAPI_API_TOKEN"),
-                        "STRAPI_API_URL / STRAPI_API_TOKEN unset — add them to stream-recorder/.env",
+                        env_set("STRAPI_API_TOKEN"),
+                        "STRAPI_API_TOKEN is unset — paste a cms.saagasolve.com token on the Settings tab",
                     ),
                     // The byline is a gate rather than a warning because the page
                     // is permanent and the field feeds the Person structured data

@@ -224,7 +224,7 @@ pub fn fmt_timestamp(seconds: f64) -> String {
 /// Where the video already is. Absent links are absent, never placeholders.
 fn links(session: &Session) -> Vec<Link> {
     let mut out = Vec::new();
-    if let Some(upload) = crate::publish::load(session).last() {
+    if let Some(upload) = crate::publish::longform(session) {
         out.push(Link {
             label: "Watch on YouTube".into(),
             url: upload.url.clone(),

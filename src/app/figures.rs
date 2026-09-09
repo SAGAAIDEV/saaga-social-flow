@@ -151,8 +151,17 @@ impl App {
     }
 
     /// Pause the take, if one is rolling, and start recording the explanation.
+    ///
+    /// A take the operator has already paused by hand is left as it is: the
+    /// break does not own that pause, so ending the break does not lift it.
+    /// Resume is still theirs to press.
     fn begin_break(&mut self, n: u32) {
-        let paused = match self.router.as_ref().map(|router| router.pause_chapter()) {
+        let paused = match self
+            .router
+            .as_ref()
+            .filter(|_| !self.clock.is_paused())
+            .map(|router| router.pause_chapter())
+        {
             Some(Ok(())) => {
                 self.clock.pause();
                 true
@@ -184,6 +193,9 @@ impl App {
                 self.set_figure_status(&format!(
                     "Figure {n:02} — say what it shows, then ⌃⇧S to pick the take back up."
                 ));
+                // The record pane's status line and Pause button follow the
+                // break too — see `ui::ControlTarget::set_recording`.
+                self.sync_controls();
             }
             Err(err) => {
                 self.set_figure_status(&format!(
@@ -239,6 +251,7 @@ impl App {
         if resume {
             self.resume_take(paused);
         }
+        self.sync_controls();
     }
 
     /// Pick the chapter back up after a break, if there was one to pause.

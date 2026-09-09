@@ -387,10 +387,19 @@ impl App {
             .pending_pair
             .map(|pair| crate::layouts::Layout::get(pair, self.orientation).label());
         if let Some(live) = self.live.as_ref() {
+            // Why the take is not rolling, if it is not. The clock is the one
+            // source for "paused", so the button and the line cannot disagree
+            // with the timer above them; the aside says whose pause it is.
+            let hold = match (self.aside.is_some(), self.clock.is_paused()) {
+                (true, _) => Some(ui::Hold::Figure),
+                (false, true) => Some(ui::Hold::Paused),
+                (false, false) => None,
+            };
             live.control_target.set_recording(
                 self.router.as_ref().map(|r| r.current_chapter_number()),
                 self.session.version,
                 waiting.as_deref(),
+                hold,
             );
             live.control_target.set_stage_gates(&self.stages());
         }
@@ -508,6 +517,8 @@ impl App {
             Action::CollectAllAnalytics => self.run_analytics_collect_all(),
             Action::NewVersion => self.new_version(),
             Action::NewProject => self.new_project(),
+            Action::TogglePause => self.toggle_pause(),
+            Action::CleanUp => self.run_cleanup(),
             Action::Retake => {
                 if self.aside.is_some() {
                     // A retake throws the chapter away; a break is the one
@@ -529,12 +540,81 @@ impl App {
                         );
                         // The take is gone, so its minutes are too — the clock
                         // must not carry a discarded chapter into the estimate.
+                        // `discard` also lifts any pause the old take was on:
+                        // the retaken chapter opens rolling.
                         self.clock.discard();
+                        self.sync_controls();
                     }
                     Err(e) => eprintln!("stream-recorder: error retaking: {:#}", e),
                 }
             }
         }
+    }
+
+    /// ⌃⌥P and the Pause button: hold the open chapter, or pick it back up.
+    ///
+    /// Built on the same break a figure takes — see [`crate::capture::pause`] —
+    /// so the paused stretch is simply absent from the file rather than a frozen
+    /// picture over silence, and the chapter stays one chapter. The clock is
+    /// what says whether the take is on hold; there is no second flag to fall
+    /// out of step with it, and `sync_controls` reads the same answer.
+    fn toggle_pause(&mut self) {
+        if self.aside.is_some() {
+            // A figure's break ends with the snip chord, which also finishes
+            // the aside; resuming under it would record the explanation into
+            // the chapter.
+            self.set_render_status("On a break for a figure — ⌃⇧S picks the take back up.");
+            return;
+        }
+        let Some(router) = self.router.as_ref() else {
+            self.set_render_status("Nothing is recording — press Start Recording first.");
+            return;
+        };
+        let result = if self.clock.is_paused() {
+            router.resume_chapter().map(|()| self.clock.resume())
+        } else {
+            router.pause_chapter().map(|()| self.clock.pause())
+        };
+        if let Err(err) = result {
+            self.set_render_status(&format!("Could not change the take's pause: {err:#}"));
+        }
+        self.sync_controls();
+    }
+
+    /// Clean Up Old Recordings: the audio and video out of every project left
+    /// untouched for a week — see [`crate::sessions::stale`] — after a dialog
+    /// that names them and says how much goes. The open project is never among
+    /// them, and nothing but audio and video is ever deleted.
+    fn run_cleanup(&mut self) {
+        const WEEK: std::time::Duration = std::time::Duration::from_secs(7 * 86_400);
+        let stale = crate::sessions::stale(WEEK, &self.session.root);
+        if stale.is_empty() {
+            self.set_render_status(
+                "Nothing to clean up — no project older than a week still has recordings.",
+            );
+            return;
+        }
+        let confirmed = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.control_target.confirm_cleanup(&stale));
+        if !confirmed {
+            self.set_render_status("Clean up cancelled — nothing deleted.");
+            return;
+        }
+        let cleaned = crate::sessions::clean(&stale);
+        let failed = match cleaned.failed {
+            0 => String::new(),
+            n => format!(" — {n} file(s) would not delete; see the log"),
+        };
+        self.set_render_status(&format!(
+            "Freed {} — removed {} recording(s) from {} project(s){failed}.",
+            crate::sessions::human_bytes(cleaned.bytes),
+            cleaned.files,
+            cleaned.projects
+        ));
+        // The picker labels each project with its size, so they are stale now.
+        self.refresh_project_controls();
     }
 
     /// The New Chapter action. While `router` is `None` this is what *starts*
@@ -1080,8 +1160,7 @@ impl App {
             return;
         }
         self.pipeline = false;
-        let uploads = crate::publish::load(&self.session);
-        if let Some(prior) = uploads.last() {
+        if let Some(prior) = crate::publish::longform(&self.session) {
             self.pipeline_status(&format!(
                 "Artwork ready. Already on YouTube at {} — to publish this render as a new video, press Upload on the YouTube tab.",
                 prior.url
@@ -2021,23 +2100,26 @@ impl App {
         // library is `~/.stream-recorder` and never the whole disk.
         let access = crate::ui::common_ancestor(&self.session.root, &library);
         live.video_brief_pane.show_local(
-            &ui::render::page("video.html", minijinja::context! {
-                brief => crate::video_brief::load(&self.session),
-                root => self.session.root.to_string_lossy(),
-                busy => busy,
-                model => self.notes_pick.model(),
-                art => art,
-                review => review,
-                // The last stage of the render chain, so the pane's pipeline
-                // strip can show the whole run without a trip to the YouTube tab.
-                youtube => crate::publish::load(&self.session).last().map(|upload| upload.url.clone()),
-                // The figures snipped during the take, each with what was said
-                // over it. Same view the Blog tab embeds — see there for `scale`.
-                figures => crate::figure::pane::build(
-                    &self.session.root,
-                    self.geometry.map(|geometry| geometry.scale()),
-                ),
-            }),
+            &ui::render::page(
+                "video.html",
+                minijinja::context! {
+                    brief => crate::video_brief::load(&self.session),
+                    root => self.session.root.to_string_lossy(),
+                    busy => busy,
+                    model => self.notes_pick.model(),
+                    art => art,
+                    review => review,
+                    // The last stage of the render chain, so the pane's pipeline
+                    // strip can show the whole run without a trip to the YouTube tab.
+                    youtube => crate::publish::longform(&self.session).map(|upload| upload.url),
+                    // The figures snipped during the take, each with what was said
+                    // over it. Same view the Blog tab embeds — see there for `scale`.
+                    figures => crate::figure::pane::build(
+                        &self.session.root,
+                        self.geometry.map(|geometry| geometry.scale()),
+                    ),
+                },
+            ),
             &self.session.root,
             &access,
             ".video.html",
@@ -2080,9 +2162,7 @@ impl App {
         let gate = self.stages().blog;
         // The newest upload is what the post would be about, so it is also the
         // one whose ledger row decides whether this has already been posted.
-        let posted = crate::publish::load(&self.session)
-            .into_iter()
-            .next_back()
+        let posted = crate::publish::longform(&self.session)
             .and_then(|upload| crate::blog::posted(&self.session, &upload.video_id));
         let pane = crate::blog::pane::build(
             &self.session.root,
@@ -2527,7 +2607,8 @@ impl App {
             match event {
                 crate::publish::PublishEvent::Status(msg) => self.set_publish_status(&msg),
                 crate::publish::PublishEvent::Uploaded(upload) => {
-                    self.publish_busy = false;
+                    // One video of the press. Not the end of it — `Done` is —
+                    // so the button stays off while the Short follows.
                     let thumb = match upload.thumbnail_set {
                         true => " with its thumbnail",
                         false => " — no thumbnail set",
@@ -2535,15 +2616,29 @@ impl App {
                     // Summary first: it repaints the status line from the gate,
                     // and the link is the more useful thing to leave on screen.
                     self.update_publish_summary();
-                    self.set_publish_status(&format!("Live at {}{thumb}", upload.url));
-                    // The upload is what the blog gate waits for, and the
-                    // render chain is what usually started it: both places
-                    // should read as finished without a tab switch.
-                    self.update_blog_view();
-                    self.pipeline_status(&format!(
-                        "On YouTube at {}{thumb}. The blog is ready when you are.",
-                        upload.url
-                    ));
+                    match upload.orientation {
+                        crate::publish::Orientation::Horizontal => {
+                            self.set_publish_status(&format!("Live at {}{thumb}", upload.url));
+                            // The upload is what the blog gate waits for, and
+                            // the render chain is what usually started it: both
+                            // places should read as finished without a tab switch.
+                            self.update_blog_view();
+                            self.pipeline_status(&format!(
+                                "On YouTube at {}{thumb}. The blog is ready when you are.",
+                                upload.url
+                            ));
+                        }
+                        crate::publish::Orientation::Vertical => {
+                            self.set_publish_status(&format!("Short live at {}", upload.url));
+                            // The blog's mobile player embeds it, so the pane
+                            // that shows the body is out of date until it re-reads.
+                            self.update_blog_view();
+                            self.pipeline_status(&format!("Short on YouTube at {}.", upload.url));
+                        }
+                    }
+                }
+                crate::publish::PublishEvent::Done => {
+                    self.publish_busy = false;
                     self.sync_controls();
                 }
                 crate::publish::PublishEvent::Connected => {
@@ -2872,8 +2967,7 @@ impl App {
             self.youtube_privacy.label()
         ));
 
-        let uploads = crate::publish::load(&self.session);
-        match uploads.last() {
+        match crate::publish::longform(&self.session) {
             None => info.push_str("## Not uploaded yet\n"),
             Some(latest) => {
                 info.push_str("## Uploaded\n");
@@ -2887,6 +2981,27 @@ impl App {
                 };
                 info.push_str(&format!("- Thumbnail: {thumb}\n"));
             }
+        }
+        // The vertical cut, as a Short. Said either way once the cut exists, so
+        // the tab never leaves anyone guessing whether Upload will send it.
+        let has_vertical = self
+            .session
+            .render_dir()
+            .join("vertical/longform.mp4")
+            .is_file();
+        match crate::publish::short(&self.session) {
+            Some(short) => {
+                info.push_str("\n## Short\n");
+                info.push_str(&format!("- {}\n", short.url));
+                info.push_str(&format!("- At: {}\n", short.uploaded_at));
+                info.push_str(&format!("- Visibility: {}\n", short.privacy.label()));
+                info.push_str("- The blog embeds it as the page's mobile player.\n");
+            }
+            None if has_vertical => info.push_str(
+                "\n## Short\n- The vertical cut goes up as a Short with the next Upload, after \
+                 the longform.\n",
+            ),
+            None => {}
         }
         live.publish_pane.show_local(
             &ui::render::page(

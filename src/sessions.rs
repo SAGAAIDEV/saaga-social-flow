@@ -11,7 +11,7 @@
 //! a project can never orphan its files.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -265,6 +265,160 @@ fn sweep_in(root: &Path, keep: &Path) -> usize {
     swept
 }
 
+/// A project nobody has touched for a while, and the audio and video in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stale {
+    pub entry: SessionEntry,
+    /// Since the newest write anywhere in the project, not since it was made:
+    /// a project opened again last week is being worked on, however old.
+    pub age_days: u64,
+    /// Every audio and video file under the project, whichever stage wrote it.
+    pub media: Vec<PathBuf>,
+    pub media_bytes: u64,
+}
+
+/// What a clean-up removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Cleaned {
+    pub projects: usize,
+    pub files: usize,
+    pub bytes: u64,
+    /// Files that would not delete. Reported rather than fatal: what did go
+    /// is gone, and the number is what the status line needs.
+    pub failed: usize,
+}
+
+/// Left in a cleaned project, so anyone opening it later can see where the
+/// recordings went and when, rather than finding a folder of transcripts with
+/// nothing to play.
+pub const CLEANED_JSON: &str = "cleaned.json";
+
+/// The extensions a clean-up removes. Audio and video only, deliberately: in
+/// a project of any size they are all of it — one take here is 9.9 GB, of
+/// which every transcript, note, figure, article and ledger together is a few
+/// hundred kilobytes — and they are the one thing a re-opened project cannot
+/// rebuild, which is what makes leaving the rest behind worth doing. Images
+/// stay: the figures and the artwork are the illustrations of a published
+/// page, and cost megabytes at most.
+const MEDIA: [&str; 7] = ["mp4", "mov", "m4a", "mp3", "wav", "aac", "caf"];
+
+/// Every project last written to more than `older_than` ago that still holds
+/// audio or video, except `keep`. Oldest first.
+///
+/// Measured from the newest file in the project — the same clock [`list`]
+/// orders by — so a project whose article was published yesterday is not
+/// stale, whatever day it was recorded on.
+pub fn stale(older_than: Duration, keep: &Path) -> Vec<Stale> {
+    match sessions_root() {
+        Ok(root) => stale_in(&root, older_than, keep, SystemTime::now()),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn stale_in(root: &Path, older_than: Duration, keep: &Path, now: SystemTime) -> Vec<Stale> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Stale> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path != keep)
+        .filter_map(|path| describe(&path))
+        .filter_map(|entry| {
+            let age = now.duration_since(entry.modified).ok()?;
+            if age < older_than {
+                return None;
+            }
+            let (media, media_bytes) = media_in(&entry.root);
+            (!media.is_empty()).then_some(Stale {
+                age_days: age.as_secs() / 86_400,
+                entry,
+                media,
+                media_bytes,
+            })
+        })
+        .collect();
+    out.sort_by_key(|project| project.entry.modified);
+    out
+}
+
+/// The audio and video under `root`, and their total size.
+fn media_in(root: &Path) -> (Vec<PathBuf>, u64) {
+    let mut files = Vec::new();
+    let mut bytes = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let is_media = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| MEDIA.contains(&ext.to_ascii_lowercase().as_str()));
+            if meta.is_file() && is_media {
+                bytes += meta.len();
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    (files, bytes)
+}
+
+/// Deletes the media of every project in `stale` and leaves [`CLEANED_JSON`]
+/// behind in each. Nothing else in a project is touched.
+pub fn clean(stale: &[Stale]) -> Cleaned {
+    let mut out = Cleaned::default();
+    for project in stale {
+        let mut freed = 0;
+        let mut removed = 0;
+        for file in &project.media {
+            let size = std::fs::metadata(file).map(|meta| meta.len()).unwrap_or(0);
+            match std::fs::remove_file(file) {
+                Ok(()) => {
+                    freed += size;
+                    removed += 1;
+                }
+                Err(err) => {
+                    out.failed += 1;
+                    eprintln!(
+                        "stream-recorder: could not remove {}: {err}",
+                        file.display()
+                    );
+                }
+            }
+        }
+        if removed > 0 {
+            out.projects += 1;
+            out.files += removed;
+            out.bytes += freed;
+            let note = serde_json::json!({
+                "at": chrono::Utc::now().to_rfc3339(),
+                "files": removed,
+                "bytes": freed,
+                "note": "Audio and video removed by Clean Up to free disk space; everything else was kept.",
+            });
+            if let Err(err) = std::fs::write(
+                project.entry.root.join(CLEANED_JSON),
+                serde_json::to_string_pretty(&note).unwrap_or_default() + "\n",
+            ) {
+                eprintln!(
+                    "stream-recorder: could not note the clean-up in {}: {err}",
+                    project.entry.root.display()
+                );
+            }
+        }
+    }
+    out
+}
+
 pub fn human_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     let bytes = bytes as f64;
@@ -468,5 +622,113 @@ mod tests {
         assert_eq!(human_bytes(0), "0 B");
         // The largest unit holds rather than overflowing into nonsense.
         assert_eq!(human_bytes(5 * 1024_u64.pow(4)), "5.0 TB");
+    }
+
+    fn write_at(path: &Path, bytes: usize, age: Duration) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, vec![0u8; bytes]).unwrap();
+        let then = SystemTime::now() - age;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(then)
+            .unwrap();
+    }
+
+    const DAY: Duration = Duration::from_secs(86_400);
+
+    /// Only the audio and video go, and only from projects nobody has written to
+    /// for the window: the transcript beside the take stays, the open project is
+    /// never touched, and a project with a fresh file in it is being worked on.
+    #[test]
+    fn a_clean_up_removes_only_the_media_of_projects_left_alone_long_enough() {
+        let root = temp("stale");
+        let old = root.join("2026-08-01_10-00-00");
+        write_at(&old.join("drafts/v1/chapter-01.mp4"), 4096, 20 * DAY);
+        write_at(
+            &old.join("drafts/v1/chapter-01.transcript.json"),
+            64,
+            20 * DAY,
+        );
+        write_at(&old.join("figures/figure-01.webp"), 128, 20 * DAY);
+        write_at(
+            &old.join("render/v1/horizontal/longform.MP4"),
+            2048,
+            20 * DAY,
+        );
+        // Old take, but somebody wrote to it yesterday: not stale.
+        let busy = root.join("2026-08-02_10-00-00");
+        write_at(&busy.join("drafts/v1/chapter-01.mp4"), 4096, 20 * DAY);
+        write_at(&busy.join("blog.jsonl"), 32, DAY);
+        // Old and untouched, but nothing left to remove.
+        let text_only = root.join("2026-08-03_10-00-00");
+        write_at(&text_only.join("notes/notes.json"), 32, 20 * DAY);
+        // The open project, however old its files look.
+        let open = root.join("2026-08-04_10-00-00");
+        write_at(&open.join("drafts/v1/chapter-01.mp4"), 4096, 20 * DAY);
+
+        let found = stale_in(&root, 7 * DAY, &open, SystemTime::now());
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].entry.root, old);
+        assert_eq!(
+            found[0].media.len(),
+            2,
+            "the mp4 and the MP4: {:?}",
+            found[0].media
+        );
+        assert_eq!(found[0].media_bytes, 4096 + 2048);
+        assert!(found[0].age_days >= 19, "{}", found[0].age_days);
+
+        let cleaned = clean(&found);
+        assert_eq!(
+            cleaned,
+            Cleaned {
+                projects: 1,
+                files: 2,
+                bytes: 6144,
+                failed: 0
+            }
+        );
+        assert!(!old.join("drafts/v1/chapter-01.mp4").exists());
+        assert!(!old.join("render/v1/horizontal/longform.MP4").exists());
+        assert!(
+            old.join("drafts/v1/chapter-01.transcript.json").exists(),
+            "the words stay"
+        );
+        assert!(
+            old.join("figures/figure-01.webp").exists(),
+            "the pictures stay"
+        );
+        assert!(
+            old.join(CLEANED_JSON).exists(),
+            "the project says where its recordings went"
+        );
+        assert!(busy.join("drafts/v1/chapter-01.mp4").exists());
+        assert!(open.join("drafts/v1/chapter-01.mp4").exists());
+        // Nothing left to find, so a second press is a no-op rather than a
+        // second dialog.
+        assert!(stale_in(&root, 7 * DAY, &open, SystemTime::now()).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Oldest first, so the dialog can name the range and the operator can see
+    /// how far back it reaches.
+    #[test]
+    fn stale_projects_are_listed_oldest_first() {
+        let root = temp("stale-order");
+        let newer = root.join("2026-08-10_10-00-00");
+        let older = root.join("2026-08-01_10-00-00");
+        write_at(&newer.join("drafts/v1/chapter-01.mp4"), 16, 10 * DAY);
+        write_at(&older.join("drafts/v1/chapter-01.mp4"), 16, 30 * DAY);
+        let found = stale_in(&root, 7 * DAY, Path::new("/nowhere"), SystemTime::now());
+        assert_eq!(
+            found
+                .iter()
+                .map(|s| s.entry.root.clone())
+                .collect::<Vec<_>>(),
+            vec![older, newer]
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

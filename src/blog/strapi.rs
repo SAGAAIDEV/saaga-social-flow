@@ -31,10 +31,18 @@
 //! }
 //! ```
 //!
-//! `update` has the identical tail, and both run `setStatusToDraft` first — so a
-//! write *without* the parameter touches only the draft. That is why the
-//! relation retry below carries the flag too: patching a dropped relation
-//! without it would fix the draft and leave the live page still missing it.
+//! `update` has the identical tail, and both run `setStatusToDraft` first. The
+//! REST layer in front of that service has not been so clear: every post this
+//! pipeline created with *no* `status` sent, against a CMS with Draft & Publish
+//! on, came back with `publishedAt` set. So the status is sent explicitly on
+//! every write, `draft` included — see [`status_for`] — and the relation retry
+//! carries the same value, so a dropped relation is fixed on the version the
+//! create made and not on some other one.
+//!
+//! Where the posts go is `cms.saagasolve.com`, as `dev.sops.env` says and as
+//! [`PRODUCTION`] falls back to when nothing says. The team file is the source
+//! of truth for the host and the token both; a `.env` or a shell export can
+//! override either on one machine, and `credentials` names which one won.
 
 use std::path::Path;
 use std::time::Duration;
@@ -53,6 +61,22 @@ const CATEGORIES_PATH: &str = "/api/categories";
 /// Strapi 5's draft/published selector, on writes as well as reads.
 const STATUS: &str = "status";
 const PUBLISHED: &str = "published";
+const DRAFT: &str = "draft";
+
+/// The CMS the blog publishes to when `STRAPI_API_URL` is unset. Production,
+/// because that is where the blog is. The team file sets the same value
+/// explicitly, so this is the answer for a machine that could not decrypt it —
+/// and never `localhost`, which is how four posts once ended up on a developer's
+/// Strapi with a ledger that called them live.
+pub const PRODUCTION: &str = "https://cms.saagasolve.com";
+
+/// What `status` is sent on a write. Never omitted: see the module docs.
+fn status_for(publish: bool) -> &'static str {
+    match publish {
+        true => PUBLISHED,
+        false => DRAFT,
+    }
+}
 
 /// What the media library did with a file.
 ///
@@ -107,11 +131,12 @@ pub struct Created {
 }
 
 impl Strapi {
+    /// The client for the CMS the environment names, production by default.
     pub fn from_env() -> Result<Strapi> {
-        let base = env("STRAPI_API_URL")
-            .context("STRAPI_API_URL is unset — add it to stream-recorder/.env")?;
-        let token = env("STRAPI_API_TOKEN")
-            .context("STRAPI_API_TOKEN is unset — add it to stream-recorder/.env")?;
+        let base = env("STRAPI_API_URL").unwrap_or_else(|| PRODUCTION.to_string());
+        let token = env("STRAPI_API_TOKEN").with_context(|| {
+            format!("STRAPI_API_TOKEN is unset — a token for {base} belongs in dev.sops.env")
+        })?;
         Ok(Strapi {
             base: base.trim_end_matches('/').to_string(),
             token,
@@ -346,10 +371,8 @@ impl Strapi {
         let mut request = ureq::post(&url)
             .set("Authorization", &self.bearer())
             .set("Content-Type", "application/json")
-            .timeout(UPLOAD_TIMEOUT);
-        if publish {
-            request = request.query(STATUS, PUBLISHED);
-        }
+            .timeout(UPLOAD_TIMEOUT)
+            .query(STATUS, status_for(publish));
         // Ask for every relation back, so a silent drop is visible.
         for (index, field) in RELATIONS.iter().enumerate() {
             request = request.query(&format!("populate[{index}]"), field);
@@ -385,6 +408,15 @@ impl Strapi {
         if publish && !published {
             warnings.push("created as a draft — strapi did not publish it".to_string());
         }
+        if !publish && published {
+            // The one outcome a reviewer cannot undo from here: REST has no
+            // unpublish. Said loudly, with where to look.
+            warnings.push(
+                "PUBLISHED on create although a draft was asked for — unpublish it in the admin \
+                 and check Draft & Publish is on for video-post"
+                    .to_string(),
+            );
+        }
 
         Ok(Created {
             document_id: document_id.clone(),
@@ -405,16 +437,15 @@ impl Strapi {
     /// the `PUT` response echoes it back set.
     fn update_relation(&self, document_id: &str, field: &str, id: i64, publish: bool) -> bool {
         let url = format!("{}{VIDEO_POSTS_PATH}/{document_id}", self.base);
-        let mut request = ureq::put(&url)
+        // The same status the create sent, so the fix lands on the version the
+        // create made — a published fix over a draft would leave the reviewer's
+        // copy still missing it, and the other way round leaves the live page.
+        let request = ureq::put(&url)
             .set("Authorization", &self.bearer())
             .set("Content-Type", "application/json")
             .query("populate", field)
+            .query(STATUS, status_for(publish))
             .timeout(LOOKUP_TIMEOUT);
-        if publish {
-            // Without this the fix lands on the draft only, and the live page
-            // keeps the relation it was missing.
-            request = request.query(STATUS, PUBLISHED);
-        }
         let response = request.send_json(serde_json::json!({ "data": { field: id } }));
         match response {
             Ok(response) => match response.into_json::<serde_json::Value>() {
@@ -713,5 +744,20 @@ mod tests {
     #[test]
     fn the_public_base_has_no_trailing_slash() {
         assert!(!public_base().ends_with('/'));
+    }
+
+    /// Never omitted. The one time it was, the CMS published every post this
+    /// pipeline made, and REST has no way to take that back.
+    #[test]
+    fn a_draft_is_asked_for_by_name() {
+        assert_eq!(status_for(false), "draft");
+        assert_eq!(status_for(true), "published");
+    }
+
+    /// What a machine without the team file publishes to: see [`PRODUCTION`].
+    #[test]
+    fn the_blog_publishes_to_production_by_default() {
+        assert_eq!(PRODUCTION, "https://cms.saagasolve.com");
+        assert!(!PRODUCTION.ends_with('/'));
     }
 }

@@ -441,7 +441,7 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
 
     // The upload is the gate on a real publish, but not on this: seeing the
     // body before the video is up is most of the reason to look at it.
-    let upload = crate::publish::load(session).into_iter().next_back();
+    let upload = crate::publish::longform(session);
     let duration = crate::edit::cut::probe_duration_seconds(&session.render_dir().join(LONGFORM))
         .unwrap_or_default();
 
@@ -457,10 +457,10 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
         duration: duration.round().max(0.0) as u32,
         thumbnail_id: None,
         thumbnail_vertical_id: None,
-        // Both halves of the vertical pair are upload results, so a dry run has
-        // neither. What it can still show is whether the cut is even there —
-        // see the note this leaves on the way out.
-        vertical: None,
+        // The Short is a ledger read and can be shown; a cut the CMS would
+        // host is an upload result, and a dry run has none — see the note this
+        // leaves on the way out.
+        vertical: vertical::from_youtube(session),
         // An upload result, like the vertical pair — a dry run has none.
         og_image_id: None,
         // The text of it is knowable without a call; only its image is not.
@@ -479,10 +479,10 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
     // The one thing the dry run knows and cannot show. Said out loud rather
     // than left to be inferred from a field that is missing for two different
     // reasons — no cut, or a cut not yet uploaded.
-    if session.render_dir().join("vertical/longform.mp4").is_file() {
+    if post.vertical.is_none() && session.render_dir().join("vertical/longform.mp4").is_file() {
         eprintln!(
-            "stream-recorder: a vertical cut is rendered; the publish will upload it as \
-             videoVertical (this body cannot, having uploaded nothing)"
+            "stream-recorder: a vertical cut is rendered but not on YouTube; the publish will \
+             upload it into the CMS as videoVertical (this body cannot, having uploaded nothing)"
         );
     }
     payload::save(&dir, &post.body())
@@ -530,9 +530,7 @@ fn run(
     // Everything that can be refused for free is refused before the first call:
     // an LLM request and a thumbnail upload are both wasted if the gate below
     // was going to stop this anyway.
-    let upload = crate::publish::load(session)
-        .into_iter()
-        .next_back()
+    let upload = crate::publish::longform(session)
         .context("the longform is not on YouTube yet — upload it on the YouTube tab first")?;
     if let Some(prior) = posted(session, &upload.video_id) {
         bail!(

@@ -186,8 +186,7 @@ impl RecordClock {
         }
     }
 
-    /// Only the tests read this back; the app asks the router, not the clock.
-    #[cfg(test)]
+    /// Whether the open chapter is on a break — a figure's, or the operator's.
     pub fn is_paused(&self) -> bool {
         self.open
             .as_ref()

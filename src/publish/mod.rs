@@ -14,7 +14,7 @@
 //! Tokens come from `auth-server`, which already owns every social OAuth token
 //! and refreshes on read.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::mpsc::Sender;
 
 use anyhow::{bail, Context, Result};
@@ -71,13 +71,45 @@ pub struct Upload {
     /// before this field existed actually was.
     #[serde(default)]
     pub privacy: youtube::Privacy,
+    /// Which cut this is. Defaults to the longform, which is what every row
+    /// written before the Short existed was.
+    #[serde(default)]
+    pub orientation: Orientation,
+}
+
+/// Which cut a ledger row is: the landscape longform, or the vertical edit of
+/// the same chapters, published as a Short.
+///
+/// Its own type rather than [`crate::layouts::Orientation`] because this one
+/// is written to disk: a serde derive on the layout enum would make every
+/// rename there a wire-format change here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Orientation {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
+impl Orientation {
+    fn noun(self) -> &'static str {
+        match self {
+            Orientation::Horizontal => "the longform",
+            Orientation::Vertical => "a Short",
+        }
+    }
 }
 
 pub enum PublishEvent {
     Status(String),
+    /// One video landed. Not terminal: a press puts up the longform and then
+    /// the vertical cut when the project has one, and the button stays off
+    /// until [`PublishEvent::Done`].
     Uploaded(Upload),
-    /// The OAuth flow finished. Terminal like the other two — the app has to
-    /// know the thread is gone before it re-enables the button.
+    /// The press is over, however many videos it put up.
+    Done,
+    /// The OAuth flow finished. Terminal like `Done` and `Failed` — the app has
+    /// to know the thread is gone before it re-enables the button.
     Connected,
     Failed(String),
 }
@@ -87,9 +119,8 @@ pub fn spawn_upload(session: Session, tx: Sender<PublishEvent>) {
     if let Err(err) = std::thread::Builder::new()
         .name("youtube-upload".into())
         .spawn(move || match run(&session, &tx) {
-            Ok(upload) => {
-                eprintln!("stream-recorder: youtube → {}", upload.url);
-                let _ = tx.send(PublishEvent::Uploaded(upload));
+            Ok(()) => {
+                let _ = tx.send(PublishEvent::Done);
             }
             Err(err) => {
                 eprintln!("stream-recorder: youtube upload failed: {err:#}");
@@ -106,7 +137,10 @@ pub fn spawn_upload(session: Session, tx: Sender<PublishEvent>) {
     }
 }
 
-fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<Upload> {
+/// The longform first, then the vertical cut as a Short when the project has
+/// one. Each lands as its own row and its own event, so a Short that fails
+/// leaves the longform live and reported rather than rolled into one failure.
+fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
     let status = |msg: String| {
         let _ = tx.send(PublishEvent::Status(msg));
     };
@@ -116,26 +150,83 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<Upload> {
         bail!("no longform rendered yet — run Render first");
     }
     // Validate all critical artwork before publishing any video.
-    let jpeg = chosen_thumbnail(session)
+    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal)
         .context("the artwork set is missing or stale — press Render video and thumbnails first")?;
-    let source_hash = hash_of_file(&video)?;
+    let longform = upload_one(
+        session,
+        &video,
+        Orientation::Horizontal,
+        Some(&jpeg),
+        &status,
+    )?;
+    eprintln!("stream-recorder: youtube → {}", longform.url);
+    let _ = tx.send(PublishEvent::Uploaded(longform.clone()));
 
-    // The ledger, not the API, is what stops a double upload: YouTube will
-    // happily accept the same video twice and give it two ids, and the second
-    // one is a duplicate on the channel that nothing here would ever clean up.
+    // The same chapters cut portrait. YouTube files it as a Short on its own —
+    // portrait, under the length limit — and the blog embeds it as the page's
+    // mobile player rather than hosting the file itself.
+    let vertical = session.render_dir().join("vertical/longform.mp4");
+    if vertical.is_file() {
+        let poster = chosen_thumbnail(session, crate::card::assets::Kind::Vertical);
+        let short = upload_one(
+            session,
+            &vertical,
+            Orientation::Vertical,
+            poster.as_deref(),
+            &status,
+        )
+        .with_context(|| {
+            format!(
+                "the longform is live at {}, but the Short did not go up",
+                longform.url
+            )
+        })?;
+        eprintln!("stream-recorder: youtube short → {}", short.url);
+        let _ = tx.send(PublishEvent::Uploaded(short));
+    }
+    Ok(())
+}
+
+/// One video up, or its existing row refreshed.
+///
+/// The ledger, not the API, is what stops a double upload: YouTube will happily
+/// accept the same video twice and give it two ids, and the second one is a
+/// duplicate on the channel that nothing here would ever clean up. A render
+/// already up gets its poster set again and nothing else.
+fn upload_one(
+    session: &Session,
+    video: &Path,
+    orientation: Orientation,
+    poster: Option<&[u8]>,
+    status: &dyn Fn(String),
+) -> Result<Upload> {
+    let source_hash = hash_of_file(video)?;
     if let Some(mut prior) = uploaded(session, &source_hash) {
-        status("Updating the thumbnail on the existing YouTube video…".into());
-        youtube::set_thumbnail(&youtube::access_token()?, &prior.video_id, &jpeg)?;
-        prior.thumbnail_set = true;
-        append(session, &prior)?;
+        if let Some(jpeg) = poster {
+            status(format!(
+                "Updating the thumbnail on the existing YouTube video for {}…",
+                orientation.noun()
+            ));
+            if set_poster(orientation, &prior.video_id, &prior.url, jpeg)? {
+                prior.thumbnail_set = true;
+                append(session, &prior)?;
+            }
+        }
         return Ok(prior);
     }
 
-    let meta = video_meta(session)?;
-    status(format!("Uploading “{}” to YouTube…", meta.title));
+    let meta = video_meta(session, orientation)?;
+    status(format!(
+        "Uploading “{}” to YouTube as {}…",
+        meta.title,
+        orientation.noun()
+    ));
     let token = youtube::access_token()?;
-    let video_id = youtube::upload_video(&token, &video, &meta)?;
-    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    let video_id = youtube::upload_video(&token, video, &meta)?;
+    let url = match orientation {
+        Orientation::Horizontal => format!("https://www.youtube.com/watch?v={video_id}"),
+        Orientation::Vertical => format!("https://www.youtube.com/shorts/{video_id}"),
+    };
 
     // Recorded before the thumbnail: the video is up either way, and a row
     // written only on complete success would lose the id if this next call fails.
@@ -147,35 +238,98 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<Upload> {
         uploaded_at: crate::schedule::ledger::now_rfc3339(),
         thumbnail_set: false,
         privacy: meta.privacy,
+        orientation,
     };
     append(session, &upload)?;
 
-    status("Setting the thumbnail…".into());
-    // Refresh after the video transfer; use the image frozen before it began.
-    youtube::access_token().and_then(|token| youtube::set_thumbnail(&token, &video_id, &jpeg))
-        .with_context(|| format!("Video is uploaded at {url}, but its thumbnail failed. Press Upload again to retry the thumbnail"))?;
-    upload.thumbnail_set = true;
-    append(session, &upload)?;
+    if let Some(jpeg) = poster {
+        status("Setting the thumbnail…".into());
+        if set_poster(orientation, &video_id, &url, jpeg)? {
+            upload.thumbnail_set = true;
+            append(session, &upload)?;
+        }
+    }
     Ok(upload)
 }
 
+/// Sets the poster, and says whether it took.
+///
+/// The longform's designed thumbnail is most of why it goes up here rather
+/// than through Buffer, so a thumbnail that will not set fails the upload with
+/// the retry spelled out. The Shorts feed shows a frame of the video whatever
+/// poster is set, so for a Short the same failure is a line in the log and a
+/// `false`.
+fn set_poster(orientation: Orientation, video_id: &str, url: &str, jpeg: &[u8]) -> Result<bool> {
+    // Refresh after the video transfer; use the image frozen before it began.
+    let result =
+        youtube::access_token().and_then(|token| youtube::set_thumbnail(&token, video_id, jpeg));
+    match (result, orientation) {
+        (Ok(()), _) => Ok(true),
+        (Err(err), Orientation::Horizontal) => Err(err).with_context(|| {
+            format!(
+                "Video is uploaded at {url}, but its thumbnail failed. Press Upload again to \
+                 retry the thumbnail"
+            )
+        }),
+        (Err(err), Orientation::Vertical) => {
+            eprintln!("stream-recorder: the Short's poster did not set: {err:#}");
+            Ok(false)
+        }
+    }
+}
+
 /// The upload owns its copy; social generation happens later in the workflow.
-fn video_meta(session: &Session) -> Result<youtube::VideoMeta> {
+///
+/// The Short shares the longform's title and description — it is the same
+/// video — with `#Shorts` added to the description, which is how YouTube asks
+/// to be told and costs nothing if it had already worked that out.
+fn video_meta(session: &Session, orientation: Orientation) -> Result<youtube::VideoMeta> {
     let metadata = metadata::load(session);
     metadata.validate()?;
     let config = crate::config::load();
+    let description = metadata.description.trim().to_string();
     Ok(youtube::VideoMeta {
         title: metadata.title.trim().to_string(),
-        description: metadata.description.trim().to_string(),
+        description: match orientation {
+            Orientation::Horizontal => description,
+            Orientation::Vertical => short_description(&description),
+        },
         category_id: config.youtube_category_id,
         privacy: config.youtube_privacy,
     })
 }
 
-fn chosen_thumbnail(session: &Session) -> Option<Vec<u8>> {
-    let path =
-        crate::card::assets::selected(&session.root, crate::card::assets::Kind::Horizontal).ok()?;
+/// The description with `#Shorts` on the end, unless it is already in there.
+fn short_description(description: &str) -> String {
+    if description.to_lowercase().contains("#shorts") {
+        return description.to_string();
+    }
+    match description.is_empty() {
+        true => "#Shorts".to_string(),
+        false => format!("{description}\n\n#Shorts"),
+    }
+}
+
+fn chosen_thumbnail(session: &Session, kind: crate::card::assets::Kind) -> Option<Vec<u8>> {
+    let path = crate::card::assets::selected(&session.root, kind).ok()?;
     std::fs::read(path).ok()
+}
+
+/// The newest upload of the landscape longform: the video the blog embeds and
+/// the YouTube tab reports. Rows for the Short are not it.
+pub fn longform(session: &Session) -> Option<Upload> {
+    load(session)
+        .into_iter()
+        .rev()
+        .find(|row| row.orientation == Orientation::Horizontal)
+}
+
+/// The newest upload of the vertical cut as a Short, if one has gone up.
+pub fn short(session: &Session) -> Option<Upload> {
+    load(session)
+        .into_iter()
+        .rev()
+        .find(|row| row.orientation == Orientation::Vertical)
 }
 
 /// The most recent upload of this exact render, if there is one.
@@ -211,13 +365,15 @@ fn append(session: &Session, upload: &Upload) -> Result<()> {
 
 /// A render identified by its bytes, so "already uploaded" survives a rename and
 /// notices a re-render.
-fn hash_of_file(path: &PathBuf) -> Result<String> {
+fn hash_of_file(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(crate::agent::prompt::hash_of_bytes(&bytes))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     fn session(root: &std::path::Path) -> Session {
@@ -247,7 +403,60 @@ mod tests {
             uploaded_at: "2026-08-16T12:00:00Z".into(),
             thumbnail_set: false,
             privacy: youtube::Privacy::Public,
+            orientation: Orientation::Horizontal,
         }
+    }
+
+    fn short_row(hash: &str, id: &str) -> Upload {
+        Upload {
+            orientation: Orientation::Vertical,
+            url: format!("https://www.youtube.com/shorts/{id}"),
+            ..upload(hash, id)
+        }
+    }
+
+    /// The blog embeds the longform and the YouTube tab reports it; a Short in
+    /// the same ledger must not be mistaken for either, however new it is.
+    #[test]
+    fn the_longform_and_the_short_are_told_apart_by_orientation() {
+        let root = temp("orientation");
+        let session = session(&root);
+        append(&session, &upload("aaaa", "long-1")).unwrap();
+        append(&session, &short_row("bbbb", "short-1")).unwrap();
+        assert_eq!(longform(&session).unwrap().video_id, "long-1");
+        assert_eq!(short(&session).unwrap().video_id, "short-1");
+        // A re-upload of the longform is the newest longform, Short or no Short.
+        append(&session, &upload("cccc", "long-2")).unwrap();
+        assert_eq!(longform(&session).unwrap().video_id, "long-2");
+        assert_eq!(short(&session).unwrap().video_id, "short-1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every row from before the Short existed was the longform.
+    #[test]
+    fn a_row_from_before_orientation_reads_as_the_longform() {
+        let row: Upload = serde_json::from_str(
+            r#"{"video_id":"abc","url":"https://y/abc","title":"A video",
+                "source_hash":"h","uploaded_at":"2026-08-16T12:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(row.orientation, Orientation::Horizontal);
+        let back = serde_json::to_string(&short_row("h", "s")).unwrap();
+        assert!(back.contains(r#""orientation":"vertical""#), "{back}");
+    }
+
+    /// YouTube is told once, and never told twice.
+    #[test]
+    fn the_short_description_carries_the_tag_exactly_once() {
+        assert_eq!(
+            short_description("Four minutes on retries."),
+            "Four minutes on retries.\n\n#Shorts"
+        );
+        assert_eq!(short_description(""), "#Shorts");
+        assert_eq!(
+            short_description("Already tagged #shorts here"),
+            "Already tagged #shorts here"
+        );
     }
 
     /// A ledger written before visibility was recorded still loads, and reads
