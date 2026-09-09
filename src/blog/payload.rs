@@ -264,6 +264,9 @@ impl NewVideoPost {
         for (field, id) in self.relations() {
             object.insert(field.into(), json!(id));
         }
+        // Postgres refuses U+0000 in text and jsonb alike, as a bare 500. A
+        // transcript is the one place it could arrive from.
+        super::limits::scrub(&mut data);
         json!({ "data": data })
     }
 

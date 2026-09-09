@@ -64,6 +64,18 @@ pub struct Library {
     /// When this was last pulled, so a stale list is visible as stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetched_at: Option<String>,
+    /// The CMS these were read from.
+    ///
+    /// An id is a row in one database. This cache was once filled from a
+    /// Strapi on `localhost:1337` — author 3 "Andrew", category 4
+    /// "ai-seo-automation" — and then read, with `STRAPI_API_URL` unset again,
+    /// to publish to `cms.saagasolve.com`, where author 3 is an unpublished row
+    /// of someone else and category 4 a different category. So [`load`] keeps
+    /// the rows only while the configured CMS is the one they came from; the
+    /// pane says where they came from instead. Absent on a cache written before
+    /// this was recorded, which is trusted as it always was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     #[serde(default)]
     pub authors: Vec<Entry>,
     /// The one taxonomy a video post carries, shared with `blog-articles`.
@@ -81,6 +93,12 @@ impl Library {
 
     pub fn category(&self, id: i64) -> Option<&Entry> {
         self.categories.iter().find(|entry| entry.id == id)
+    }
+
+    /// The CMS this was read from, when it is not `base` — the one configured
+    /// now. `None` when they agree, or when the cache predates recording it.
+    pub fn read_elsewhere(&self, base: &str) -> Option<&str> {
+        self.base.as_deref().filter(|from| !same_cms(from, base))
     }
 
     /// The id for a name, case-insensitively — how an env override or a config
@@ -129,10 +147,33 @@ pub fn load() -> Library {
     let Ok(path) = path() else {
         return Library::default();
     };
-    std::fs::read_to_string(&path)
+    let cached = std::fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    quarantine(cached, &super::strapi::configured_base())
+}
+
+/// The cache with its rows removed when they came from another CMS.
+///
+/// The provenance stays, so the pane can say where the rows went rather than
+/// showing an empty list with no reason; only the ids go, because an id from
+/// elsewhere is the one thing here that is worse than nothing.
+fn quarantine(mut cached: Library, base: &str) -> Library {
+    if cached.read_elsewhere(base).is_some() {
+        cached.authors.clear();
+        cached.categories.clear();
+    }
+    cached
+}
+
+/// Whether two base URLs name the same CMS: the same host, however it was
+/// typed. `http://localhost:1337/` and `http://localhost:1337` agree;
+/// `https://cms.saagasolve.com` and `http://localhost:1337` do not.
+pub fn same_cms(a: &str, b: &str) -> bool {
+    a.trim()
+        .trim_end_matches('/')
+        .eq_ignore_ascii_case(b.trim().trim_end_matches('/'))
 }
 
 pub fn save(library: &Library) -> Result<()> {
@@ -151,6 +192,7 @@ pub fn refresh() -> Result<Library> {
     let categories = client.list_categories()?;
     let library = Library {
         fetched_at: Some(crate::schedule::ledger::now_rfc3339()),
+        base: Some(client.base().to_string()),
         authors,
         categories,
     };
@@ -212,6 +254,7 @@ mod tests {
     fn ids_are_looked_up_on_the_cached_lists() {
         let library = Library {
             fetched_at: None,
+            base: None,
             authors: vec![entry(12, "Ahmed Raza", None)],
             categories: vec![entry(2, "AI Powered Marketing", None)],
         };
@@ -238,5 +281,80 @@ mod live {
             println!("  category {:>3}  {}", category.id, category.label());
         }
         assert!(!library.authors.is_empty(), "the CMS has authors");
+    }
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    fn from(base: Option<&str>) -> Library {
+        Library {
+            fetched_at: Some("2026-09-08T17:55:01Z".into()),
+            base: base.map(str::to_string),
+            authors: vec![Entry {
+                id: 3,
+                name: "Andrew".into(),
+                slug: "author".into(),
+                detail: None,
+            }],
+            categories: vec![Entry {
+                id: 4,
+                name: "ai-seo-automation".into(),
+                slug: "ai-seo-automation".into(),
+                detail: None,
+            }],
+        }
+    }
+
+    /// The cache that caused it: read from a local Strapi, then consulted for
+    /// a publish to production. The rows go; where they came from stays, so the
+    /// pane can say so.
+    #[test]
+    fn rows_read_from_another_cms_are_dropped_but_their_origin_kept() {
+        let kept = quarantine(
+            from(Some("http://localhost:1337")),
+            "https://cms.saagasolve.com",
+        );
+        assert!(kept.authors.is_empty() && kept.categories.is_empty());
+        assert_eq!(
+            kept.read_elsewhere("https://cms.saagasolve.com"),
+            Some("http://localhost:1337")
+        );
+        assert!(kept.author(3).is_none());
+    }
+
+    #[test]
+    fn rows_from_the_configured_cms_are_kept_however_the_url_was_typed() {
+        let kept = quarantine(
+            from(Some("https://cms.saagasolve.com/")),
+            "https://CMS.saagasolve.com",
+        );
+        assert_eq!(kept.authors.len(), 1);
+        assert!(kept.read_elsewhere("https://cms.saagasolve.com").is_none());
+    }
+
+    /// A cache written before the origin was recorded is trusted as before:
+    /// refusing it would empty every existing install's dropdowns for nothing.
+    #[test]
+    fn a_cache_with_no_recorded_origin_is_kept() {
+        let kept = quarantine(from(None), "https://cms.saagasolve.com");
+        assert_eq!(kept.authors.len(), 1);
+        assert!(kept.read_elsewhere("anything").is_none());
+    }
+
+    #[test]
+    fn the_origin_round_trips_through_the_file_format() {
+        let text = serde_json::to_string(&from(Some("http://localhost:1337"))).unwrap();
+        assert!(
+            text.contains("\"base\":\"http://localhost:1337\""),
+            "{text}"
+        );
+        let back: Library = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.base.as_deref(), Some("http://localhost:1337"));
+        // And the old shape, without it, still reads.
+        let old: Library =
+            serde_json::from_str(r#"{"fetched_at":"x","authors":[],"categories":[]}"#).unwrap();
+        assert!(old.base.is_none());
     }
 }

@@ -29,9 +29,10 @@ use crate::longform::Longform;
 const TITLE_MAX: usize = 200;
 const SLUG_MAX: usize = 80;
 const DESCRIPTION_MAX: usize = 160;
-/// Strapi's ceiling on the long description. Generous, because the field's
-/// whole point is having room the snippet does not.
-const LONG_DESCRIPTION_MAX: usize = 1000;
+/// A sanity clip only. The house limit is [`super::limits::LONG_DESCRIPTION`],
+/// and the repair shortens to it as a sentence rather than cutting a paragraph
+/// at a word — which is what a clip here at the house limit would do first.
+const LONG_DESCRIPTION_MAX: usize = 600;
 const CAPTION_MAX: usize = 120;
 /// Not a CMS limit — an editorial one. Past five the accordion is longer than
 /// the article and the questions stop being ones anyone asked.
@@ -54,8 +55,8 @@ no clever-colon constructions. It is the search result, so it wants to read well
 at around 60.
 
 h1 — the heading printed on the page, only when it should read differently from
-the title. The heading has no length limit and can say the thing properly where
-a title clipped for a search result reads abrupt. Leave it empty whenever the
+the title. Under 200 characters like the title, but it can say the thing properly
+where a title clipped for a search result reads abrupt. Leave it empty whenever the
 title already works as a heading; a duplicate is one more string to keep in sync
 and buys the reader nothing.
 
@@ -63,16 +64,18 @@ description — 140 to 160 characters. It is the teaser on the listing page and
 the search snippet, so it must read as a complete promise and end in a full
 stop. Primary keyword inside the first 60 characters.
 
-longDescription — 300 to 600 characters, or empty. The same promise with room to
-keep it: what the video covers and who it is for, in two or three sentences read
-whole rather than cut to a snippet. Leave it empty rather than padding the short
-one out to length — the page falls back to `description`, and a longer string
-that says no more is worse than the shorter one.
+longDescription — one sentence, 120 to 200 characters, or empty. It is printed
+under the heading as the standfirst, so it has to read as a line, not a
+paragraph: what the video shows and who it is for, once. No list of features and
+no second sentence. Leave it empty rather than restating `description` — the
+page falls back to that, and a longer string that says no more is worse.
 
 keywords — 5 to 10 phrases someone would actually type into a search box.
 
 keywordTargets — the same thinking, structured, for the 3 to 6 terms that
 actually matter. Each is a term, a priority and an intent:
+
+  term — the phrase itself, under 120 characters.
 
   priority — exactly one target is "primary": the single term this page is for,
   and the one the title and opening are written around. Everything else is
@@ -83,7 +86,8 @@ actually matter. Each is a term, a priority and an intent:
   to buy or sign up, "navigational" to reach a specific place. Use only these
   four; leave it out if none of them fits.
 
-  notes — optional, one line, on what the page has to say to satisfy that term.
+  notes — optional, one line under 1000 characters, on what the page has to say to
+  satisfy that term.
 
 Ground every term in what the video actually covers. A term the video does not
 answer is a page that ranks and then disappoints, which is worse than one that
@@ -108,9 +112,11 @@ blocks — the body, in order, mixing three kinds:
   styles, classes or images. The H2 text becomes the page's table of contents, so
   each one has to make sense read on its own, out of order.
 
-  quote — 0 to 2, for a line worth remembering. The highlight must be a literal
-  substring of the quote text; it renders in brand orange, and a highlight that
-  cannot be found renders nothing.
+  quote — 0 to 2, for a line worth remembering: one or two sentences, under 200
+  characters. The CMS field holds 255 and refuses the whole post past it, so a
+  quote that runs long is cut down rather than kept whole. The highlight must be a
+  literal substring of the quote text; it renders in brand orange, and a highlight
+  that cannot be found renders nothing.
 
   table — at most one, and only where the material genuinely compares options or
   summarises structured data. Never force prose into a table. 2 to 5 columns, 2
@@ -226,7 +232,7 @@ impl ArticleExtraction {
             prompt_version: prompt.version,
             prompt_hash: prompt.hash.clone(),
             slug: slugify(&title, SLUG_MAX),
-            h1: heading(&self.h1, &title),
+            h1: clipped(&heading(&self.h1, &title), TITLE_MAX),
             title,
             description: clipped(&self.description, DESCRIPTION_MAX),
             long_description: clipped(&self.long_description, LONG_DESCRIPTION_MAX),
@@ -270,12 +276,7 @@ fn heading(raw: &str, title: &str) -> String {
 
 /// The four values the CMS enum accepts. Anything else is refused for the whole
 /// entry, so an invented intent would fail the create rather than the field.
-const INTENTS: [&str; 4] = [
-    "informational",
-    "commercial",
-    "transactional",
-    "navigational",
-];
+const INTENTS: [&str; 4] = super::limits::INTENTS;
 /// Past six the brief stops being a brief.
 const TARGETS_MAX: usize = 6;
 
@@ -499,6 +500,8 @@ fn clipped(value: &str, max: usize) -> String {
     }
 }
 
+/// The article, and every model call it took — one per draft, so the ledger
+/// shows a correction as a correction rather than folding it into the draft.
 pub fn generate_article(
     longform: &Longform,
     version: Option<u32>,
@@ -507,7 +510,7 @@ pub fn generate_article(
     prompt_root: Option<&std::path::Path>,
     figures: &[FigureOffer],
     components: &[EmbedOffer],
-) -> Result<(Article, crate::agent::trace::LlmStep)> {
+) -> Result<(Article, Vec<crate::agent::trace::LlmStep>)> {
     if longform.chapters.is_empty() {
         bail!("no transcribed chapters to write an article from");
     }
@@ -520,20 +523,31 @@ pub fn generate_article(
     }
     let prompt = build_user_prompt(longform, figures, components);
 
+    let mut steps = Vec::new();
     let (extracted, step) = crate::agent::extract::extract::<ArticleExtraction>(
         crate::agent::prompt::BLOG,
         "blog",
         &system,
-        prompt,
+        prompt.clone(),
         model,
         provider,
     )?;
+    steps.push(step);
+    let mut article = extracted.into_article(version, &system, figures, components);
 
-    let article = extracted.into_article(version, &system, figures, components);
+    // The CMS's limits, checked on the draft and fixed by the model that wrote
+    // it — see [`super::repair`]. A quote past the column used to surface as a
+    // bare 500 at publish, after the images were already up.
+    let repaired = super::repair::to_limits(&mut article, model, provider, &|_| {})?;
+    steps.extend(repaired.steps);
+    for line in repaired.changed {
+        eprintln!("stream-recorder: {line}");
+    }
+
     if !article.is_publishable() {
         bail!("the model returned nothing publishable — no title, slug, description or body");
     }
-    Ok((article, step))
+    Ok((article, steps))
 }
 
 /// Why the standing prompt cannot run this draft, or `None` when it can.
@@ -1362,5 +1376,21 @@ mod tests {
         };
         let err = generate_article(&empty, None, "m", None, None, &[], &[]).unwrap_err();
         assert!(err.to_string().contains("no transcribed chapters"));
+    }
+}
+
+#[cfg(test)]
+mod prompt_limit_tests {
+    use super::SYSTEM_PROMPT;
+
+    /// The prompt says what the CMS holds, so the first draft is the fixed one
+    /// most of the time and the repair turn is the exception.
+    #[test]
+    fn the_prompt_states_the_limits_the_cms_enforces() {
+        assert!(SYSTEM_PROMPT.contains(
+            "quote — 0 to 2, for a line worth remembering: one or two sentences, under 200"
+        ));
+        assert!(SYSTEM_PROMPT.contains("term — the phrase itself, under 120 characters."));
+        assert!(SYSTEM_PROMPT.contains("Under 200 characters like the title"));
     }
 }

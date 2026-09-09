@@ -45,10 +45,12 @@ pub mod components;
 pub mod figures;
 pub mod generate;
 pub mod library;
+pub mod limits;
 pub mod og;
 pub mod pane;
 pub mod payload;
 pub mod preview;
+pub mod repair;
 pub mod schema;
 pub mod strapi;
 pub mod vertical;
@@ -87,6 +89,9 @@ pub struct Chosen {
     pub name: Option<String>,
     /// What the pane shows.
     pub label: String,
+    /// The name the pick was made under, when there was one — what the row the
+    /// id names has to still be called on the CMS the publish goes to.
+    pub remembered: Option<String>,
 }
 
 impl Chosen {
@@ -113,11 +118,13 @@ impl Chosen {
                     id: Some(entry.id),
                     name: None,
                     label: format!("{} (from {env_key})", entry.name),
+                    remembered: Some(entry.name.clone()),
                 },
                 None => Chosen {
                     id: None,
                     label: format!("{name} (from {env_key})"),
                     name: Some(name),
+                    remembered: None,
                 },
             };
         }
@@ -125,14 +132,17 @@ impl Chosen {
             Some(id) => Chosen {
                 id: Some(id),
                 name: None,
-                // The remembered name is only for display, so a cache that has
-                // never been fetched still shows something recognisable.
-                label: remembered.unwrap_or_else(|| format!("#{id}")),
+                // The remembered name is for display and for the publish-time
+                // check, so a cache that has never been fetched still shows
+                // something recognisable.
+                label: remembered.clone().unwrap_or_else(|| format!("#{id}")),
+                remembered,
             },
             None => Chosen {
                 id: None,
                 name: None,
                 label: "none chosen".to_string(),
+                remembered: None,
             },
         }
     }
@@ -201,6 +211,9 @@ pub enum BlogEvent {
     /// [`BlogEvent::Ready`], which means a live CMS entry exists — nothing is
     /// reversible after that one, and everything is after this one.
     Written(PathBuf),
+    /// The draft on disk was brought within the CMS's limits, or found to be
+    /// within them already. One line per change, empty for "nothing to do".
+    Repaired(Vec<String>),
     /// Terminal failure. Distinct from a `Status` with the same words: the app
     /// has to know the thread is gone so it can re-enable the button.
     Failed(String),
@@ -326,7 +339,7 @@ fn write_draft(
         model,
         generate::stale_preamble_note(Some(&session.root), &offers, &requested).as_deref(),
     )));
-    let (article, step) = generate::generate_article(
+    let (article, steps) = generate::generate_article(
         &longform,
         session.version,
         model,
@@ -337,7 +350,9 @@ fn write_draft(
     )?;
     let dir = session.blog_dir();
     let path = schema::save(&dir, &article)?;
-    crate::agent::trace::write_step(&dir, &session.root, &step)?;
+    for step in &steps {
+        crate::agent::trace::write_step(&dir, &session.root, step)?;
+    }
     Ok(path)
 }
 
@@ -485,7 +500,13 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
              upload it into the CMS as videoVertical (this body cannot, having uploaded nothing)"
         );
     }
-    payload::save(&dir, &post.body())
+    let body = post.body();
+    // Said rather than refused: the JSON is the thing being asked for here, and
+    // a body past a limit is exactly the one worth reading.
+    for violation in limits::check(&body["data"]) {
+        eprintln!("stream-recorder: the CMS would refuse this post — {violation}");
+    }
+    payload::save(&dir, &body)
 }
 
 pub fn spawn_publish(
@@ -600,6 +621,35 @@ fn run(
         );
     }
 
+    // An id is a row in one database. The list the pane picked from was read
+    // from whichever CMS the environment named at the time — and that has been
+    // a local Strapi, where author 3 was "Andrew"; on cms.saagasolve.com the
+    // same id is a draft row of someone else, and category 4 is a different
+    // category. So each id is read back from the CMS this publish goes to and
+    // has to still name what the pane said it did. Two small reads, before any
+    // upload, against a byline nobody chose on a permanent page.
+    if author.is_some() || category.is_some() {
+        status("Checking the author and category on the CMS…".into());
+    }
+    if let Some(id) = author {
+        confirm(
+            "author",
+            id,
+            client.author_name(id)?,
+            chosen_author.remembered.as_deref(),
+            client.base(),
+        )?;
+    }
+    if let Some(id) = category {
+        confirm(
+            "category",
+            id,
+            client.category_name(id)?,
+            chosen_category.remembered.as_deref(),
+            client.base(),
+        )?;
+    }
+
     // The draft on disk wins, and that is the whole point of there being a
     // preview. Regenerating here would publish a different article from the one
     // that was just read and approved — the model does not write the same piece
@@ -623,7 +673,7 @@ fn run(
                 model,
                 generate::stale_preamble_note(Some(&session.root), &offers, &requested).as_deref(),
             ));
-            let (article, step) = generate::generate_article(
+            let (article, steps) = generate::generate_article(
                 &longform,
                 session.version,
                 model,
@@ -633,7 +683,9 @@ fn run(
                 &requested,
             )?;
             schema::save(&dir, &article)?;
-            crate::agent::trace::write_step(&dir, &session.root, &step)?;
+            for step in &steps {
+                crate::agent::trace::write_step(&dir, &session.root, step)?;
+            }
             article
         }
     };
@@ -653,7 +705,64 @@ fn run(
     }
 
     let wanted = article.figures();
-    let figures = match wanted.is_empty() {
+
+    // Assembled before anything is uploaded, with the upload results left
+    // blank, so the CMS's limits can be measured against the body as it will be
+    // sent. Everything Postgres bounds is in the article, the chapters and the
+    // config; the media ids and figure URLs still missing are the only fields
+    // not measured. Three publishes each put three images into the media
+    // library and then failed on a pull quote — see [`limits`].
+    let mut new_post = payload::NewVideoPost {
+        date: payload::today(),
+        video_url: upload.url.clone(),
+        video_id: Some(upload.video_id.clone()),
+        duration: duration.round().max(1.0) as u32,
+        thumbnail_id: None,
+        thumbnail_vertical_id: None,
+        vertical: vertical::from_youtube(session),
+        og_image_id: None,
+        cta: cta(&cfg, None),
+        embeds,
+        chapters: timeline.chapters,
+        transcript: timeline.transcript,
+        author_id: author,
+        category_id: category,
+        figures: figures::local(session, &wanted)?,
+        article,
+    };
+    limits::ensure(&new_post.body())?;
+    // Strapi's body middleware takes 1 MB of JSON. A long recording's word
+    // timings are what gets a post past that, and they are the part the page
+    // can do without; the transcript text and the chapters stay.
+    let size = limits::bytes(&new_post.body());
+    if size > limits::BODY_MAX {
+        let words = new_post
+            .transcript
+            .as_ref()
+            .map(|transcript| transcript.words.len())
+            .unwrap_or_default();
+        if let Some(transcript) = new_post.transcript.as_mut() {
+            transcript.words.clear();
+        }
+        let after = limits::bytes(&new_post.body());
+        if after > limits::BODY_MAX {
+            bail!(
+                "the post is {} KB without word timings and Strapi accepts {} KB",
+                after / 1000,
+                limits::BODY_MAX / 1000
+            );
+        }
+        let note = format!(
+            "dropped {words} word timings from the transcript: the post was {} KB and Strapi \
+             accepts {} KB",
+            size / 1000,
+            limits::BODY_MAX / 1000
+        );
+        eprintln!("stream-recorder: {note}");
+        status(note);
+    }
+
+    new_post.figures = match wanted.is_empty() {
         true => Default::default(),
         false => {
             status(format!("Uploading {} figure(s)…", wanted.len()));
@@ -662,30 +771,13 @@ fn run(
     };
 
     status("Uploading the thumbnail…".into());
-    let thumbnail_id = client.upload_media(&thumbnail, Some(&article.title))?;
-    let vertical = vertical::upload(&client, session, status)?;
-    let og_image_id = Some(og::upload(&client, &og_path, &article.title, status)?);
-    let cta = cta(&cfg, cta_image(&client, &cfg, status));
-    let thumbnail_vertical_id = Some(client.upload_media(&portrait, Some(&article.title))?);
+    let title = new_post.article.title.clone();
+    new_post.thumbnail_id = Some(client.upload_media(&thumbnail, Some(&title))?);
+    new_post.vertical = vertical::upload(&client, session, status)?;
+    new_post.og_image_id = Some(og::upload(&client, &og_path, &title, status)?);
+    new_post.cta = cta(&cfg, cta_image(&client, &cfg, status));
+    new_post.thumbnail_vertical_id = Some(client.upload_media(&portrait, Some(&title))?);
 
-    let new_post = payload::NewVideoPost {
-        date: payload::today(),
-        video_url: upload.url.clone(),
-        video_id: Some(upload.video_id.clone()),
-        duration: duration.round().max(1.0) as u32,
-        thumbnail_id: Some(thumbnail_id),
-        thumbnail_vertical_id,
-        vertical,
-        og_image_id,
-        cta,
-        embeds,
-        chapters: timeline.chapters,
-        transcript: timeline.transcript,
-        author_id: author,
-        category_id: category,
-        figures,
-        article,
-    };
     // On disk before the wire, so a body Strapi refuses is still readable —
     // which is the one case where reading it back matters most.
     let body = payload::save(&dir, &new_post.body())?;
@@ -694,13 +786,14 @@ fn run(
     status(format!("Creating “{}” in Strapi…", new_post.article.title));
     let created = client.create_video_post(
         &new_post,
-        // Draft, not published. Reversed from the original decision: the
-        // article is written by a model and the page is permanent and public,
-        // so the last read happens in the CMS while it can still be changed.
-        // `create_video_post` omits `?status=published` for this, which leaves
-        // Strapi's draft untouched by any publish step — the admin URL on the
-        // ledger row is where it gets reviewed and sent live.
-        false,
+        // Published, not left as a draft — the decision reversed once more, and
+        // for a reason: the review now happens here, before the wire. The
+        // article is read in Preview, the fields the CMS or the house style
+        // would refuse are shown and fixed on the Blog tab, and the button is
+        // off until they are. A draft that then had to be found in the admin
+        // and published by hand was a second review nobody did. The ledger
+        // row still records whether Strapi actually published it.
+        true,
     )?;
 
     let post = Post {
@@ -715,6 +808,124 @@ fn run(
     };
     append(session, &post)?;
     Ok(post)
+}
+
+/// The row an id names on the target CMS has to be the one that was picked.
+///
+/// `found` is what the CMS says the row is called, `picked` what the pane said
+/// when the id was chosen. Missing is refused, and so is a different name; the
+/// same name under a different case is not, because that is how the lookups
+/// match everywhere else. `None` for `picked` — an id that came from a live
+/// lookup a moment ago — only has to exist.
+fn confirm(
+    label: &str,
+    id: i64,
+    found: Option<String>,
+    picked: Option<&str>,
+    base: &str,
+) -> Result<()> {
+    const RETRY: &str =
+        "the Blog tab's list was read from another CMS; press Refresh there and pick again";
+    match (found, picked) {
+        (None, _) => bail!("no {label} #{id} on {base} — {RETRY}"),
+        (Some(name), Some(picked)) if !name.trim().eq_ignore_ascii_case(picked.trim()) => {
+            bail!("{label} #{id} on {base} is {name:?}, not {picked:?} — {RETRY}")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Writes the fields edited on the Blog tab's "Needs fixing" card into the
+/// draft on disk.
+///
+/// Keys are [`limits::Target::key`]s; anything else in the form is ignored
+/// rather than written somewhere. A field posted back unchanged is not a
+/// change. The message says what was saved and what is still over, because
+/// the card is about to be repainted from the same file and should agree.
+pub fn save_fields(
+    session: &Session,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<String> {
+    let dir = session.blog_dir();
+    let mut article = schema::load(&dir).context("no draft to edit — press Write Article first")?;
+    let mut written = 0;
+    for (key, text) in fields {
+        let Some(target) = limits::Target::parse(key) else {
+            continue;
+        };
+        if limits::value_of(&article, target) == Some(text.trim()) {
+            continue;
+        }
+        if limits::set(&mut article, target, text) {
+            written += 1;
+        }
+    }
+    if written > 0 {
+        schema::save(&dir, &article)?;
+    }
+    let left = limits::article(&article);
+    Ok(match (written, left.is_empty()) {
+        (0, true) => "Nothing changed; the draft is within the CMS's limits.".to_string(),
+        (0, false) => format!("Nothing changed. Still over: {}", limits::listed(&left)),
+        (n, true) => format!("Saved {n} field(s). The draft is within the CMS's limits."),
+        (n, false) => format!("Saved {n} field(s). Still over: {}", limits::listed(&left)),
+    })
+}
+
+/// Asks the model to shorten every field of the draft on disk that the CMS
+/// would refuse — the Blog tab's other answer to the "Needs fixing" card.
+///
+/// On a thread like the write and the publish, because it is a model call;
+/// it shares their busy flag because all three write `article.json`.
+pub fn spawn_repair(
+    session: Session,
+    model: String,
+    provider: Option<String>,
+    tx: Sender<BlogEvent>,
+) {
+    let unstarted = tx.clone();
+    if let Err(err) = thread::Builder::new()
+        .name("blog-repair".into())
+        .spawn(move || {
+            let status = |msg: String| {
+                let _ = tx.send(BlogEvent::Status(msg));
+            };
+            match repair_draft(&session, &model, provider.as_deref(), &status) {
+                Ok(changed) => {
+                    let _ = tx.send(BlogEvent::Repaired(changed));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: blog repair failed: {err:#}");
+                    let _ = tx.send(BlogEvent::Failed(format!(
+                        "Could not shorten the draft: {err:#}"
+                    )));
+                }
+            }
+        })
+    {
+        let _ = unstarted.send(BlogEvent::Failed(format!(
+            "Could not start the repair: {err}"
+        )));
+    }
+}
+
+fn repair_draft(
+    session: &Session,
+    model: &str,
+    provider: Option<&str>,
+    status: &dyn Fn(String),
+) -> Result<Vec<String>> {
+    let dir = session.blog_dir();
+    let mut article =
+        schema::load(&dir).context("no draft to shorten — press Write Article first")?;
+    let outcome = repair::to_limits(&mut article, model, provider, status)?;
+    if !outcome.changed.is_empty() {
+        schema::save(&dir, &article)?;
+    }
+    for step in &outcome.steps {
+        crate::agent::trace::write_step(&dir, &session.root, step)?;
+    }
+    Ok(outcome.changed)
 }
 
 /// The standing call to action, with its image already uploaded.
@@ -1165,5 +1376,134 @@ mod tests {
         let err = write_payload(&session(&root)).unwrap_err();
         assert!(err.to_string().contains("Write Article"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod confirm_tests {
+    use super::confirm;
+
+    /// The publish that went out with author 3: "Andrew" in the pane, a draft
+    /// row of someone else on the CMS it was sent to. Both names in the message,
+    /// so the reader sees what happened rather than just that it did.
+    #[test]
+    fn a_row_called_something_else_is_refused_naming_both() {
+        let err = confirm(
+            "author",
+            3,
+            Some("Ahmed Raza".into()),
+            Some("Andrew"),
+            "https://cms.saagasolve.com",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("author #3"), "{err}");
+        assert!(err.contains("\"Ahmed Raza\""), "{err}");
+        assert!(err.contains("\"Andrew\""), "{err}");
+        assert!(err.contains("Refresh"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_row_is_refused() {
+        let err = confirm("category", 9, None, Some("Education"), "https://cms")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no category #9 on https://cms"), "{err}");
+    }
+
+    /// Case is not a difference — the by-name lookups are case-insensitive, and
+    /// a pick made under "education" against a row called "Education" is the
+    /// same row.
+    #[test]
+    fn the_same_name_passes_whatever_its_case() {
+        assert!(confirm(
+            "category",
+            2,
+            Some("Education".into()),
+            Some("education"),
+            "b"
+        )
+        .is_ok());
+        assert!(confirm("author", 27, Some(" Andrew ".into()), Some("Andrew"), "b").is_ok());
+    }
+
+    /// An id that came from a live lookup has no remembered name to differ
+    /// from; existing is the whole check.
+    #[test]
+    fn an_id_with_no_remembered_name_only_has_to_exist() {
+        assert!(confirm("author", 12, Some("Anyone".into()), None, "b").is_ok());
+        assert!(confirm("author", 12, None, None, "b").is_err());
+    }
+}
+
+#[cfg(test)]
+mod save_fields_tests {
+    use super::*;
+    use crate::blog::schema::{Article, Block};
+
+    fn session(tag: &str) -> Session {
+        let root = std::env::temp_dir().join(format!("blog-fields-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("blog")).unwrap();
+        Session {
+            root: root.clone(),
+            dir: root.join("drafts"),
+            version: None,
+        }
+    }
+
+    /// The card's edits land in the file the publish reads, and only the
+    /// fields the card names: a stray key writes nothing.
+    #[test]
+    fn edited_fields_are_written_to_the_draft_and_the_rest_left_alone() {
+        let session = session("save");
+        let dir = session.blog_dir();
+        schema::save(
+            &dir,
+            &Article {
+                title: "Title".into(),
+                slug: "title".into(),
+                description: "d".into(),
+                blocks: vec![
+                    Block::Text {
+                        html: "<p>a</p>".into(),
+                    },
+                    Block::Quote {
+                        text: "q".repeat(326),
+                        highlight: String::new(),
+                    },
+                ],
+                ..Article::default()
+            },
+        )
+        .unwrap();
+        let fields = std::collections::BTreeMap::from([
+            (
+                "quote_text:1".to_string(),
+                "A line worth remembering.".to_string(),
+            ),
+            ("password".to_string(), "ignored".to_string()),
+            ("title".to_string(), "Title".to_string()),
+        ]);
+        let message = save_fields(&session, &fields).unwrap();
+        assert!(
+            message.starts_with("Saved 1 field(s). The draft is within"),
+            "{message}"
+        );
+        let back = schema::load(&dir).unwrap();
+        assert!(
+            matches!(&back.blocks[1], Block::Quote { text, .. } if text == "A line worth remembering.")
+        );
+        assert_eq!(back.title, "Title");
+
+        // Still over after the edit: said, so the repainted card agrees.
+        let fields =
+            std::collections::BTreeMap::from([("quote_text:1".to_string(), "x".repeat(300))]);
+        let message = save_fields(&session, &fields).unwrap();
+        assert!(
+            message.contains("Still over: blocks[1] (quote).text is 300"),
+            "{message}"
+        );
+        let _ = std::fs::remove_dir_all(&session.root);
     }
 }

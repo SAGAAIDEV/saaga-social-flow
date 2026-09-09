@@ -828,6 +828,8 @@ impl App {
             UiEvent::SelectThumbnail(id) => self.select_thumbnail(&id),
             UiEvent::BlogAuthorSelected(id) => self.select_blog_author(&id),
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
+            UiEvent::SaveBlogFields(fields) => self.save_blog_fields(&fields),
+            UiEvent::RepairBlog => self.run_repair_blog(),
             UiEvent::ThumbnailModelSelected(id) => self.select_thumbnail_model(&id),
             UiEvent::ToggleReference { name, value } => self.toggle_reference(&name, value),
             UiEvent::AddReference { name, data } => self.add_reference(&name, &data),
@@ -1531,6 +1533,35 @@ impl App {
         self.update_blog_view();
     }
 
+    /// Saves the fields edited on the Blog tab's "Needs fixing" card and
+    /// repaints, so the card shrinks to what is still over and Publish
+    /// comes back when nothing is.
+    fn save_blog_fields(&mut self, fields: &BTreeMap<String, String>) {
+        match crate::blog::save_fields(&self.session, fields) {
+            Ok(message) => self.set_blog_status(&message),
+            Err(err) => self.set_blog_status(&format!("Could not save the fields: {err:#}")),
+        }
+        self.update_blog_view();
+        self.sync_controls();
+    }
+
+    /// Asks the model to shorten every field the CMS would refuse. Shares
+    /// `blog_busy` with the write and the publish: all three write the draft.
+    fn run_repair_blog(&mut self) {
+        if self.blog_busy {
+            self.set_blog_status("Already working on the article…");
+            return;
+        }
+        self.blog_busy = true;
+        crate::blog::spawn_repair(
+            self.session.clone(),
+            self.posts_pick.model().to_string(),
+            self.posts_pick.provider().map(str::to_string),
+            self.blog_tx.clone(),
+        );
+        self.sync_controls();
+    }
+
     fn set_blog_status(&self, text: &str) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_blog_status(text);
@@ -1588,6 +1619,17 @@ impl App {
                     self.set_blog_status(&format!(
                         "Strapi: {authors} author(s), {categories} category(ies)."
                     ));
+                    self.sync_controls();
+                }
+                crate::blog::BlogEvent::Repaired(changed) => {
+                    self.blog_busy = false;
+                    // Repaint first: the card is what shrinks, and the status
+                    // line is the receipt.
+                    self.update_blog_view();
+                    self.set_blog_status(&match changed.is_empty() {
+                        true => "Nothing needed shortening.".to_string(),
+                        false => format!("Shortened: {}", changed.join("; ")),
+                    });
                     self.sync_controls();
                 }
                 crate::blog::BlogEvent::Failed(msg) => {
@@ -2139,6 +2181,9 @@ impl App {
                     // The last stage of the render chain, so the pane's pipeline
                     // strip can show the whole run without a trip to the YouTube tab.
                     youtube => crate::publish::longform(&self.session).map(|upload| upload.url),
+                    // The vertical cut's Short, listed beside it so neither link
+                    // needs the YouTube tab.
+                    short => crate::publish::short(&self.session).map(|upload| upload.url),
                     // The figures snipped during the take, each with what was said
                     // over it. Same view the Blog tab embeds — see there for `scale`.
                     figures => crate::figure::pane::build(
@@ -2656,13 +2701,34 @@ impl App {
                             ));
                         }
                         crate::publish::Orientation::Vertical => {
-                            self.set_publish_status(&format!("Short live at {}", upload.url));
+                            // The Short lands second, and a line naming only it
+                            // would replace the longform's — leaving one of the
+                            // two links on screen. Both, with the longform read
+                            // back from the row its own event appended.
+                            let longform = crate::publish::longform(&self.session);
+                            let status = match &longform {
+                                Some(long) => {
+                                    format!("Live at {}. Short live at {}", long.url, upload.url)
+                                }
+                                None => format!("Short live at {}", upload.url),
+                            };
+                            self.set_publish_status(&status);
                             // The blog's mobile player embeds it, so the pane
                             // that shows the body is out of date until it re-reads.
                             self.update_blog_view();
-                            self.pipeline_status(&format!("Short on YouTube at {}.", upload.url));
+                            let pipeline = match &longform {
+                                Some(long) => format!(
+                                    "On YouTube at {} and the Short at {}. The blog is ready when you are.",
+                                    long.url, upload.url
+                                ),
+                                None => format!("Short on YouTube at {}.", upload.url),
+                            };
+                            self.pipeline_status(&pipeline);
                         }
                     }
+                    // The Video pane lists both links under the clips, so it has
+                    // to re-read the ledger after either row lands.
+                    self.update_video_view();
                 }
                 crate::publish::PublishEvent::Done => {
                     self.publish_busy = false;

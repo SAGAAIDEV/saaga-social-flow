@@ -156,6 +156,12 @@ pub enum WebEvent {
     BlogCategory {
         value: String,
     },
+    /// The Blog tab's "Needs fixing" card, whole: over-limit field key → text.
+    SaveBlogFields {
+        fields: std::collections::BTreeMap<String, String>,
+    },
+    /// Shorten every over-limit field of the draft with the model.
+    RepairBlog,
     /// Open the drag-to-select overlay for a figure. The chord is the usual
     /// way in; the button is for the case where the thing worth showing is
     /// already on screen and still there.
@@ -231,6 +237,8 @@ impl WebEvent {
             }
             WebEvent::BlogAuthor { value } => UiEvent::BlogAuthorSelected(value),
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
+            WebEvent::SaveBlogFields { fields } => UiEvent::SaveBlogFields(fields),
+            WebEvent::RepairBlog => UiEvent::RepairBlog,
             WebEvent::CopyText { text } => UiEvent::CopyText(text),
             WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
             WebEvent::TestSettings { service } => UiEvent::TestSettings(service),
@@ -643,6 +651,23 @@ mod tests {
             }
         );
     }
+    /// The "Needs fixing" card posts its boxes under the limits' target keys,
+    /// and they have to arrive as typed — the app parses the keys back.
+    #[test]
+    fn blog_fixes_reach_the_ui_event_under_their_keys() {
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"saveBlogFields","fields":{"quote_text:4":"Shorter.","title":"T"}}"#,
+        )
+        .unwrap();
+        let UiEvent::SaveBlogFields(fields) = event.into_ui_event() else {
+            panic!("wrong event")
+        };
+        assert_eq!(fields["quote_text:4"], "Shorter.");
+        assert_eq!(fields["title"], "T");
+        let event: WebEvent = serde_json::from_str(r#"{"type":"repairBlog"}"#).unwrap();
+        assert!(matches!(event.into_ui_event(), UiEvent::RepairBlog));
+    }
+
     #[test]
     fn youtube_details_reach_the_ui_event() {
         let event: WebEvent = serde_json::from_str(

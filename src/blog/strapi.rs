@@ -70,6 +70,18 @@ const DRAFT: &str = "draft";
 /// Strapi with a ledger that called them live.
 pub const PRODUCTION: &str = "https://cms.saagasolve.com";
 
+/// The CMS the environment names, before any client exists.
+///
+/// What the author and category cache is keyed by — see [`super::library`] —
+/// so a list read from one Strapi is not offered as ids for another. The same
+/// answer [`Strapi::from_env`] builds its client on.
+pub fn configured_base() -> String {
+    env("STRAPI_API_URL")
+        .unwrap_or_else(|| PRODUCTION.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// What `status` is sent on a write. Never omitted: see the module docs.
 fn status_for(publish: bool) -> &'static str {
     match publish {
@@ -133,14 +145,11 @@ pub struct Created {
 impl Strapi {
     /// The client for the CMS the environment names, production by default.
     pub fn from_env() -> Result<Strapi> {
-        let base = env("STRAPI_API_URL").unwrap_or_else(|| PRODUCTION.to_string());
+        let base = configured_base();
         let token = env("STRAPI_API_TOKEN").with_context(|| {
             format!("STRAPI_API_TOKEN is unset — a token for {base} belongs in dev.sops.env")
         })?;
-        Ok(Strapi {
-            base: base.trim_end_matches('/').to_string(),
-            token,
-        })
+        Ok(Strapi { base, token })
     }
 
     /// A client pointed at nowhere, for the tests of callers that must decide
@@ -158,6 +167,11 @@ impl Strapi {
         format!("Bearer {}", self.token)
     }
 
+    /// Where this client posts, without a trailing slash.
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
     // ------------------------------------------------------------- lookups
 
     pub fn find_author(&self, name: &str) -> Option<i64> {
@@ -166,6 +180,16 @@ impl Strapi {
 
     pub fn find_category(&self, name: &str) -> Option<i64> {
         self.find_relation(CATEGORIES_PATH, "category", name)
+    }
+
+    /// What the author row `id` is called on this CMS, or `None` when there is
+    /// no such row. The publish-time check on an id picked from the cache.
+    pub fn author_name(&self, id: i64) -> Result<Option<String>> {
+        self.name_by_id(AUTHORS_PATH, "author", id)
+    }
+
+    pub fn category_name(&self, id: i64) -> Result<Option<String>> {
+        self.name_by_id(CATEGORIES_PATH, "category", id)
     }
 
     /// Every author in the CMS, for the picker.
@@ -279,6 +303,49 @@ impl Strapi {
         }
         eprintln!("stream-recorder: strapi found no {label} named {name:?}");
         None
+    }
+
+    /// The `name` on one row, by numeric id.
+    ///
+    /// Published first, then draft. Both collections have Draft & Publish on,
+    /// so one document is two rows with two ids, and the list the pane was
+    /// read from is the published one — but an id that only exists as a draft
+    /// is still an id Strapi will happily attach, which is exactly how author 3
+    /// went from "Andrew" on one CMS to someone else's unpublished row on
+    /// another. An error here is a failed read, not a missing row: the caller
+    /// stops either way, but says different things.
+    fn name_by_id(&self, path: &str, label: &str, id: i64) -> Result<Option<String>> {
+        for status in [PUBLISHED, DRAFT] {
+            let url = format!("{}{path}", self.base);
+            let response = ureq::get(&url)
+                .set("Authorization", &self.bearer())
+                .query("filters[id][$eq]", &id.to_string())
+                .query("fields[0]", "name")
+                .query(STATUS, status)
+                .query("pagination[pageSize]", "1")
+                .timeout(LOOKUP_TIMEOUT)
+                .call();
+            let body: serde_json::Value = match response {
+                Ok(response) => response
+                    .into_json()
+                    .with_context(|| format!("parsing the {label} #{id} lookup"))?,
+                Err(ureq::Error::Status(code, response)) => {
+                    let detail = response.into_string().unwrap_or_default();
+                    bail!(
+                        "strapi refused the {label} #{id} lookup ({code}): {}",
+                        detail.trim()
+                    );
+                }
+                Err(err) => {
+                    return Err(err)
+                        .with_context(|| format!("looking up {label} #{id} on {}", self.base))
+                }
+            };
+            if let Some(name) = name_in(&body) {
+                return Ok(Some(name));
+            }
+        }
+        Ok(None)
     }
 
     // --------------------------------------------------------------- media
@@ -534,6 +601,15 @@ fn is_published(entry: &serde_json::Value) -> bool {
         .is_some_and(|at| !at.trim().is_empty())
 }
 
+/// The `name` of the first row in a list response, trimmed.
+fn name_in(body: &serde_json::Value) -> Option<String> {
+    body["data"]
+        .get(0)?
+        .get("name")?
+        .as_str()
+        .map(|name| name.trim().to_string())
+}
+
 /// The id and URL out of `/api/upload`'s array-shaped answer.
 fn media_entry(body: &serde_json::Value) -> Option<(i64, String)> {
     let first = body.as_array()?.first()?;
@@ -759,5 +835,25 @@ mod tests {
     fn the_blog_publishes_to_production_by_default() {
         assert_eq!(PRODUCTION, "https://cms.saagasolve.com");
         assert!(!PRODUCTION.ends_with('/'));
+    }
+}
+
+#[cfg(test)]
+mod lookup_tests {
+    use super::name_in;
+    use serde_json::json;
+
+    #[test]
+    fn the_name_is_read_off_the_first_row_and_trimmed() {
+        let body = json!({ "data": [{ "id": 3, "documentId": "d", "name": " Ahmed Raza " }] });
+        assert_eq!(name_in(&body).as_deref(), Some("Ahmed Raza"));
+    }
+
+    /// An empty page is "no such row", not a parse failure.
+    #[test]
+    fn an_empty_page_is_none() {
+        assert_eq!(name_in(&json!({ "data": [] })), None);
+        assert_eq!(name_in(&json!({ "data": null })), None);
+        assert_eq!(name_in(&json!({ "data": [{ "id": 3 }] })), None);
     }
 }

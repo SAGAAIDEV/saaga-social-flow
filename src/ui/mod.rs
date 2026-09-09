@@ -183,6 +183,11 @@ pub enum UiEvent {
     /// A Strapi relation id, or empty for none.
     BlogAuthorSelected(String),
     BlogCategorySelected(String),
+    /// The Blog tab's "Needs fixing" card, saved: [`crate::blog::limits::Target`]
+    /// key → the edited text.
+    SaveBlogFields(std::collections::BTreeMap<String, String>),
+    /// Shorten every over-limit field of the draft with the model.
+    RepairBlog,
     ToggleReference {
         name: String,
         value: bool,
@@ -2506,8 +2511,8 @@ pub fn attach_controls(
 
     let blog_status = NSTextField::labelWithString(
         &NSString::from_str(
-            "Writes the article and creates it as a draft in Strapi. One model call.\n\
-             Review it there and publish from the CMS.",
+            "Writes the article and publishes it to the blog in Strapi. One model call.\n\
+             Read it in Preview first — the page goes live.",
         ),
         mtm,
     );
