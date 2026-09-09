@@ -507,6 +507,7 @@ impl App {
             Action::PullAnalytics => self.run_analytics_pull(),
             Action::Reflect => self.run_reflect(),
             Action::CaptureFrame => self.capture_frame(),
+            Action::CaptureScreen => self.capture_screen(),
             Action::CaptureFigure => self.capture_figure(),
             Action::WriteBlurbs => self.write_blurbs(),
             Action::GenerateThumbnails => self.run_thumbnails(),
@@ -1733,6 +1734,41 @@ impl App {
         self.update_video_view();
     }
 
+    /// The Retake screen button: grab the screen alone and keep the photo.
+    ///
+    /// The render and Retake photo take both at one instant so the pair belongs
+    /// together — but once the photo is right, the thing most often wrong is the
+    /// slide behind it, and retaking both to fix the slide throws away the
+    /// expression that was fine. The newest screen grab is the one used, so this
+    /// simply becomes it.
+    fn capture_screen(&mut self) {
+        let message = match self.take_screen_grab() {
+            None => "This layout has no screen to grab — pick a layout with one, or snip a figure \
+                 instead"
+                .to_string(),
+            Some(Err(err)) => format!("The screen grab failed: {err:#}"),
+            Some(Ok(shot)) => format!(
+                "Took the screen ({}). Generate thumbnails to use it; the artwork set draws \
+                 over your photo only",
+                file_name(&shot)
+            ),
+        };
+        self.set_thumbnail_status(&message);
+        self.update_video_view();
+    }
+
+    /// The screen exactly as the layout sees it — the tap the compositor reads —
+    /// into the project's screen grabs. `None` is the ordinary case for a
+    /// talking-head layout, not a failure worth reporting.
+    fn take_screen_grab(&self) -> Option<anyhow::Result<std::path::PathBuf>> {
+        self.screen
+            .as_ref()
+            .and_then(|screen| screen.tap().latest())
+            .map(|frame| {
+                crate::thumbnail::still::write_screen(&self.session.root, frame.pixels.get())
+            })
+    }
+
     /// Grabs the newest camera frame — and the screen, when the layout has one —
     /// into the project's stills. Returns what was taken, or why nothing was.
     ///
@@ -1746,16 +1782,7 @@ impl App {
             return Err("No camera frame yet".into());
         };
         let camera = crate::thumbnail::still::write(&self.session.root, frame.pixels.get());
-        // The tap the compositor reads, so this is the screen exactly as the
-        // layout sees it. `None` is the ordinary case for a talking-head layout,
-        // not a failure worth reporting.
-        let screen = self
-            .screen
-            .as_ref()
-            .and_then(|screen| screen.tap().latest())
-            .map(|frame| {
-                crate::thumbnail::still::write_screen(&self.session.root, frame.pixels.get())
-            });
+        let screen = self.take_screen_grab();
 
         match (camera, screen) {
             (Err(err), _) => Err(format!("Could not save the photo: {err:#}")),

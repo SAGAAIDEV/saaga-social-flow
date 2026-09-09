@@ -70,6 +70,9 @@ pub enum Action {
     Reflect,
     ApplyRewrites,
     CaptureFrame,
+    /// Grab the screen alone, keeping the photo — see `App::capture_screen`.
+    /// No hotkey: it is pressed from the pane that shows both pictures.
+    CaptureScreen,
     /// Open the drag-to-select overlay for a blog figure — see
     /// [`crate::figure`]. Its own chord rather than a click, because the whole
     /// point is to catch what is on screen *now*, and reaching for a button in

@@ -62,6 +62,8 @@ pub enum WebEvent {
     Reflect,
     /// Grab the current camera frame as the thumbnail's subject.
     CaptureFrame,
+    /// Grab the screen alone, keeping the photo that was already taken.
+    CaptureScreen,
     GenerateThumbnails,
     /// Draw the procedural card.
     DrawCard,
@@ -193,6 +195,7 @@ impl WebEvent {
             WebEvent::Apply => UiEvent::Action(crate::hotkeys::Action::ApplyRewrites),
             WebEvent::Reflect => UiEvent::Action(crate::hotkeys::Action::Reflect),
             WebEvent::CaptureFrame => UiEvent::Action(crate::hotkeys::Action::CaptureFrame),
+            WebEvent::CaptureScreen => UiEvent::Action(crate::hotkeys::Action::CaptureScreen),
             WebEvent::GenerateThumbnails => {
                 UiEvent::Action(crate::hotkeys::Action::GenerateThumbnails)
             }
@@ -461,6 +464,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<WebEvent>(r#"{"type":"captureFrame"}"#).unwrap(),
             WebEvent::CaptureFrame
+        );
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"captureScreen"}"#).unwrap(),
+            WebEvent::CaptureScreen
         );
         assert_eq!(
             serde_json::from_str::<WebEvent>(r#"{"type":"selectThumbnail","id":"thumb-a"}"#)
