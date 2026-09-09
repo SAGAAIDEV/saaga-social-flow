@@ -37,6 +37,24 @@ pub struct Pane {
     /// the display's backing scale to report sizes in pixels, and a pane that
     /// read the display itself could not be tested.
     pub figures: crate::figure::pane::FiguresView,
+    /// The draft's fields the CMS would refuse, each with its text to edit.
+    /// Empty is the normal case; while it is not, Publish is off.
+    pub fixes: Vec<FixView>,
+}
+
+/// One over-limit field on the "Needs fixing" card.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FixView {
+    /// [`super::limits::Target::key`] — the form field name the edit posts
+    /// back under.
+    pub key: String,
+    /// "Block 5 · quote".
+    pub label: String,
+    /// Why, in the checker's words.
+    pub problem: String,
+    pub text: String,
+    pub length: usize,
+    pub limit: usize,
 }
 
 /// One option in the author or category dropdown.
@@ -129,13 +147,17 @@ pub fn build(
     let article = schema::load(dir).ok();
     let author = super::chosen_author(cfg, library);
     let category = super::chosen_category(cfg, library);
+    let fixes = article.as_ref().map(fixes_view).unwrap_or_default();
     Pane {
         blocked: blocked.or_else(|| {
-            article
-                .is_none()
-                .then(|| "No article yet — press Create Draft to write one.".to_string())
+            article.is_none().then(|| {
+                "No article yet — press Write Article, or Publish to write and post it.".to_string()
+            })
         }),
-        can_publish,
+        // A draft the CMS would refuse cannot go: the button says so before
+        // the publish would, and the card below says what to change.
+        can_publish: can_publish && fixes.is_empty(),
+        fixes,
         prompt: prompt_view(root, crate::agent::prompt::library_dir().as_deref()),
         authors: choices(&library.authors, author.id),
         categories: choices(&library.categories, category.id),
@@ -182,6 +204,15 @@ fn choices(entries: &[super::library::Entry], selected: Option<i64>) -> Vec<Choi
 /// A cold cache is the common first-run state and it is not an error, so it
 /// reads as an instruction rather than a failure.
 fn library_hint(library: &super::library::Library) -> String {
+    // Rows from another CMS have already been dropped by `library::load`; this
+    // is the reason the dropdowns are empty, and what to do about it.
+    let current = super::strapi::configured_base();
+    if let Some(from) = library.read_elsewhere(&current) {
+        return format!(
+            "These lists were read from {from}, not {current}. Press Refresh to read them from \
+             the CMS this will publish to."
+        );
+    }
     match &library.fetched_at {
         Some(when) if !library.authors.is_empty() => format!(
             "{} author(s), {} category(ies), read {when}",
@@ -191,6 +222,36 @@ fn library_hint(library: &super::library::Library) -> String {
         Some(when) => format!("Strapi returned no authors when read {when}"),
         None => "Press Refresh to read the authors and categories from Strapi.".to_string(),
     }
+}
+
+/// The fields past a CMS limit, one row each, with the text to edit.
+///
+/// Length violations on fields the model wrote — the ones a rewrite can fix.
+/// One row per field even when a field breaks two rules, and counted the way
+/// the column counts, which is also what the card's live counter does.
+pub fn fixes_view(article: &Article) -> Vec<FixView> {
+    let mut seen: Vec<super::limits::Target> = Vec::new();
+    super::limits::article(article)
+        .into_iter()
+        .filter_map(|violation| {
+            let (target, limit) = (violation.target?, violation.limit?);
+            if seen.contains(&target) {
+                return None;
+            }
+            seen.push(target);
+            let text = super::limits::value_of(article, target)
+                .unwrap_or_default()
+                .to_string();
+            Some(FixView {
+                key: target.key(),
+                label: target.label(),
+                problem: violation.problem,
+                length: text.encode_utf16().count(),
+                limit,
+                text,
+            })
+        })
+        .collect()
 }
 
 fn article_view(article: Article) -> ArticleView {
@@ -399,7 +460,7 @@ mod tests {
             &no_library(),
             figures(&dir),
         );
-        assert!(pane.blocked.unwrap().contains("press Create Draft"));
+        assert!(pane.blocked.unwrap().contains("press Write Article"));
         assert!(pane.article.is_none());
         assert!(pane.posted.is_none());
     }
@@ -638,6 +699,7 @@ mod tests {
         };
         super::super::library::Library {
             fetched_at: Some("2026-08-29T00:00:00Z".into()),
+            base: None,
             authors: vec![
                 entry(12, "Ahmed Raza", Some("Senior SEO Content Strategist")),
                 entry(11, "Danish Rafique", Some("Senior SEO Content Strategist")),
@@ -660,5 +722,62 @@ mod tests {
         assert_eq!(view.label, "v0 (builtin)");
         assert!(view.path.ends_with("blog.article.txt"), "{}", view.path);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod fixes_tests {
+    use super::*;
+    use crate::blog::schema::KeywordTarget;
+
+    /// The card lists the quote that failed three publishes, under the key the
+    /// form posts back and with the count the counter starts from.
+    #[test]
+    fn an_over_limit_quote_becomes_an_editable_row() {
+        let article = Article {
+            title: "Title".into(),
+            slug: "title".into(),
+            description: "d".into(),
+            blocks: vec![
+                Block::Text {
+                    html: "<p>a</p>".into(),
+                },
+                Block::Quote {
+                    text: "q".repeat(326),
+                    highlight: String::new(),
+                },
+            ],
+            keyword_targets: vec![KeywordTarget {
+                term: "fine".into(),
+                priority: "primary".into(),
+                intent: String::new(),
+                notes: String::new(),
+            }],
+            ..Article::default()
+        };
+        let fixes = fixes_view(&article);
+        assert_eq!(fixes.len(), 1, "{fixes:?}");
+        assert_eq!(fixes[0].key, "quote_text:1");
+        assert_eq!(fixes[0].label, "Block 2 · quote");
+        assert_eq!((fixes[0].length, fixes[0].limit), (326, 255));
+        assert_eq!(fixes[0].text.len(), 326);
+        assert!(fixes[0].problem.contains("326"), "{}", fixes[0].problem);
+    }
+
+    /// A draft within limits has no card, and a blank required field is not a
+    /// row here: there is nothing to shorten, and the publish names it.
+    #[test]
+    fn a_draft_within_limits_has_no_rows() {
+        let article = Article {
+            title: "Title".into(),
+            slug: "title".into(),
+            description: String::new(),
+            blocks: vec![Block::Quote {
+                text: "Short.".into(),
+                highlight: String::new(),
+            }],
+            ..Article::default()
+        };
+        assert!(fixes_view(&article).is_empty());
     }
 }

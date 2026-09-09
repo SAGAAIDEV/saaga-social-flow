@@ -194,6 +194,9 @@ mod tests {
         assert!(html.contains("Nothing written yet"));
         assert!(html.contains("No artwork yet"));
         assert!(html.contains("No photo yet"));
+        // Both retakes are offered whatever the state: the photo, and the screen
+        // on its own so a good photo survives a slide change.
+        assert!(html.contains("captureFrame") && html.contains("captureScreen"));
         assert!(html.contains("Nothing rendered yet"));
         assert!(html.contains("name=\"notes\""));
         assert!(!html.contains("<fieldset disabled>"));
@@ -382,6 +385,44 @@ mod tests {
         assert!(steps[youtube..].contains("done"), "{steps}");
     }
 
+    /// Both cuts get their link on the pane, the longform first. The Short
+    /// lands second and its status line used to be the only link left on
+    /// screen.
+    #[test]
+    fn an_uploaded_project_lists_both_youtube_links() {
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => empty_art(), review => no_clips(), figures => no_figures(),
+                youtube => "https://www.youtube.com/watch?v=abc",
+                short => "https://www.youtube.com/shorts/def",
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        let card = &html[html.find("On YouTube").expect("the upload card")..];
+        let longform = card
+            .find("https://www.youtube.com/watch?v=abc")
+            .expect("the longform link");
+        let short = card
+            .find("https://www.youtube.com/shorts/def")
+            .expect("the short link");
+        assert!(longform < short, "{card}");
+
+        // Nothing up yet: no card, rather than two empty rows.
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => empty_art(), review => no_clips(), figures => no_figures(),
+                youtube => None::<String>, short => None::<String>,
+            },
+        );
+        assert!(!html.contains("On YouTube"), "{html}");
+    }
+
     #[test]
     fn an_empty_reflect_pane_invites_the_first_run() {
         let html = page(
@@ -445,6 +486,56 @@ mod tests {
         // under it, which reads as a finding of "none".
         assert!(!html.contains("Subtitle options"));
         assert!(html.contains("Closing options"));
+    }
+
+    /// A draft the CMS would refuse shows the field to fix, editable, under the
+    /// key the form posts back, with the count the live counter starts from.
+    /// Publish is off while the card is up, and both ways out are offered.
+    #[test]
+    fn the_blog_pane_lists_over_limit_fields_to_edit() {
+        let html = page(
+            "blog.html",
+            context! {
+                blocked => None::<String>,
+                can_publish => false,
+                author => "Andrew", category => "Education", library_hint => "read",
+                authors => Vec::<()>::new(), categories => Vec::<()>::new(),
+                prompt => context! { label => "v0 (builtin)", path => "/tmp/p", builtin => true },
+                posted => None::<()>,
+                figures => context! { can_write => false, hint => "", rows => Vec::<()>::new() },
+                fixes => vec![context! {
+                    key => "quote_text:4", label => "Block 5 · quote",
+                    problem => "is 326 characters and the CMS holds 255",
+                    text => "q".repeat(326), length => 326, limit => 255,
+                }],
+                article => None::<()>,
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("Needs fixing before Publish"), "{html}");
+        assert!(
+            html.contains(r#"<textarea name="quote_text:4" rows="4" data-limit="255">"#),
+            "{html}"
+        );
+        assert!(html.contains("326 / 255"), "{html}");
+        assert!(html.contains(r#"class="count over""#), "{html}");
+        assert!(html.contains("Save fixes"), "{html}");
+        assert!(html.contains(r#"{"type":"repairBlog"}"#), "{html}");
+
+        // No card at all when nothing is over.
+        let html = page(
+            "blog.html",
+            context! {
+                blocked => None::<String>, can_publish => true,
+                author => "", category => "", library_hint => "",
+                authors => Vec::<()>::new(), categories => Vec::<()>::new(),
+                prompt => context! { label => "v0", path => "", builtin => true },
+                posted => None::<()>,
+                figures => context! { can_write => false, hint => "", rows => Vec::<()>::new() },
+                fixes => Vec::<()>::new(), article => None::<()>,
+            },
+        );
+        assert!(!html.contains("Needs fixing"), "{html}");
     }
 
     /// Everything a human should check before a permanent public URL exists:
@@ -543,7 +634,7 @@ mod tests {
         assert!(html.contains("Education"));
         assert!(html.contains("publishBlog"));
         assert!(html.contains("editBlogPrompt"));
-        // Write and Preview come before Create Draft, in that order: it is the
+        // Write and Preview come before Publish, in that order: it is the
         // order of commitment, and it is the whole reason a draft can be read
         // before a permanent slug exists.
         let write_at = html.find("writeBlog").expect("the write button");
@@ -554,7 +645,7 @@ mod tests {
             "buttons out of order"
         );
         assert!(
-            html.contains("Create Draft publishes the draft below as it stands"),
+            html.contains("Publish puts the draft below live as it stands"),
             "the pane says the draft on disk is what publishes"
         );
         // The pickers, and the row each one is currently on. Without `selected`

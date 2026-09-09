@@ -19,14 +19,19 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       visibility chosen on the YouTube tab — but only for a project that has
       never been uploaded. A re-render of a video already on YouTube stops here
       and says so; publishing it again as a new video is the YouTube tab's
-      button, so tightening a cut never mints a duplicate on the channel.
+      button, so tightening a cut never mints a duplicate on the channel. When
+      the project has a vertical cut it follows as a Short, and the status line
+      and the Video pane's **On YouTube** card list both links — the longform's
+      and the Short's — rather than the last one to land.
 
    The chain stops at the first failure and the status line under the button
    says which step. Everything the press produces lands in the **Video details**
    pane on the right, top to bottom in the order it is produced: the notes that
    steer the copy and the copy itself, the artwork set with the photo it was
    drawn from, and the rendered clips to scrub before anything else goes out.
-   **Retake photo** and **Redraw artwork** are the corrections; the design
+   **Retake photo**, **Retake screen** and **Redraw artwork** are the
+   corrections — the screen on its own, so a good photo survives a slide
+   change; the design
    controls (kicker, theme, focus) and the optional AI image experiments are
    folded away beneath them. Between the artwork and the clips, a **Figures**
    card lists every figure snipped during the take with what was said over it,
@@ -36,11 +41,26 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    There is no Thumbnails tab and no Review sub-tab any more.
 2. **YouTube** — edit and save the title and description, choose visibility,
    connect the channel, and upload (or re-upload) the longform by hand.
-3. **Blog (Strapi)** — write and review the companion article, then send it to Strapi.
+3. **Blog (Strapi)** — write and review the companion article, then publish it live at
+   `/blog/{slug}`; the ledger row records whether Strapi actually published it.
    Deliberately not part of the render's chain: the blog carries the portrait
    poster and the OG image, and this is where they get checked first. When the
    blog is blocked on artwork the reason is the specific one — a photo or design
    changed since the set was drawn — rather than a generic "generate artwork".
+   Before anything is uploaded, the post is measured against the CMS's field
+   limits — a Strapi `string` is a 255-character column in Postgres whether the
+   schema says so or not, and a pull quote past it used to come back as a bare
+   500 after the three images were already in the media library — and the
+   picked author and category are read back from the CMS the publish goes to,
+   so an id from a list read off a local Strapi cannot land on production under
+   someone else's name. The Blog tab says where its lists came from when that
+   is not the configured CMS; Refresh re-reads them. A fresh draft is checked
+   against the same limits as it is written and the model is asked to shorten
+   what is over; a draft already on disk that is over shows a **Needs fixing**
+   card on the Blog tab, each field editable in place with a live count, with
+   **Save fixes** and **Shorten with the model** as the two ways out. Publish is
+   off until the card is empty. The long description is held to one sentence of
+   200 characters the same way: not a CMS limit, but it prints under the heading.
    The existing CMS preview and publishing controls remain here.
 4. **Socials** — generate and edit platform copy; upload video media to create public
    asset URLs; build the Buffer plan, review/approve it, and queue it. Analytics and

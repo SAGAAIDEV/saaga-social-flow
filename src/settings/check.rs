@@ -143,9 +143,10 @@ fn buffer() -> Result<String> {
 
 /// A token can read the CMS and still be unable to write to it. `list_authors`
 /// is the same lookup the Blog pane populates its byline dropdown from, so this
-/// answers the question that pane will ask next.
+/// answers the question that pane will ask next. The host has a default —
+/// see `blog::strapi::PRODUCTION` — so the token is the only thing that can be
+/// missing.
 fn strapi() -> Result<String> {
-    required("STRAPI_API_URL")?;
     required("STRAPI_API_TOKEN")?;
     let client = crate::blog::strapi::Strapi::from_env()?;
     let authors = client.list_authors().context("listing Strapi authors")?;

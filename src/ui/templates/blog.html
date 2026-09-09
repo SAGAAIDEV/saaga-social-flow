@@ -35,6 +35,23 @@
   .pick .name { color: var(--dim); font-size: 11px; text-transform: uppercase; }
 
   /*
+    The fields the CMS would refuse, editable in place. Bordered in the warning
+    colour because the button above is off until this card is empty.
+  */
+  .fixes {
+    margin: 12px 0; padding: 10px 12px; border: 1px solid var(--warn, #d08a2a);
+    border-radius: 8px; max-width: 900px;
+  }
+  .fixes h2 { margin: 0 0 4px; }
+  .fix { margin: 10px 0; }
+  .fix textarea {
+    width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; font: inherit;
+    background: #0e1116; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .fix textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .count.over { color: var(--warn, #d08a2a); }
+
+  /*
     Figures read as a column of rows rather than a grid of thumbnails: the
     caption is the thing being reviewed, and a grid sizes itself for the
     pictures and leaves no room to read.
@@ -52,27 +69,27 @@
 
 <h1>Blog</h1>
 <div class="sub">
-  The longform as a video post on saagasolve.com/education. Drafted for review, not queued.
+  The longform as a video post on saagasolve.com/blog. Reviewed here; live on Publish.
 </div>
 
 <!--
   Left to right is the order of commitment. Write Article costs an LLM call and
-  a local file; Preview costs nothing; Create Draft makes a CMS entry with a
-  permanent slug. The primary style is on Create Draft because it is the one
+  a local file; Preview costs nothing; Publish makes a live page with a
+  permanent slug. The primary style is on Publish because it is the one
   that finishes the stage, but the two before it are what make it safe.
 -->
 <div class="bar">
   {{ ui.action("Write Article", {"type": "writeBlog"}) }}
   {{ ui.action("Preview", {"type": "previewBlog"}, disabled=not article) }}
-  {{ ui.action("Create Draft", {"type": "publishBlog"}, primary=true, disabled=not can_publish) }}
+  {{ ui.action("Publish", {"type": "publishBlog"}, primary=true, disabled=not can_publish) }}
   {{ ui.action("Edit Prompt", {"type": "editBlogPrompt"}) }}
   {{ ui.tag(prompt.label, "ok" if not prompt.builtin else "") }}
 </div>
 <div class="path">
   {% if article %}
-  Create Draft publishes the draft below as it stands — Write Article to replace it.
+  Publish puts the draft below live as it stands — Write Article to replace it.
   {% else %}
-  Write Article drafts locally; nothing reaches the CMS until Create Draft.
+  Write Article drafts locally; nothing reaches the CMS until Publish.
   {% endif %}
 </div>
 <div class="path">{{ prompt.path }}</div>
@@ -104,6 +121,51 @@
   {{ ui.action("Refresh", {"type": "refreshBlogLibrary"}) }}
 </div>
 <div class="path">{{ library_hint }}</div>
+
+{% if fixes %}
+<!--
+  Postgres holds a Strapi `string` to 255 characters and refuses the whole post
+  past it, as a bare 500 after the images are up. These are the fields over a
+  limit, with the text to edit. Two ways out: shorten it here and save, or let
+  the model shorten every one. The button is outside the form on purpose — a
+  <button> inside one submits it.
+-->
+<form id="blog-fixes" class="fixes">
+  <h2>Needs fixing before Publish</h2>
+  <div class="path">Each field is past its length limit — the CMS's, or the house style's. Shorten it here and save, or press Shorten with the model.</div>
+  {% for fix in fixes %}
+  <div class="fix">
+    <div class="name">{{ fix.label }}<span class="count{% if fix.length > fix.limit %} over{% endif %}" data-count-for="{{ fix.key }}">{{ fix.length }} / {{ fix.limit }}</span></div>
+    <textarea name="{{ fix.key }}" rows="4" data-limit="{{ fix.limit }}">{{ fix.text }}</textarea>
+    <div class="warn">{{ fix.problem }}</div>
+  </div>
+  {% endfor %}
+  <div class="bar"><button type="submit" class="primary">Save fixes</button></div>
+</form>
+<div class="bar">
+  <button type="button" data-send='{{ {"type": "repairBlog"} | tojson }}'>Shorten with the model</button>
+</div>
+<script>
+(function () {
+  const form = document.getElementById('blog-fixes');
+  // The counter counts what the column counts: UTF-16 units, like `length`.
+  form.addEventListener('input', function (event) {
+    const box = event.target.closest('textarea');
+    if (!box) return;
+    const count = form.querySelector('[data-count-for="' + box.name + '"]');
+    const limit = Number(box.dataset.limit);
+    count.textContent = box.value.length + ' / ' + limit;
+    count.classList.toggle('over', box.value.length > limit);
+  });
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const fields = {};
+    form.querySelectorAll('textarea').forEach(function (box) { fields[box.name] = box.value; });
+    send({type: 'saveBlogFields', fields: fields});
+  });
+})();
+</script>
+{% endif %}
 
 {% if blocked %}<p class="empty">{{ blocked }}</p>{% endif %}
 

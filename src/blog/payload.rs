@@ -117,7 +117,7 @@ impl MagicLinkCta {
     }
 }
 
-/// The portrait cut, already uploaded.
+/// The portrait cut, already up somewhere.
 ///
 /// Carries no poster. `thumbnailVertical` is a post-level field on
 /// [`NewVideoPost`] and comes out of the artwork set, which renders the
@@ -126,8 +126,12 @@ impl MagicLinkCta {
 /// and this one wrote last.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerticalCut {
-    /// Absolute URL of the uploaded file.
+    /// Absolute URL: the Short's page on YouTube, or the file the CMS hosts.
     pub url: String,
+    /// YouTube's id when the cut went up as a Short — see
+    /// [`crate::publish::short`] — which the page embeds the way it embeds the
+    /// landscape video. `None` for a file uploaded into the media library.
+    pub video_id: Option<String>,
 }
 
 /// One uploaded figure, as the CMS needs it.
@@ -216,16 +220,19 @@ impl NewVideoPost {
             object.insert("magicLinkCta".into(), cta.value());
         }
         if let Some(cut) = &self.vertical {
-            object.insert(
-                "videoVertical".into(),
-                json!({
-                    "url": cut.url,
-                    "caption": self.article.caption,
-                    // An uploaded file, not a watch URL: this cut is hosted by
-                    // the CMS itself, which is the whole reason it was uploaded.
-                    "provider": "upload",
-                }),
-            );
+            let mut video = json!({
+                "url": cut.url,
+                "caption": self.article.caption,
+                // A file the CMS hosts, unless the cut is on YouTube — then
+                // the same provider and id the landscape video is sent with,
+                // so the page embeds it rather than streaming a file.
+                "provider": "upload",
+            });
+            if let Some(id) = &cut.video_id {
+                video["provider"] = json!("youtube");
+                video["externalId"] = json!(id);
+            }
+            object.insert("videoVertical".into(), video);
         }
         // Written by the model on every draft and, until now, dropped on the
         // floor here. The field is real and the page reads it.
@@ -257,6 +264,9 @@ impl NewVideoPost {
         for (field, id) in self.relations() {
             object.insert(field.into(), json!(id));
         }
+        // Postgres refuses U+0000 in text and jsonb alike, as a bare 500. A
+        // transcript is the one place it could arrive from.
+        super::limits::scrub(&mut data);
         json!({ "data": data })
     }
 
@@ -661,6 +671,7 @@ mod tests {
         full.og_image_id = Some(91);
         full.vertical = Some(VerticalCut {
             url: "https://cms.saagasolve.com/uploads/vertical.mp4".into(),
+            video_id: None,
         });
         full.thumbnail_vertical_id = Some(88);
         full.cta = Some(MagicLinkCta {
@@ -778,6 +789,7 @@ mod tests {
         let mut tall = post();
         tall.vertical = Some(VerticalCut {
             url: "https://cms.saagasolve.com/uploads/longform_vertical.mp4".into(),
+            video_id: None,
         });
         let body = tall.body();
         let video = &body["data"]["videoVertical"];
@@ -789,6 +801,25 @@ mod tests {
             video["provider"], "upload",
             "hosted by the CMS, not YouTube"
         );
+        assert!(!video.as_object().unwrap().contains_key("externalId"));
+        assert_eq!(video["caption"], "Four minutes on enforcement economics");
+    }
+
+    /// The cut that went up as a Short is embedded like the landscape video —
+    /// provider and id — so the page plays YouTube's copy and the CMS holds no
+    /// file. The same shape `video` is sent with, for the same reason.
+    #[test]
+    fn a_portrait_cut_on_youtube_is_sent_as_a_short_embed() {
+        let mut tall = post();
+        tall.vertical = Some(VerticalCut {
+            url: "https://www.youtube.com/shorts/sh0rt1d".into(),
+            video_id: Some("sh0rt1d".into()),
+        });
+        let body = tall.body();
+        let video = &body["data"]["videoVertical"];
+        assert_eq!(video["provider"], "youtube");
+        assert_eq!(video["externalId"], "sh0rt1d");
+        assert_eq!(video["url"], "https://www.youtube.com/shorts/sh0rt1d");
         assert_eq!(video["caption"], "Four minutes on enforcement economics");
     }
 
@@ -800,6 +831,7 @@ mod tests {
         let mut tall = post();
         tall.vertical = Some(VerticalCut {
             url: "https://cms.saagasolve.com/uploads/longform_vertical.mp4".into(),
+            video_id: None,
         });
         assert!(
             !tall.body()["data"]

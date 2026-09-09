@@ -133,7 +133,7 @@ credentials could not be read and falls back to whatever is set locally.
 | `OPENROUTER_API_KEY` | thumbnails, figure blurbs, notes, social copy | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `BUFFER_API_KEY` | building and sending the social schedule | [Buffer → Settings → API](https://publish.buffer.com/settings/api) |
 | `S3_BUCKET` | uploading renders so Buffer has a video URL to attach | your AWS account |
-| `STRAPI_API_URL`, `STRAPI_API_TOKEN` | publishing the article to the CMS | Strapi Admin → Settings → API Tokens |
+| `STRAPI_API_TOKEN` (and `STRAPI_API_URL`, defaulting to cms.saagasolve.com) | publishing the article to the CMS | `dev.sops.env` carries the team's; Strapi Admin → Settings → API Tokens for a new one |
 | `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | uploading the render to YouTube | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) — OAuth client of type *Desktop app* |
 
 One OpenRouter key covers every model, image models included: thumbnails route
@@ -274,8 +274,8 @@ HTML/Jinja2 templates in `src/ui/templates/`:
   OpenRouter key is live and what credit is left
 - Image generation goes through OpenRouter, so `OPENROUTER_API_KEY` is the key
   to check; there is no separate Gemini key
-- For CMS problems press **Test** under Blog (Strapi), which checks
-  `STRAPI_API_URL` and `STRAPI_API_TOKEN` together
+- For CMS problems press **Test** under Blog (Strapi), which checks that
+  `STRAPI_API_TOKEN` can read cms.saagasolve.com
 
 ### Face Tracking Slow
 - Face detection runs on a background thread

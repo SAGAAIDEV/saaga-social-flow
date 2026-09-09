@@ -57,6 +57,20 @@
   .steps li.stale .dot { background: var(--warning); }
   .steps li.stale { color: var(--foreground); }
 
+  /* ---- the upload links ------------------------------------------------------ */
+  .uploads { list-style: none; margin: 0; padding: 0; }
+  .uploads li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0;
+                border-top: 1px solid var(--border); }
+  .uploads li:first-child { border-top: 0; padding-top: 0; }
+  .uploads .name { flex: none; width: 64px; color: var(--muted-foreground); font-size: 12px; }
+  .uploads a { color: var(--foreground); word-break: break-all; }
+  .uploads .none { color: var(--muted-foreground); }
+  .uploads .copy {
+    flex: none; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; color: var(--muted-foreground); font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .uploads .copy:hover { color: var(--foreground); border-color: var(--ring); }
+
   /* ---- card ---------------------------------------------------------------- */
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
@@ -320,8 +334,8 @@
         <div class="empty" style="flex:1">No photo yet — the render takes one from the camera.</div>
         {% endif %}
         {% if art.screen %}
-        <figure><div class="frame"><img src="{{ art.screen.url }}" alt="screen at capture"></div>
-          <figcaption>Screen at that moment</figcaption></figure>
+        <figure><div class="frame"><img src="{{ art.screen.url }}" alt="screen grab"></div>
+          <figcaption>The screen, as last grabbed — Retake screen catches a different slide</figcaption></figure>
         {% endif %}
       </div>
     </div>
@@ -330,6 +344,7 @@
       <div class="actions">
         {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
         {{ ui.action("Retake photo", {"type": "captureFrame"}) }}
+        {{ ui.action("Retake screen", {"type": "captureScreen"}) }}
         <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
       </div>
       <p class="help">{{ art.card.hint }}</p>
@@ -525,6 +540,31 @@
     {% endif %}
   </div>
 </section>
+
+{% if youtube or short %}
+<!-- 5. On YouTube: one link per cut, so the Short's does not stand in for both -->
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">On YouTube</h2>
+      <p class="card-desc">Where each cut went up. The blog embeds the longform, and the Short as its mobile player.</p>
+    </div>
+    <span class="badge secondary">Uploaded</span>
+  </div>
+  <div class="card-bd">
+    <ul class="uploads">
+      <li><span class="name">Longform</span>
+        {% if youtube %}<a href="{{ youtube }}">{{ youtube }}</a>
+        <button class="copy" data-send='{{ {"type": "copyText", "text": youtube} | tojson }}'>copy</button>
+        {% else %}<span class="none">Not uploaded yet</span>{% endif %}</li>
+      <li><span class="name">Short</span>
+        {% if short %}<a href="{{ short }}">{{ short }}</a>
+        <button class="copy" data-send='{{ {"type": "copyText", "text": short} | tojson }}'>copy</button>
+        {% else %}<span class="none">Not uploaded yet — the vertical cut goes up with the next Upload</span>{% endif %}</li>
+    </ul>
+  </div>
+</section>
+{% endif %}
 </div>
 
 <script>

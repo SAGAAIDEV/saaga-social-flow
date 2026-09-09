@@ -19,6 +19,11 @@ pub enum Action {
     Stop,
     NewChapter,
     Retake,
+    /// Pause the open chapter, or pick it back up. The break comes out of the
+    /// file — see [`crate::capture::pause`] — so a paused minute costs nothing
+    /// but the minute. ⌃⌥P, because it is pressed mid-take with the eyes on
+    /// whatever is being demonstrated, not on this window.
+    TogglePause,
     Notes,
     /// Put every transcribed chapter on the pasteboard. No hotkey: it is a
     /// reach for something outside this app, always with a hand already on the
@@ -65,6 +70,9 @@ pub enum Action {
     Reflect,
     ApplyRewrites,
     CaptureFrame,
+    /// Grab the screen alone, keeping the photo — see `App::capture_screen`.
+    /// No hotkey: it is pressed from the pane that shows both pictures.
+    CaptureScreen,
     /// Open the drag-to-select overlay for a blog figure — see
     /// [`crate::figure`]. Its own chord rather than a click, because the whole
     /// point is to catch what is on screen *now*, and reaching for a button in
@@ -85,6 +93,10 @@ pub enum Action {
     CollectAllAnalytics,
     NewProject,
     NewVersion,
+    /// Remove the audio and video from every project untouched for a week —
+    /// see [`crate::sessions::stale`]. No hotkey: it deletes recordings, so it
+    /// costs a click and a confirmation.
+    CleanUp,
 }
 
 const BASE: Modifiers = Modifiers::CONTROL.union(Modifiers::ALT);
@@ -108,6 +120,7 @@ impl Hotkeys {
             (BASE, Code::KeyQ, Action::Quit),
             (BASE, Code::KeyC, Action::NewChapter),
             (BASE, Code::KeyT, Action::Retake),
+            (BASE, Code::KeyP, Action::TogglePause),
             (SNIP, Code::KeyS, Action::CaptureFigure),
         ];
         let mut by_id = HashMap::new();

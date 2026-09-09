@@ -3,8 +3,10 @@ use super::generate::VideoContext;
 use crate::session::Session;
 
 pub fn enrich(session: &Session, videos: &mut [VideoContext]) {
-    let uploads = crate::publish::load(session);
-    let latest = uploads.last();
+    // The longform, not the newest row: the Short goes up after it and would
+    // otherwise be what every social post linked to.
+    let latest = crate::publish::longform(session);
+    let latest = latest.as_ref();
     let article = crate::blog::schema::load(&session.blog_dir()).ok();
     let blog_posts = crate::blog::load(session);
     let published_blog = latest

@@ -32,6 +32,20 @@ use crate::hotkeys::Action;
 use crate::layouts::{Orientation, Pair};
 use crate::region::PointRect;
 
+/// Why an open chapter is not rolling, for [`ControlTarget::set_recording`].
+///
+/// The two are told apart because they end differently: a manual pause ends
+/// with Resume, a figure's break with the snip chord — and a Pause button that
+/// offered to resume a figure's break would lift it under the aside still
+/// being recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hold {
+    /// The operator pressed Pause.
+    Paused,
+    /// A figure is being explained — see `crate::figure::aside`.
+    Figure,
+}
+
 /// Which queue [`ControlTarget::confirm_clear`] was told to empty.
 ///
 /// Mirrors `schedule::clear::Scope` rather than using it, so the AppKit layer
@@ -169,6 +183,11 @@ pub enum UiEvent {
     /// A Strapi relation id, or empty for none.
     BlogAuthorSelected(String),
     BlogCategorySelected(String),
+    /// The Blog tab's "Needs fixing" card, saved: [`crate::blog::limits::Target`]
+    /// key → the edited text.
+    SaveBlogFields(std::collections::BTreeMap<String, String>),
+    /// Shorten every over-limit field of the draft with the model.
+    RepairBlog,
     ToggleReference {
         name: String,
         value: bool,
@@ -257,6 +276,7 @@ pub struct ControlTargetIvars {
     prompt_field: RefCell<Option<Retained<NSTextField>>>,
     chapter_button: RefCell<Option<Retained<NSButton>>>,
     retake_button: RefCell<Option<Retained<NSButton>>>,
+    pause_button: RefCell<Option<Retained<NSButton>>>,
     regions_button: RefCell<Option<Retained<NSButton>>>,
     status: RefCell<Option<Retained<NSTextField>>>,
     /// The recording clock and the speech-time ballpark. See `app::clock`.
@@ -534,6 +554,16 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Render));
         }
 
+        #[unsafe(method(onTogglePause:))]
+        fn on_toggle_pause(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::TogglePause));
+        }
+
+        #[unsafe(method(onCleanUp:))]
+        fn on_clean_up(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::CleanUp));
+        }
+
         #[unsafe(method(onGenerateTitles:))]
         fn on_generate_titles(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::GenerateTitles));
@@ -651,6 +681,7 @@ impl ControlTarget {
             prompt_field: RefCell::new(None),
             chapter_button: RefCell::new(None),
             retake_button: RefCell::new(None),
+            pause_button: RefCell::new(None),
             regions_button: RefCell::new(None),
             status: RefCell::new(None),
             timer: RefCell::new(None),
@@ -789,6 +820,59 @@ impl ControlTarget {
         }
     }
 
+    /// Asks before Clean Up deletes anything, and says exactly what: how many
+    /// projects, how old, how much, and which ones by name.
+    ///
+    /// The list is the point. "35 projects, 31 GB" is a number; "Trade fallout,
+    /// Stream recorder demo, …" is the moment someone remembers one of them is
+    /// not done. Cancel is the default and takes Return.
+    pub fn confirm_cleanup(&self, stale: &[crate::sessions::Stale]) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let bytes: u64 = stale.iter().map(|project| project.media_bytes).sum();
+        let (oldest, newest) = match (stale.first(), stale.last()) {
+            (Some(oldest), Some(newest)) => (oldest.age_days, newest.age_days),
+            _ => return false,
+        };
+        const NAMED: usize = 8;
+        let mut names: Vec<String> = stale
+            .iter()
+            .take(NAMED)
+            .map(|project| {
+                format!(
+                    "  • {} — {}",
+                    project.entry.title(),
+                    crate::sessions::human_bytes(project.media_bytes)
+                )
+            })
+            .collect();
+        if stale.len() > NAMED {
+            names.push(format!("  … and {} more", stale.len() - NAMED));
+        }
+        let alert = NSAlert::new(mtm);
+        alert.setMessageText(&NSString::from_str(&format!(
+            "Remove the recordings from {} project(s) older than a week?",
+            stale.len()
+        )));
+        alert.setInformativeText(&NSString::from_str(&format!(
+            "Frees {}. These projects were last touched {} to {} days ago:\n\n{}\n\n\
+             Their audio and video are deleted permanently — the raw takes, the cuts and \
+             the renders. Transcripts, notes, figures, artwork, articles and every ledger \
+             stay, and the open project is never touched.",
+            crate::sessions::human_bytes(bytes),
+            newest,
+            oldest,
+            names.join("\n"),
+        )));
+        alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+        alert.addButtonWithTitle(&NSString::from_str(&format!(
+            "Remove recordings from {} project(s)",
+            stale.len()
+        )));
+        alert.runModal() == 1001
+    }
+
     /// Switches each pipeline button on or off from [`crate::stage::Stages`].
     ///
     /// The button is the whole signal here; the reason a blocked one gives is
@@ -860,7 +944,17 @@ impl ControlTarget {
     /// `pending` names a layout picked mid-take that the next chapter will start
     /// in. It rides here rather than in its own field because this method owns
     /// the status line, and two writers would just overwrite each other.
-    pub fn set_recording(&self, chapter: Option<u32>, version: Option<u32>, pending: Option<&str>) {
+    ///
+    /// `hold` says why an open chapter is not rolling, if it is not — see
+    /// [`Hold`]. It sets the Pause button's title and whether it is offered at
+    /// all, and it rewrites the status line, for the same one-writer reason.
+    pub fn set_recording(
+        &self,
+        chapter: Option<u32>,
+        version: Option<u32>,
+        pending: Option<&str>,
+        hold: Option<Hold>,
+    ) {
         if MainThreadMarker::new().is_none() {
             return;
         }
@@ -870,9 +964,20 @@ impl ControlTarget {
         let Some(retake) = self.ivars().retake_button.borrow().clone() else {
             return;
         };
+        let Some(pause) = self.ivars().pause_button.borrow().clone() else {
+            return;
+        };
         let Some(status) = self.ivars().status.borrow().clone() else {
             return;
         };
+        // Offered while a chapter is open and not on a figure's break: that
+        // break ends with the snip chord, and a Resume that lifted it would
+        // pull the take back up under the aside still being recorded.
+        pause.setEnabled(chapter.is_some() && hold != Some(Hold::Figure));
+        pause.setTitle(&NSString::from_str(match hold {
+            Some(Hold::Paused) => "Resume  ⌃⌥P",
+            _ => "Pause  ⌃⌥P",
+        }));
         match chapter {
             None => {
                 button.setTitle(&NSString::from_str("Start Recording"));
@@ -892,9 +997,20 @@ impl ControlTarget {
                 let waiting = pending
                     .map(|layout| format!(" — {layout} starts at the next chapter"))
                     .unwrap_or_default();
-                status.setStringValue(&NSString::from_str(&format!(
-                    "Recording {v}chapter {n:02} — press New Chapter or Stop{waiting}"
-                )));
+                let line = match hold {
+                    Some(Hold::Paused) => format!(
+                        "Paused on {v}chapter {n:02} — nothing is being recorded. Resume or ⌃⌥P \
+                         picks the take back up where it left off{waiting}"
+                    ),
+                    Some(Hold::Figure) => format!(
+                        "{v}chapter {n:02} paused for a figure — say what it shows, then ⌃⇧S \
+                         picks the take back up{waiting}"
+                    ),
+                    None => {
+                        format!("Recording {v}chapter {n:02} — press New Chapter or Stop{waiting}")
+                    }
+                };
+                status.setStringValue(&NSString::from_str(&line));
             }
         }
     }
@@ -1885,21 +2001,23 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 9] = [
-        ("", sel!(onNewChapter:)),        // 0 ┐
-        ("Retake  ⌃⌥T", sel!(onRetake:)), // 1 │ Record
-        ("Stop", sel!(onStop:)),
-        ("Render video and thumbnails", sel!(onRunRender:)),
-        ("Notes", sel!(onNotes:)), // 4 ┐ Notes (right pane)
-        ("Copy Transcript", sel!(onCopyTranscript:)), // 5 ┘
-        ("New Project", sel!(onNewProject:)), // 6 ┐
-        ("New Version", sel!(onNewVersion:)), // 7 │ Session
-        ("", sel!(onToggleRegions:)), // 8 ┘ title set by set_regions
+    let buttons: [(&str, Sel); 11] = [
+        ("", sel!(onNewChapter:)),                           // 0 ┐
+        ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
+        ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
+        ("Stop", sel!(onStop:)),                             // 3 │
+        ("Render video and thumbnails", sel!(onRunRender:)), // 4 ┘
+        ("Notes", sel!(onNotes:)),                           // 5 ┐ Notes (right pane)
+        ("Copy Transcript", sel!(onCopyTranscript:)),        // 6 ┘
+        ("New Project", sel!(onNewProject:)),                // 7 ┐
+        ("New Version", sel!(onNewVersion:)),                // 8 │ Session
+        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 9 │
+        ("", sel!(onToggleRegions:)),                        // 10 ┘ title set by set_regions
     ];
-    const RECORD: Range<usize> = 0..4;
-    const NOTES: Range<usize> = 4..6;
-    const SESSION: Range<usize> = 6..9;
-    const REGIONS: usize = 8;
+    const RECORD: Range<usize> = 0..5;
+    const NOTES: Range<usize> = 5..7;
+    const SESSION: Range<usize> = 7..11;
+    const REGIONS: usize = 10;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
         let button = unsafe {
@@ -1914,9 +2032,10 @@ pub fn attach_controls(
     }
     *target.ivars().chapter_button.borrow_mut() = Some(built[0].clone());
     *target.ivars().retake_button.borrow_mut() = Some(built[1].clone());
+    *target.ivars().pause_button.borrow_mut() = Some(built[2].clone());
     *target.ivars().regions_button.borrow_mut() = Some(built[REGIONS].clone());
 
-    *target.ivars().render_button.borrow_mut() = Some(built[3].clone());
+    *target.ivars().render_button.borrow_mut() = Some(built[4].clone());
     let render_status = NSTextField::labelWithString(
         &NSString::from_str(
             "Record a video, then render it. One press: photo, cut, title, artwork, YouTube.",
@@ -2392,8 +2511,8 @@ pub fn attach_controls(
 
     let blog_status = NSTextField::labelWithString(
         &NSString::from_str(
-            "Writes the article and creates it as a draft in Strapi. One model call.\n\
-             Review it there and publish from the CMS.",
+            "Writes the article and publishes it to the blog in Strapi. One model call.\n\
+             Read it in Preview first — the page goes live.",
         ),
         mtm,
     );
