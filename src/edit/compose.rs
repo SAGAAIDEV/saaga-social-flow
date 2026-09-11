@@ -328,18 +328,20 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `n` is the chapter this card introduces; `shown` is the number printed on it.
+/// The card in front of chapter `n`, numbered `n` — the same number the
+/// vertical cut, the notes and the blog give the chapter. See [`prepare`] for
+/// why the first one a viewer meets is "02".
 ///
-/// They differ because the opening title card stands in for chapter one's, so
-/// the card in front of chapter two is the first one anyone sees — see
-/// [`prepare`].
-fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> {
+/// `title` may be empty: a chapter nobody has titled shows "Chapter 03" from
+/// the label and number alone, and the topic slot collapses. A topic reading
+/// "Chapter 3" under a number reading "03" said the same thing twice.
+fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
         &format!("seg-{n:02}-card"),
         serde_json::json!({
             "chapterLabel": "Chapter",
-            "chapterNumber": format!("{shown:02}"),
+            "chapterNumber": format!("{n:02}"),
             "chapterTopic": title,
             "durationSeconds": CARD_SECONDS,
             // Revealed on a beat, like it always was: a chapter card appears
@@ -357,7 +359,8 @@ fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> 
 /// the branded background.
 ///
 /// It exists because the longform had no opening of its own, so the first thing
-/// a viewer saw was a card reading "Chapter 02" — see [`prepare`].
+/// a viewer saw was a chapter card rather than the video's title — see
+/// [`prepare`].
 fn write_opener(workspace: &Path, project_title: &str) -> Result<Job> {
     title_card(
         workspace,
@@ -668,9 +671,9 @@ mod tests {
     }
 
     /// The bug this pins, reported as "we see chapter 2 first": chapter one used
-    /// to be the only chapter with no card, so the first card a viewer met read
-    /// "Chapter 02" and every card after it looked off by one. The longform now
-    /// opens on its own title and every chapter is labelled.
+    /// to be the only chapter with no card, so the first thing a viewer met was
+    /// a chapter card rather than the video's title. The longform now opens on
+    /// its own title and every chapter is labelled — by its own number.
     #[test]
     fn the_longform_opens_on_its_own_title_then_labels_every_chapter() {
         let (library, edit, compose) = fixture("order");

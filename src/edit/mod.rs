@@ -304,10 +304,14 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
                 .and_then(|data| data.chapters.get(n.saturating_sub(1) as usize))
                 .map(|c| c.title.trim())
                 .filter(|t| !t.is_empty());
+            // No fallback title. The cards print "Chapter" and the number from
+            // their own slots, so a topic reading "Chapter 3" beneath them said
+            // it twice — and, while the number counted something else, said
+            // "02 / Chapter 3". Empty, the topic slot collapses.
             let title = from_titles
                 .or(from_notes)
                 .map(str::to_string)
-                .unwrap_or_else(|| format!("Chapter {n}"));
+                .unwrap_or_default();
             (n, title)
         })
         .collect()

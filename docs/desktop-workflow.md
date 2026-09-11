@@ -8,7 +8,10 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       A render requires a still: it refuses to start only when no frame can be
       taken and there is none from before to fall back on.
    2. Cuts and renders the longform and the vertical chapters, with progress
-      beneath the recording controls.
+      beneath the recording controls. The longform opens on the video's own
+      title, and every chapter after the first gets a card carrying the
+      chapter's own number — the same one the vertical cut, the notes and the
+      blog use, so the first card a viewer meets reads "Chapter 02".
    3. Writes the title and description from the completed transcript, using the
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is
