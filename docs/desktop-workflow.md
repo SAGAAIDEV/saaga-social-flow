@@ -22,7 +22,7 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       button, so tightening a cut never mints a duplicate on the channel. When
       the project has a vertical cut it follows as a Short, and the status line
       and the Video pane's **On YouTube** card list both links — the longform's
-      and the Short's — rather than the last one to land.
+      and the Short's — rather than the last one to land. The YouTube tab lists the pair with a copy button on each and one for both.
 
    The chain stops at the first failure and the status line under the button
    says which step. Everything the press produces lands in the **Video details**

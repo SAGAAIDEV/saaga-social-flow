@@ -3090,17 +3090,31 @@ impl App {
                 info.push_str(&format!("- Visibility: {}\n", short.privacy.label()));
                 info.push_str("- The blog embeds it as the page's mobile player.\n");
             }
+            None if has_vertical && !targets.vertical => info.push_str(
+                "\n## Short\n- The vertical longform is switched off under Video details, so it \
+                 is not uploaded as a Short.\n",
+            ),
             None if has_vertical => info.push_str(
                 "\n## Short\n- The vertical cut goes up as a Short with the next Upload, after \
                  the longform.\n",
             ),
             None => {}
         }
+        // Both links with a copy each, and one copy for both: the pair is what
+        // gets pasted into a post, and reading it out of the text above meant
+        // selecting across two headings.
+        let youtube = crate::publish::longform(&self.session).map(|upload| upload.url);
+        let short = crate::publish::short(&self.session).map(|upload| upload.url);
+        let both = match (&youtube, &short) {
+            (Some(long), Some(short)) => Some(format!("{long}\n{short}")),
+            _ => None,
+        };
         live.publish_pane.show_local(
             &ui::render::page(
                 "youtube.html",
                 minijinja::context! {
                     metadata => crate::publish::metadata::load(&self.session), info => info,
+                    youtube => youtube, short => short, both => both,
                 },
             ),
             &self.session.root,

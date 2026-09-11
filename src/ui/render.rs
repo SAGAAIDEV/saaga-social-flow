@@ -959,6 +959,69 @@ mod tests {
         assert!(html.contains("warn"));
         assert!(html.contains("No rewrites proposed"));
     }
+    /// Both links on the tab the upload happens on, each with its own copy and
+    /// one copy for the pair — the pair is what gets pasted into a post.
+    #[test]
+    fn the_youtube_tab_offers_both_links_to_copy() {
+        let html = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata { title: String::new(), description: String::new() }, info => "",
+                youtube => "https://www.youtube.com/watch?v=abc",
+                short => "https://www.youtube.com/shorts/def",
+                both => "https://www.youtube.com/watch?v=abc\nhttps://www.youtube.com/shorts/def",
+            },
+        );
+        assert!(!html.contains("Template error"), "{html}");
+        let card = &html[html.find("On YouTube").expect("the links card")..];
+        // The autoescaper writes `/` as an entity inside the attribute; the
+        // browser reads it back. The copy payload goes through `tojson`, which
+        // leaves the URL as typed and sorts the keys.
+        assert!(
+            card.contains(r#"href="https:&#x2f;&#x2f;www.youtube.com&#x2f;watch?v=abc""#),
+            "{card}"
+        );
+        assert!(
+            card.contains(r#"href="https:&#x2f;&#x2f;www.youtube.com&#x2f;shorts&#x2f;def""#),
+            "{card}"
+        );
+        assert!(
+            card.contains(r#"{"text":"https://www.youtube.com/watch?v=abc","type":"copyText"}"#),
+            "{card}"
+        );
+        assert!(
+            card.contains(r#"{"text":"https://www.youtube.com/shorts/def","type":"copyText"}"#),
+            "{card}"
+        );
+        assert!(card.contains("Copy both links"), "{card}");
+        assert!(
+            card.contains(r#"watch?v=abc\nhttps://www.youtube.com/shorts/def","type":"copyText"}"#),
+            "{card}"
+        );
+
+        // Only the longform up: its link, a note for the Short, no pair to copy.
+        let html = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata { title: String::new(), description: String::new() }, info => "",
+                youtube => "https://www.youtube.com/watch?v=abc",
+                short => None::<String>, both => None::<String>,
+            },
+        );
+        assert!(html.contains("Not uploaded yet"), "{html}");
+        assert!(!html.contains("Copy both links"), "{html}");
+
+        // Nothing up: no card at all.
+        let html = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata { title: String::new(), description: String::new() }, info => "",
+                youtube => None::<String>, short => None::<String>, both => None::<String>,
+            },
+        );
+        assert!(!html.contains("On YouTube"), "{html}");
+    }
+
     #[test]
     fn youtube_details_are_editable_and_escaped() {
         let html = page(
