@@ -830,6 +830,7 @@ impl App {
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
             UiEvent::SaveBlogFields(fields) => self.save_blog_fields(&fields),
             UiEvent::RepairBlog => self.run_repair_blog(),
+            UiEvent::RenderTarget { name, value } => self.set_render_target(&name, value),
             UiEvent::ThumbnailModelSelected(id) => self.select_thumbnail_model(&id),
             UiEvent::ToggleReference { name, value } => self.toggle_reference(&name, value),
             UiEvent::AddReference { name, data } => self.add_reference(&name, &data),
@@ -1092,6 +1093,15 @@ impl App {
         let stages = self.stages();
         if let Some(reason) = stages.render.missing() {
             self.set_render_status(reason);
+            return;
+        }
+        // Refused before the photo is taken and the cut starts: a render with
+        // nothing to produce would still cost both.
+        if !crate::config::load().render.any() {
+            let reason = "Every render output is switched off — tick the horizontal longform, \
+                          the vertical longform or the shorts under Video details";
+            self.set_render_status(reason);
+            self.set_thumbnail_status(reason);
             return;
         }
         let photo = match self.take_still() {
@@ -1531,6 +1541,39 @@ impl App {
             Err(err) => self.set_blog_status(&format!("Could not save the category: {err:#}")),
         }
         self.update_blog_view();
+    }
+
+    /// Remembers a Render output box. Config, not the project: which outputs you
+    /// want is a standing preference, like the thumbnail model. The next render
+    /// draws only what the ticked outputs still lack — the plan leaves an
+    /// unticked output out, and the renderer skips anything already current.
+    fn set_render_target(&mut self, name: &str, value: bool) {
+        let mut config = crate::config::load();
+        if !config.render.set(name, value) {
+            return;
+        }
+        let targets = config.render;
+        match crate::config::save(&config) {
+            Ok(()) => {
+                let label = crate::config::RenderTargets::label(name);
+                let message = match (value, targets.any()) {
+                    (true, _) => format!(
+                        "Render will produce {label}. Only what is missing or stale gets drawn."
+                    ),
+                    (false, true) => format!("Render will skip {label}."),
+                    (false, false) => {
+                        "Every render output is off — Render will refuse until one is ticked."
+                            .to_string()
+                    }
+                };
+                self.set_render_status(&message);
+            }
+            Err(err) => {
+                self.set_render_status(&format!("Could not save the render options: {err:#}"))
+            }
+        }
+        self.update_video_view();
+        self.sync_controls();
     }
 
     /// Saves the fields edited on the Blog tab's "Needs fixing" card and
@@ -2213,6 +2256,8 @@ impl App {
                     // The last stage of the render chain, so the pane's pipeline
                     // strip can show the whole run without a trip to the YouTube tab.
                     youtube => crate::publish::longform(&self.session).map(|upload| upload.url),
+                    // The three Render boxes, remembered in config.
+                    targets => crate::config::load().render,
                     // The vertical cut's Short, listed beside it so neither link
                     // needs the YouTube tab.
                     short => crate::publish::short(&self.session).map(|upload| upload.url),
@@ -3114,6 +3159,7 @@ impl App {
             .render_dir()
             .join("vertical/longform.mp4")
             .is_file();
+        let targets = crate::config::load().render;
         match crate::publish::short(&self.session) {
             Some(short) => {
                 info.push_str("\n## Short\n");

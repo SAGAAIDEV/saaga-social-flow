@@ -156,6 +156,12 @@ pub enum WebEvent {
     BlogCategory {
         value: String,
     },
+    /// A Render output box on the Video details pane: `horizontal`,
+    /// `vertical` or `shorts`, and whether it is now ticked.
+    RenderTarget {
+        name: String,
+        value: bool,
+    },
     /// The Blog tab's "Needs fixing" card, whole: over-limit field key → text.
     SaveBlogFields {
         fields: std::collections::BTreeMap<String, String>,
@@ -238,6 +244,7 @@ impl WebEvent {
             WebEvent::BlogAuthor { value } => UiEvent::BlogAuthorSelected(value),
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
             WebEvent::SaveBlogFields { fields } => UiEvent::SaveBlogFields(fields),
+            WebEvent::RenderTarget { name, value } => UiEvent::RenderTarget { name, value },
             WebEvent::RepairBlog => UiEvent::RepairBlog,
             WebEvent::CopyText { text } => UiEvent::CopyText(text),
             WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
@@ -666,6 +673,19 @@ mod tests {
         assert_eq!(fields["title"], "T");
         let event: WebEvent = serde_json::from_str(r#"{"type":"repairBlog"}"#).unwrap();
         assert!(matches!(event.into_ui_event(), UiEvent::RepairBlog));
+    }
+
+    /// The base bridge appends `value` to a checkbox's payload, so the box
+    /// arrives named and with its new state.
+    #[test]
+    fn a_render_output_box_reaches_the_ui_event() {
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"renderTarget","name":"shorts","value":false}"#)
+                .unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::RenderTarget { name, value: false } if name == "shorts"
+        ));
     }
 
     #[test]

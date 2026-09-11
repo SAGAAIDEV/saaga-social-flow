@@ -188,6 +188,11 @@ pub enum UiEvent {
     SaveBlogFields(std::collections::BTreeMap<String, String>),
     /// Shorten every over-limit field of the draft with the model.
     RepairBlog,
+    /// A Render output box moved: `horizontal`, `vertical` or `shorts`.
+    RenderTarget {
+        name: String,
+        value: bool,
+    },
     ToggleReference {
         name: String,
         value: bool,

@@ -11,7 +11,16 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       beneath the recording controls. The longform opens on the video's own
       title, and every chapter after the first gets a card carrying the
       chapter's own number — the same one the vertical cut, the notes and the
-      blog use, so the first card a viewer meets reads "Chapter 02".
+      blog use, so the first card a viewer meets reads "Chapter 02". Three
+      boxes on the Video details pane — **Horizontal longform**, **Vertical
+      longform**, **Shorts** — decide what is produced; all three are on by
+      default and remembered. A render draws only what the ticked outputs still
+      lack, so ticking one after a render costs that output alone. The vertical
+      longform is the shorts joined, so it renders the chapters either way; an
+      unticked output's earlier files are left where they are — and the uploads
+      honour the boxes rather than the files: YouTube skips the Short when the
+      vertical longform is off, Distribute leaves out whatever is off, and the
+      blog does not send a vertical file whose box is off.
    3. Writes the title and description from the completed transcript, using the
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is

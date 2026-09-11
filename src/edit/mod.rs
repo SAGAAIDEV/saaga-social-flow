@@ -251,16 +251,26 @@ fn compose_and_render(
         .ok()
         .and_then(|manifest| manifest.longform_title().map(str::to_string))
         .unwrap_or_else(|| session.title());
+    // The boxes on the Video details pane, read here rather than passed in, so
+    // a re-cut from the Edit tab honours them the same way Render does.
+    let targets = crate::config::load().render;
+    if !targets.any() {
+        bail!(
+            "every render output is switched off — tick the horizontal longform, the vertical \
+             longform or the shorts under Video details"
+        );
+    }
     status("Preparing HyperFrames compositions…");
-    let plan = compose::prepare(
+    let plan = compose::prepare_targets(
         edit_root,
         &session.compose_dir(),
         &compose::components_root(),
         &titles,
         &longform_title,
+        targets,
     )?;
     if plan.is_empty() {
-        bail!("no horizontal or vertical cuts to compose");
+        bail!("no horizontal or vertical cuts to compose for the outputs that are switched on");
     }
     progress(COMPOSED);
     // Only the title cards and the verticals are drawn; the chapter bodies go into the

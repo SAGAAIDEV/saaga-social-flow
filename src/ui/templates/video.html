@@ -237,6 +237,13 @@
   .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px;
           color: var(--muted-foreground); }
   .meta .name { color: var(--foreground); font-weight: 500; }
+  /* The three Render outputs, remembered. A row rather than a card: they
+     qualify the button above them, and there are only three. */
+  .targets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 10px;
+             font-size: 12px; color: var(--muted-foreground); }
+  .targets .name { text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+  .targets label { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); cursor: pointer; }
+  .targets .note { flex-basis: 100%; }
 </style>
 
 <div class="page">
@@ -245,6 +252,19 @@
   <p>One press of <b>Render video and thumbnails</b> takes your photo, cuts the take, writes the
     title and description, draws the artwork and uploads to YouTube. The blog is its own step,
     so the artwork can be checked here first.</p>
+  <!-- What Render produces. Each box is remembered, and a render only draws what
+       the ticked outputs still lack — so ticking one after a render costs that
+       output alone. The vertical longform is the shorts joined, so it renders the
+       chapters whether or not the Shorts box is on. -->
+  {# All three on when the page is rendered without the config — the same default the config has. #}
+  {% set boxes = targets if targets is defined else {"horizontal": true, "vertical": true, "shorts": true} %}
+  <div class="targets" aria-label="What Render produces">
+    <span class="name">Render</span>
+    {{ ui.toggle("Horizontal longform", boxes.horizontal, {"type": "renderTarget", "name": "horizontal"}) }}
+    {{ ui.toggle("Vertical longform", boxes.vertical, {"type": "renderTarget", "name": "vertical"}) }}
+    {{ ui.toggle("Shorts", boxes.shorts, {"type": "renderTarget", "name": "shorts"}) }}
+    <span class="note">Remembered. A render only draws what the ticked outputs still lack, so ticking one later renders just that.</span>
+  </div>
 </header>
 
 {% set artwork_state = "none" %}

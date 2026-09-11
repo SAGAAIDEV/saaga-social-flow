@@ -494,7 +494,10 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
     // The one thing the dry run knows and cannot show. Said out loud rather
     // than left to be inferred from a field that is missing for two different
     // reasons — no cut, or a cut not yet uploaded.
-    if post.vertical.is_none() && session.render_dir().join("vertical/longform.mp4").is_file() {
+    if post.vertical.is_none()
+        && cfg.render.vertical
+        && session.render_dir().join("vertical/longform.mp4").is_file()
+    {
         eprintln!(
             "stream-recorder: a vertical cut is rendered but not on YouTube; the publish will \
              upload it into the CMS as videoVertical (this body cannot, having uploaded nothing)"
@@ -773,7 +776,7 @@ fn run(
     status("Uploading the thumbnail…".into());
     let title = new_post.article.title.clone();
     new_post.thumbnail_id = Some(client.upload_media(&thumbnail, Some(&title))?);
-    new_post.vertical = vertical::upload(&client, session, status)?;
+    new_post.vertical = vertical::upload(&client, session, cfg.render, status)?;
     new_post.og_image_id = Some(og::upload(&client, &og_path, &title, status)?);
     new_post.cta = cta(&cfg, cta_image(&client, &cfg, status));
     new_post.thumbnail_vertical_id = Some(client.upload_media(&portrait, Some(&title))?);
