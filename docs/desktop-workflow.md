@@ -20,7 +20,11 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       unticked output's earlier files are left where they are — and the uploads
       honour the boxes rather than the files: YouTube skips the Short when the
       vertical longform is off, Distribute leaves out whatever is off, and the
-      blog does not send a vertical file whose box is off.
+      blog does not send a vertical file whose box is off. The composites are
+      recorded at 0.25 bits per pixel per frame — 15.6 Mbps for a 1080p master,
+      about 1.2 GB per orientation for a ten-minute take — and HyperFrames
+      renders the cards and the vertical chapters at its `high` quality; both
+      were lower, and a soft master is soft at every stage after it.
    3. Writes the title and description from the completed transcript, using the
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is

@@ -7,6 +7,13 @@ use anyhow::{bail, Context, Result};
 use super::cut;
 
 pub const CARD_SECONDS: f64 = 3.0;
+/// Where the workspace records the encoder quality its renders were made at.
+///
+/// Declared as a source of every job, so changing [`super::render::QUALITY`]
+/// re-renders everything exactly once. Without it a quality change passed
+/// every freshness check — the compositions had not changed — and the shorts
+/// on disk stayed at the old setting for as long as the project lived.
+pub const QUALITY_FILE: &str = "render-quality.txt";
 pub const OPENER_SECONDS: f64 = 2.6;
 const HF_VERSION: &str = "0.7.107";
 
@@ -279,6 +286,9 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
     );
     std::fs::write(root.join("package.json"), package)?;
     std::fs::write(root.join("index.html"), blank_index(width, height))?;
+    // Only when it differs, like every other render input: rewriting it each
+    // run would make every composition look stale every run.
+    write_if_changed(&root.join(QUALITY_FILE), super::render::QUALITY)?;
     Ok(())
 }
 
@@ -431,7 +441,12 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
         // The badge is declared a source as well as the markup: it is drawn on
         // every card, so a new one has to re-render them rather than leaving the
         // old logo on disk looking current.
-        sources: vec![wrapper, baked, workspace.join("assets/badge.svg")],
+        sources: vec![
+            wrapper,
+            baked,
+            workspace.join("assets/badge.svg"),
+            workspace.join(QUALITY_FILE),
+        ],
     })
 }
 
@@ -478,6 +493,7 @@ fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Resul
             baked,
             workspace.join(&camera),
             workspace.join(&audio),
+            workspace.join(QUALITY_FILE),
         ],
     })
 }
@@ -745,6 +761,30 @@ mod tests {
         assert!(card.contains("Second"));
         // A chapter card still animates in — it arrives mid-video.
         assert!(card.contains(r#""holdFromStart":0"#), "{card}");
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// A render is made at one quality, and the quality is one of its inputs:
+    /// every job names the workspace's quality file, and the file carries the
+    /// current setting — so raising it re-renders once, and not again.
+    #[test]
+    fn the_render_quality_is_a_source_of_every_job() {
+        let (library, edit, compose) = fixture("quality");
+        let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
+        let plan = prepare(&edit, &compose, &library, &titles, "A video").unwrap();
+        let quality = compose.join("horizontal").join(QUALITY_FILE);
+        assert_eq!(
+            std::fs::read_to_string(&quality).unwrap(),
+            super::super::render::QUALITY
+        );
+        for job in plan.h_segments.iter().filter_map(Segment::job) {
+            assert!(
+                job.sources.contains(&quality),
+                "{}: {:?}",
+                job.id,
+                job.sources
+            );
+        }
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 

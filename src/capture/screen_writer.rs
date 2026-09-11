@@ -54,13 +54,7 @@ pub fn video_settings(
     let bitrate_key =
         unsafe { AVVideoAverageBitRateKey }.ok_or_else(|| missing("AVVideoAverageBitRateKey"))?;
 
-    // ~0.1 bits per pixel per frame: screen content is mostly flat colour and
-    // sharp text, which H.264 codes efficiently, but text turns to mush if
-    // starved. Clamped so a 5K display does not ask for an absurd rate.
-    let pixels = (width * height) as f64;
-    let bitrate = ((pixels * f64::from(FPS) * 0.1) as i64).clamp(4_000_000, 40_000_000);
-
-    let bitrate_number = NSNumber::new_i64(bitrate);
+    let bitrate_number = NSNumber::new_i64(target_bitrate(width, height));
     let compression: Retained<NSDictionary<NSString, AnyObject>> =
         NSDictionary::from_slices(&[bitrate_key], &[bitrate_number.as_ref() as &AnyObject]);
 
@@ -215,9 +209,42 @@ unsafe fn ns_key(key: &'static CFString) -> &'static NSString {
     unsafe { &*(key as *const CFString as *const NSString) }
 }
 
+/// Bits per pixel per frame the composites are encoded at.
+///
+/// This was 0.1, on the reasoning that screen content is flat colour and sharp
+/// text, which H.264 codes cheaply. It gave a 1080p master 6.2 Mbps, and that
+/// master is not a screen: it is the screen scaled into a slot beside a camera
+/// feed, and the camera's noise and motion eat the budget the text needed.
+/// The result read soft, and every stage after it — the cut at CRF 18, the
+/// YouTube re-encode — could only inherit that. At 0.25 a 1080p master is
+/// 15.6 Mbps, about twice YouTube's recommended upload rate for 1080p30 and
+/// what a master feeding a re-encode should be. Roughly 2.5× the disk of
+/// before: a ten-minute take is about 1.2 GB per orientation.
+const BITS_PER_PIXEL_FRAME: f64 = 0.25;
+/// Below this even a small capture reads soft; above it a 5K display would be
+/// asking for more than any player needs.
+const BITRATE_FLOOR: i64 = 8_000_000;
+const BITRATE_CEILING: i64 = 60_000_000;
+
+/// The average bitrate asked of the encoder for a `width`×`height` composite.
+pub fn target_bitrate(width: usize, height: usize) -> i64 {
+    let pixels = (width * height) as f64;
+    ((pixels * f64::from(FPS) * BITS_PER_PIXEL_FRAME) as i64).clamp(BITRATE_FLOOR, BITRATE_CEILING)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The 1080p master that read soft was 6.2 Mbps. It is now within sight of
+    /// what a re-encode wants fed, and the clamps still hold at both ends.
+    #[test]
+    fn a_1080p_master_is_encoded_at_a_rate_text_survives() {
+        assert_eq!(target_bitrate(1920, 1080), 15_552_000);
+        assert_eq!(target_bitrate(640, 480), BITRATE_FLOOR);
+        assert_eq!(target_bitrate(6016, 3384), BITRATE_CEILING);
+        assert!(target_bitrate(1920, 1080) > 2 * 6_200_000);
+    }
 
     #[test]
     fn video_settings_clamps_the_bitrate_for_tiny_and_huge_displays() {

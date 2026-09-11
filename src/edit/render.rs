@@ -16,7 +16,14 @@ use anyhow::{bail, Context, Result};
 use super::compose::{Job, Kind, Plan, Segment};
 use super::cut;
 
-pub const QUALITY: &str = "draft";
+/// HyperFrames' encoder quality for every deliverable this renders: the title
+/// cards spliced into the horizontal longform, and the vertical chapters that
+/// are the shorts and the vertical longform. Of `draft`, `standard` and `high`
+/// this ran at `draft`, which is the preview setting — the shorts came out
+/// Constrained Baseline at under 4 Mbps and read as compressed. `high` costs
+/// render time and buys the picture; the render is already incremental, so it
+/// is paid once per composition.
+pub const QUALITY: &str = "high";
 /// Pinned so the cache path, the npx fallback and the preflight check cannot
 /// drift apart into three different renderers.
 pub const HF_VERSION: &str = "0.7.107";
