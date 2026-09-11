@@ -8,7 +8,23 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       A render requires a still: it refuses to start only when no frame can be
       taken and there is none from before to fall back on.
    2. Cuts and renders the longform and the vertical chapters, with progress
-      beneath the recording controls.
+      beneath the recording controls. The longform opens on the video's own
+      title, and every chapter after the first gets a card carrying the
+      chapter's own number — the same one the vertical cut, the notes and the
+      blog use, so the first card a viewer meets reads "Chapter 02". Three
+      boxes directly above **Render video and thumbnails** — **Horizontal**,
+      **Vertical**, **Shorts** — decide what is produced; all three are on by
+      default and remembered. A render draws only what the ticked outputs still
+      lack, so ticking one after a render costs that output alone. The vertical
+      longform is the shorts joined, so it renders the chapters either way; an
+      unticked output's earlier files are left where they are — and the uploads
+      honour the boxes rather than the files: YouTube skips the Short when the
+      vertical longform is off, Distribute leaves out whatever is off, and the
+      blog does not send a vertical file whose box is off. The composites are
+      recorded at 0.25 bits per pixel per frame — 15.6 Mbps for a 1080p master,
+      about 1.2 GB per orientation for a ten-minute take — and HyperFrames
+      renders the cards and the vertical chapters at its `high` quality; both
+      were lower, and a soft master is soft at every stage after it.
    3. Writes the title and description from the completed transcript, using the
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is
@@ -22,7 +38,7 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       button, so tightening a cut never mints a duplicate on the channel. When
       the project has a vertical cut it follows as a Short, and the status line
       and the Video pane's **On YouTube** card list both links — the longform's
-      and the Short's — rather than the last one to land.
+      and the Short's — rather than the last one to land. The YouTube tab lists the pair with a copy button on each and one for both.
 
    The chain stops at the first failure and the status line under the button
    says which step. Everything the press produces lands in the **Video details**
@@ -125,6 +141,11 @@ those experiments do not replace the artwork used for publishing.
 | 1280×720 horizontal | YouTube thumbnail; Strapi `thumbnail` |
 | 720×1280 portrait | Strapi `thumbnailVertical`; downloadable/social export. Words on top, photo underneath — the top of a portrait player is where the crop and the controls land. |
 | 1200×630 OG | Strapi `ogImage`; LinkedIn and Facebook image posts |
+
+When the photo is taken, the card's focus point is set from the face tracker's
+anchor, so the photo box is cropped around the face rather than the frame's centre.
+The two Focus boxes on the Video details pane nudge it; the vertical one only moves
+anything when the still is taller than its box.
 
 The current set is recorded in `thumbnails/artwork.json`, with file hashes and measured
 JPEG dimensions. A failed generation leaves the previous complete set active. Editing

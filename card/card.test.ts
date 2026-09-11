@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parsePayload } from "./input";
 import { page } from "./page";
 import { layout } from "./layout";
+import { objectPosition } from "./components";
 
 describe("thumbnail formats", () => {
   for (const format of ["horizontal", "vertical"] as const) {
@@ -42,7 +43,7 @@ describe("thumbnail formats", () => {
     expect(html).toContain('A &amp; B');
   });
   test("malformed inputs fail at the boundary", () => {
-    for (const bad of [null, [], {}, { title: "" }, { title: "x", width: "720" }, { title: "x", height: Infinity }, { title: "x", description: {} }, { title: "x", format: "square" }, { title: "x", focus: NaN }, { title: "x", og: "yes" }]) {
+    for (const bad of [null, [], {}, { title: "" }, { title: "x", width: "720" }, { title: "x", height: Infinity }, { title: "x", description: {} }, { title: "x", format: "square" }, { title: "x", focus: NaN }, { title: "x", focusY: "0.3" }, { title: "x", photoSize: [1920] }, { title: "x", photoSize: [0, 1080] }, { title: "x", og: "yes" }]) {
       expect(() => parsePayload(bad)).toThrow();
     }
   });
@@ -84,5 +85,51 @@ describe("the OG image is the thumbnail at another resolution", () => {
     const og = parsePayload({ ...brief, format: "vertical", og: true });
     expect(og.format).toBe("horizontal");
     expect(page(og)).toContain('data-format="horizontal"');
+  });
+});
+
+describe("the photo crop centres on the face", () => {
+  const still = { width: 1920, height: 1080 };
+  const h = layout("horizontal", true).photo;
+  const v = layout("vertical", true).photo;
+
+  /** The landscape column shows under half the still's width, so where the
+   *  window sits is everything. A face a quarter of the way across has to end
+   *  up in the middle of the column, not a quarter of the way across it. */
+  test("a face left of centre slides the window left, and lands centred", () => {
+    const at = objectPosition({ x: 0.25, y: 0.5 }, h, still);
+    const scale = Math.max(h.width / still.width, h.height / still.height);
+    const shown = h.width / scale;
+    const left = at.x * (still.width - shown);
+    expect(left + shown / 2).toBeCloseTo(0.25 * still.width, 6);
+    expect(at.x).toBeLessThan(0.25);
+    expect(at.y).toBe(0.5);
+  });
+  test("a centred face is the centred crop, in both layouts", () => {
+    expect(objectPosition({ x: 0.5, y: 0.5 }, h, still)).toEqual({ x: 0.5, y: 0.5 });
+    expect(objectPosition({ x: 0.5, y: 0.5 }, v, still)).toEqual({ x: 0.5, y: 0.5 });
+  });
+  test("a face at the edge slides the window flush rather than off the still", () => {
+    expect(objectPosition({ x: 0.02, y: 0.5 }, h, still).x).toBe(0);
+    expect(objectPosition({ x: 0.98, y: 0.5 }, h, still).x).toBe(1);
+  });
+  /** Neither photo box is taller than a landscape still, so the vertical
+   *  axis has nothing to move and answers centred whatever the face does. */
+  test("an axis with no overflow stays centred", () => {
+    expect(objectPosition({ x: 0.5, y: 0.1 }, h, still).y).toBe(0.5);
+    expect(objectPosition({ x: 0.5, y: 0.9 }, v, still).y).toBe(0.5);
+    // A portrait camera does overflow vertically, and then y moves.
+    expect(objectPosition({ x: 0.5, y: 0.2 }, h, { width: 1080, height: 1920 }).y).toBeLessThan(0.5);
+  });
+  test("without the still's size the point is used as the position, as before", () => {
+    expect(objectPosition({ x: 0.3, y: 0.5 }, h)).toEqual({ x: 0.3, y: 0.5 });
+    expect(objectPosition({ x: NaN, y: 2 }, h)).toEqual({ x: 0.5, y: 1 });
+  });
+  test("the page carries the centred position, not the raw point", () => {
+    const html = page(parsePayload({ title: "Face", photo: "file:///still.jpg", focus: 0.25, focusY: 0.5, photoSize: [1920, 1080] }));
+    expect(html).toContain("object-position:");
+    expect(html).not.toContain("object-position:25% 50%");
+    const legacy = page(parsePayload({ title: "Face", photo: "file:///still.jpg", focus: 0.25 }));
+    expect(legacy).toContain("object-position:25% 50%");
   });
 });

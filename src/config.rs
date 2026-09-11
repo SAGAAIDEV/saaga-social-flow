@@ -107,6 +107,10 @@ pub struct Config {
     /// runs with Render unless it is switched off here.
     #[serde(default)]
     pub thumbnail: Thumbnail,
+    /// What Render produces. All three on unless switched off on the Video
+    /// details pane, and remembered there.
+    #[serde(default)]
+    pub render: RenderTargets,
     /// How the Draft tab's live meter decides you are talking.
     #[serde(default)]
     pub vad: Vad,
@@ -966,5 +970,107 @@ mod tests {
         assert_eq!(older.audio_device_uid.as_deref(), Some("mic-1"));
         assert_eq!(older.posts_prompt, None);
         assert!(older.thumbnail.brief.is_empty());
+    }
+}
+
+/// What Render produces: the horizontal longform, the vertical longform, the
+/// shorts. Each is a checkbox above the Render button and remembered here.
+///
+/// The shorts are the vertical chapter renders, and the vertical longform is
+/// those same renders joined — so asking for the vertical longform renders the
+/// chapters whether or not the shorts box is on. What the boxes decide is which
+/// *outputs* are assembled; a render only draws what is missing or stale, so
+/// switching one on after a render costs that output and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderTargets {
+    #[serde(default = "enabled_by_default")]
+    pub horizontal: bool,
+    #[serde(default = "enabled_by_default")]
+    pub vertical: bool,
+    #[serde(default = "enabled_by_default")]
+    pub shorts: bool,
+}
+
+impl Default for RenderTargets {
+    fn default() -> Self {
+        RenderTargets {
+            horizontal: true,
+            vertical: true,
+            shorts: true,
+        }
+    }
+}
+
+impl RenderTargets {
+    /// Whether Render has anything to do at all.
+    pub fn any(self) -> bool {
+        self.horizontal || self.vertical || self.shorts
+    }
+
+    /// Whether the vertical chapter compositions are needed: as shorts in their
+    /// own right, or as the parts the vertical longform is joined from.
+    pub fn vertical_parts(self) -> bool {
+        self.vertical || self.shorts
+    }
+
+    /// Flips one box by the name the pane posts. `false` for a name that is
+    /// not a box, so a stray message changes nothing.
+    pub fn set(&mut self, name: &str, on: bool) -> bool {
+        match name {
+            "horizontal" => self.horizontal = on,
+            "vertical" => self.vertical = on,
+            "shorts" => self.shorts = on,
+            _ => return false,
+        }
+        true
+    }
+
+    /// What the pane calls each box.
+    pub fn label(name: &str) -> &str {
+        match name {
+            "horizontal" => "the horizontal longform",
+            "vertical" => "the vertical longform",
+            "shorts" => "the shorts",
+            other => other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod render_target_tests {
+    use super::*;
+
+    /// A config written before the boxes existed reads as all three on, which
+    /// is what every render did until now.
+    #[test]
+    fn absent_targets_mean_everything_on() {
+        let parsed: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed.render, RenderTargets::default());
+        assert!(parsed.render.any() && parsed.render.vertical_parts());
+        let partial: RenderTargets = serde_json::from_str(r#"{"shorts": false}"#).unwrap();
+        assert_eq!(
+            partial,
+            RenderTargets {
+                horizontal: true,
+                vertical: true,
+                shorts: false
+            }
+        );
+    }
+
+    /// The vertical longform is the shorts joined, so it needs them rendered
+    /// whether or not they are wanted as outputs themselves.
+    #[test]
+    fn the_vertical_longform_needs_the_chapter_renders() {
+        let mut targets = RenderTargets::default();
+        assert!(targets.set("shorts", false));
+        assert!(targets.vertical_parts());
+        assert!(targets.set("vertical", false));
+        assert!(!targets.vertical_parts());
+        assert!(targets.any());
+        assert!(targets.set("horizontal", false));
+        assert!(!targets.any());
+        assert!(!targets.set("audio", true));
+        assert_eq!(RenderTargets::label("shorts"), "the shorts");
     }
 }

@@ -77,8 +77,15 @@ fn run(session: &Session, tx: &Sender<DistributeEvent>) -> Result<(PathBuf, Dist
     let status = |msg: &str| {
         let _ = tx.send(DistributeEvent::Status(msg.to_string()));
     };
-    let assets = collect_assets(&session.render_dir(), &session.dir, &session.root)?;
+    let targets = crate::config::load().render;
+    let assets = collect_assets(&session.render_dir(), &session.dir, &session.root, targets)?;
     if assets.is_empty() {
+        if !targets.horizontal && !targets.shorts {
+            bail!(
+                "the horizontal longform and the shorts are both switched off above the Render \
+                 button — nothing to upload"
+            );
+        }
         bail!(
             "no rendered videos in {} — run Render first",
             session.render_dir().display()
@@ -99,10 +106,19 @@ fn run(session: &Session, tx: &Sender<DistributeEvent>) -> Result<(PathBuf, Dist
 
 /// `root` is the project folder rather than a stage: the thumbnail is chosen once
 /// for the project, not per version, and that is where it lives.
-fn collect_assets(render_dir: &Path, drafts: &Path, root: &Path) -> Result<Vec<Asset>> {
+///
+/// `targets` are the Render boxes: an output that is off is left out even when
+/// its file is on disk from an earlier render, so unticking the shorts is also
+/// how they stop going to S3.
+fn collect_assets(
+    render_dir: &Path,
+    drafts: &Path,
+    root: &Path,
+    targets: crate::config::RenderTargets,
+) -> Result<Vec<Asset>> {
     let mut assets = Vec::new();
     let longform = render_dir.join("horizontal/longform.mp4");
-    if longform.is_file() {
+    if targets.horizontal && longform.is_file() {
         assets.push(Asset {
             id: "longform".into(),
             kind: AssetKind::Long,
@@ -130,7 +146,7 @@ fn collect_assets(render_dir: &Path, drafts: &Path, root: &Path) -> Result<Vec<A
     }
     for n in 1..=99 {
         let video = render_dir.join(format!("vertical/chapter-{n:02}.mp4"));
-        if !video.is_file() {
+        if !targets.shorts || !video.is_file() {
             continue;
         }
         assets.push(Asset {
@@ -251,6 +267,48 @@ fn combined_transcript(drafts: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The Render boxes decide what ships, not what is on disk: a render made
+    /// with the shorts on and the box unticked since must not send them.
+    #[test]
+    fn switched_off_outputs_are_not_collected_even_when_their_files_exist() {
+        use crate::config::RenderTargets;
+        let root = temp("targets");
+        let render = root.join("render");
+        let drafts = root.join("drafts");
+        std::fs::create_dir_all(render.join("horizontal")).unwrap();
+        std::fs::create_dir_all(render.join("vertical")).unwrap();
+        std::fs::create_dir_all(&drafts).unwrap();
+        std::fs::write(render.join("horizontal/longform.mp4"), b"vid").unwrap();
+        std::fs::write(render.join("vertical/chapter-01.mp4"), b"v1").unwrap();
+
+        let no_shorts = RenderTargets {
+            horizontal: true,
+            vertical: true,
+            shorts: false,
+        };
+        let ids: Vec<String> = collect_assets(&render, &drafts, &root, no_shorts)
+            .unwrap()
+            .into_iter()
+            .map(|asset| asset.id)
+            .collect();
+        assert!(ids.iter().any(|id| id == "longform"), "{ids:?}");
+        assert!(!ids.iter().any(|id| id.starts_with("chapter-")), "{ids:?}");
+
+        let no_longform = RenderTargets {
+            horizontal: false,
+            vertical: true,
+            shorts: true,
+        };
+        let ids: Vec<String> = collect_assets(&render, &drafts, &root, no_longform)
+            .unwrap()
+            .into_iter()
+            .map(|asset| asset.id)
+            .collect();
+        assert!(!ids.iter().any(|id| id == "longform"), "{ids:?}");
+        assert!(ids.iter().any(|id| id == "chapter-01"), "{ids:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
@@ -279,7 +337,7 @@ mod tests {
             r#"{"status":"completed","text":"hello there"}"#,
         )
         .unwrap();
-        let assets = collect_assets(&render, &drafts, &root).unwrap();
+        let assets = collect_assets(&render, &drafts, &root, Default::default()).unwrap();
         let ids: Vec<_> = assets.iter().map(|a| a.id.as_str()).collect();
         assert!(ids.contains(&"longform"));
         assert!(ids.contains(&"longform-transcript"));
@@ -291,7 +349,13 @@ mod tests {
     #[test]
     fn collect_empty_without_renders() {
         let root = temp("empty");
-        let assets = collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
+        let assets = collect_assets(
+            &root.join("render"),
+            &root.join("drafts"),
+            &root,
+            Default::default(),
+        )
+        .unwrap();
         assert!(assets.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -337,7 +401,8 @@ mod tests {
         std::fs::write(render.join("horizontal/longform.mp4"), b"vid").unwrap();
         activated_thumbnail(&root, "thumb-abc123");
 
-        let assets = collect_assets(&render, &root.join("drafts"), &root).unwrap();
+        let assets =
+            collect_assets(&render, &root.join("drafts"), &root, Default::default()).unwrap();
         let thumb = assets
             .iter()
             .find(|a| a.id == "thumbnail")
@@ -356,7 +421,13 @@ mod tests {
     fn a_thumbnail_alone_is_not_a_distribution() {
         let root = temp("thumbnail-only");
         activated_thumbnail(&root, "thumb-abc123");
-        let assets = collect_assets(&root.join("render"), &root.join("drafts"), &root).unwrap();
+        let assets = collect_assets(
+            &root.join("render"),
+            &root.join("drafts"),
+            &root,
+            Default::default(),
+        )
+        .unwrap();
         assert!(assets.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -372,7 +443,8 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"jpg").unwrap();
 
-        let assets = collect_assets(&render, &root.join("drafts"), &root).unwrap();
+        let assets =
+            collect_assets(&render, &root.join("drafts"), &root, Default::default()).unwrap();
         assert!(!assets.iter().any(|a| a.id == "thumbnail"));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -383,7 +455,8 @@ mod tests {
         std::fs::create_dir_all(render.join("horizontal")).unwrap();
         std::fs::write(render.join("horizontal/longform.mp4"), b"video").unwrap();
         let set = crate::card::assets::fixture(&root);
-        let assets = collect_assets(&render, &root.join("drafts"), &root).unwrap();
+        let assets =
+            collect_assets(&render, &root.join("drafts"), &root, Default::default()).unwrap();
         for id in ["thumbnail", "thumbnail-vertical", "og-image"] {
             let asset = assets.iter().find(|asset| asset.id == id).unwrap();
             assert_eq!(asset.kind, AssetKind::Image);

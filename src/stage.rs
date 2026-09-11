@@ -127,9 +127,16 @@ impl Stages {
         let has_thumbnail = (artwork.is_ok(), artwork_reason);
         // Reads the same config the pane does, so the button and the dropdown
         // never disagree. A file read, like the thumbnail check above it.
+        let config = crate::config::load();
         let has_author =
-            crate::blog::chosen_author(&crate::config::load(), &crate::blog::library::load())
-                .is_set();
+            crate::blog::chosen_author(&config, &crate::blog::library::load()).is_set();
+        // "Not rendered" and "switched off" are different instructions.
+        let longform_reason = match config.render.horizontal {
+            true => "No longform rendered yet — run Render first",
+            false => {
+                "The horizontal longform is switched off above the Render button — tick it and Render"
+            }
+        };
 
         Stages {
             titles: gate(false, &[recorded]),
@@ -161,7 +168,7 @@ impl Stages {
             publish: gate(
                 busy.publish,
                 &[
-                    (longform, "No longform rendered yet — run Render first"),
+                    (longform, longform_reason),
                     has_thumbnail,
                     (crate::publish::metadata::load(session).validate().is_ok(), "Save a valid title and description on the YouTube tab"),
                 ],

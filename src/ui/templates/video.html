@@ -381,9 +381,16 @@
           <div class="field">
             <!-- The one control that cannot be judged from the boxes: the still is a
                  wide frame and the photo column is nearly portrait, so most of the
-                 width is cropped and this picks which part survives. -->
-            <label class="label">Focus</label>
+                 width is cropped and this picks which part survives — the point the
+                 box is centred on. Set from your face when the photo is taken; nudge
+                 it here. The second box is the same point's other half, and only
+                 moves anything when the still is taller than its box. -->
+            <label class="label" title="Where your face is across the still, 0–1. Set when the photo is taken; nudge to adjust.">Focus ↔</label>
             <input data-field="focus" type="number" min="0" max="1" step="0.02" value="{{ art.card.focus }}">
+          </div>
+          <div class="field">
+            <label class="label" title="Where your face is down the still, 0–1. Only matters when the still is taller than its box.">Focus ↕</label>
+            <input data-field="focus_y" type="number" min="0" max="1" step="0.02" value="{{ art.card.focus_y }}">
           </div>
           <div class="field">
             <label class="label">AI format</label>

@@ -188,6 +188,11 @@ pub enum UiEvent {
     SaveBlogFields(std::collections::BTreeMap<String, String>),
     /// Shorten every over-limit field of the draft with the model.
     RepairBlog,
+    /// A Render output box moved: `horizontal`, `vertical` or `shorts`.
+    RenderTarget {
+        name: String,
+        value: bool,
+    },
     ToggleReference {
         name: String,
         value: bool,
@@ -248,6 +253,9 @@ const TIMER_H: f64 = 22.0;
 const METER_W: f64 = 90.0;
 const BUTTON_GAP: f64 = 4.0;
 const GROUP_H: f64 = 114.0;
+/// The tag on the Render output boxes, which is how the group layout knows to
+/// put them side by side on one row rather than one per row like the buttons.
+const ROW_TAG: isize = 1;
 /// One progress row under the render button: a caption and a small bar.
 const BAR_H: f64 = 14.0;
 const CAPTION_W: f64 = 72.0;
@@ -266,6 +274,11 @@ pub struct ControlTargetIvars {
     /// The Track Mouse switch, beside it. Same kind of decision, one fewer
     /// state — there is nothing to load, so it is never disabled.
     mouse_checkbox: RefCell<Option<Retained<NSButton>>>,
+    /// The three Render output boxes — horizontal longform, vertical longform,
+    /// shorts — one row in the Record group directly above the Render button,
+    /// so what a press produces is decided where it is pressed. Named, because
+    /// one action serves all three and the sender says which moved.
+    render_target_boxes: RefCell<Vec<(&'static str, Retained<NSButton>)>>,
     /// The YouTube tab's Visibility picker.
     privacy_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     version_popup: RefCell<Option<Retained<NSPopUpButton>>>,
@@ -410,6 +423,29 @@ define_class!(
             if let Some(checkbox) = self.ivars().mouse_checkbox.borrow().as_ref() {
                 let on = checkbox.state() == NSControlStateValueOn;
                 let _ = self.ivars().tx.send(UiEvent::MouseTrackToggled(on));
+            }
+        }
+
+        /// One of the Render output boxes moved. The sender says which: the
+        /// same event the Video pane's boxes used to post, so the app's side
+        /// did not move with them.
+        #[unsafe(method(onRenderTargetChanged:))]
+        fn on_render_target_changed(&self, sender: Option<&AnyObject>) {
+            let Some(sender) = sender else {
+                return;
+            };
+            for (name, checkbox) in self.ivars().render_target_boxes.borrow().iter() {
+                let same = std::ptr::eq(
+                    &**checkbox as *const NSButton as *const AnyObject,
+                    sender as *const AnyObject,
+                );
+                if same {
+                    let on = checkbox.state() == NSControlStateValueOn;
+                    let _ = self.ivars().tx.send(UiEvent::RenderTarget {
+                        name: name.to_string(),
+                        value: on,
+                    });
+                }
             }
         }
 
@@ -672,6 +708,7 @@ impl ControlTarget {
             pair_popup: RefCell::new(None),
             face_checkbox: RefCell::new(None),
             mouse_checkbox: RefCell::new(None),
+            render_target_boxes: RefCell::new(Vec::new()),
             privacy_popup: RefCell::new(None),
             version_popup: RefCell::new(None),
             project_popup: RefCell::new(None),
@@ -923,6 +960,26 @@ impl ControlTarget {
             "Track Face"
         }));
         checkbox.setEnabled(!loading);
+    }
+
+    /// Put the three Render boxes into the state the config holds — after a
+    /// click, so the box and the file agree, and on every control sync.
+    pub fn set_render_targets(&self, targets: crate::config::RenderTargets) {
+        if MainThreadMarker::new().is_none() {
+            return;
+        }
+        for (name, checkbox) in self.ivars().render_target_boxes.borrow().iter() {
+            let on = match *name {
+                "horizontal" => targets.horizontal,
+                "vertical" => targets.vertical,
+                _ => targets.shorts,
+            };
+            checkbox.setState(if on {
+                NSControlStateValueOn
+            } else {
+                NSControlStateValueOff
+            });
+        }
     }
 
     pub fn set_regions(&self, has_screen: bool, visible: bool) {
@@ -1464,9 +1521,8 @@ fn layout_left(
     let group_h = groups
         .iter()
         .map(|(_, buttons)| {
-            buttons.len() as f64 * BUTTON_H
-                + buttons.len().saturating_sub(1) as f64 * BUTTON_GAP
-                + 32.0
+            let rows = group_rows(buttons).len();
+            rows as f64 * BUTTON_H + rows.saturating_sub(1) as f64 * BUTTON_GAP + 32.0
         })
         .fold(GROUP_H, f64::max);
     let stack_bottom = (y - SECTION_GAP - group_h).max(PAD + 110.0);
@@ -1561,21 +1617,43 @@ fn layout_right(
     ));
 }
 
+/// The group's rows: every button its own row, except a run of buttons tagged
+/// [`ROW_TAG`], which share one — the Render output boxes.
+fn group_rows(buttons: &[Retained<NSButton>]) -> Vec<Vec<Retained<NSButton>>> {
+    let mut rows: Vec<Vec<Retained<NSButton>>> = Vec::new();
+    for button in buttons {
+        let shared = button.tag() == ROW_TAG;
+        match rows.last_mut() {
+            Some(row) if shared && row.iter().all(|other| other.tag() == ROW_TAG) => {
+                row.push(button.clone())
+            }
+            _ => rows.push(vec![button.clone()]),
+        }
+    }
+    rows
+}
+
 fn layout_group_buttons(frame: &NSBox, buttons: &[Retained<NSButton>]) {
     let Some(content) = frame.contentView() else {
         return;
     };
     let bounds = content.bounds();
-    let n = buttons.len().max(1);
+    let rows = group_rows(buttons);
+    let n = rows.len().max(1);
     let total = n as f64 * BUTTON_H + (n - 1) as f64 * BUTTON_GAP;
     let y0 = ((bounds.size.height - total) / 2.0).max(0.0);
-    for (i, button) in buttons.iter().enumerate() {
+    for (i, row) in rows.iter().enumerate() {
         let from_bottom = (n - 1 - i) as f64;
         let y = y0 + from_bottom * (BUTTON_H + BUTTON_GAP);
-        button.setFrame(NSRect::new(
-            NSPoint::new(0.0, y),
-            NSSize::new(bounds.size.width.max(8.0), BUTTON_H),
-        ));
+        // A shared row splits the width evenly; a button has it all.
+        let k = row.len().max(1) as f64;
+        let w = ((bounds.size.width - BUTTON_GAP * (k - 1.0)) / k).max(8.0);
+        for (j, button) in row.iter().enumerate() {
+            button.setFrame(NSRect::new(
+                NSPoint::new(j as f64 * (w + BUTTON_GAP), y),
+                NSSize::new(w, BUTTON_H),
+            ));
+        }
     }
 }
 
@@ -1663,6 +1741,7 @@ pub fn attach_controls(
     pair_idx: usize,
     face_tracking: bool,
     mouse_tracking: bool,
+    render_targets: crate::config::RenderTargets,
     youtube_privacy: crate::publish::youtube::Privacy,
     model_menu: &[crate::notes::ModelMenuRow],
     model_idx: usize,
@@ -1998,6 +2077,54 @@ pub fn attach_controls(
     });
     *target.ivars().mouse_checkbox.borrow_mut() = Some(mouse_checkbox.clone());
 
+    // The Render output boxes: one row directly above the Render button, in
+    // the group it belongs to. Small, so three fit across the Record group;
+    // tagged, so `layout_group_buttons` lays the run out side by side.
+    let render_target_boxes: Vec<(&'static str, Retained<NSButton>)> = [
+        (
+            "horizontal",
+            "Horizontal",
+            "Render the horizontal longform",
+            render_targets.horizontal,
+        ),
+        (
+            "vertical",
+            "Vertical",
+            "Render the vertical longform — the shorts joined end to end",
+            render_targets.vertical,
+        ),
+        (
+            "shorts",
+            "Shorts",
+            "Render each chapter's vertical cut as a short",
+            render_targets.shorts,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, title, tip, on)| {
+        let checkbox = unsafe {
+            NSButton::buttonWithTitle_target_action(
+                &NSString::from_str(title),
+                Some(&target),
+                Some(sel!(onRenderTargetChanged:)),
+                mtm,
+            )
+        };
+        checkbox.setButtonType(NSButtonType::Switch);
+        checkbox.setControlSize(NSControlSize::Small);
+        checkbox.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        checkbox.setToolTip(Some(&NSString::from_str(tip)));
+        checkbox.setState(if on {
+            NSControlStateValueOn
+        } else {
+            NSControlStateValueOff
+        });
+        checkbox.setTag(ROW_TAG);
+        (name, checkbox)
+    })
+    .collect();
+    *target.ivars().render_target_boxes.borrow_mut() = render_target_boxes.clone();
+
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
@@ -2076,7 +2203,19 @@ pub fn attach_controls(
     })
     .collect();
 
-    let left_groups = [("Record", &built[RECORD]), ("Session", &built[SESSION])]
+    // The Record group, with the Render boxes as one row directly above the
+    // Render button — the last button in its run.
+    let mut record: Vec<Retained<NSButton>> = built[RECORD].to_vec();
+    let render = record
+        .pop()
+        .expect("the Render button closes the Record group");
+    record.extend(
+        render_target_boxes
+            .iter()
+            .map(|(_, checkbox)| checkbox.clone()),
+    );
+    record.push(render);
+    let left_groups = [("Record", record.as_slice()), ("Session", &built[SESSION])]
         .into_iter()
         .map(|(title, group)| {
             let frame = make_button_group(mtm, title, group);

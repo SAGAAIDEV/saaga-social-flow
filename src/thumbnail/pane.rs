@@ -56,8 +56,9 @@ pub struct CardView {
     pub kicker: String,
     /// The two themes, with the chosen one marked.
     pub themes: Vec<ModelChoice>,
-    /// `0.50`, as the number box shows it.
+    /// `0.50`, as the number boxes show it: across, then down.
     pub focus: String,
+    pub focus_y: String,
     /// Whether Redraw artwork does anything, and why not when it does not.
     pub can_draw: bool,
     pub hint: String,
@@ -213,6 +214,7 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
         // Two decimals, because the useful range of a nudge is about a twentieth
         // of the frame and a whole number would round every one of them away.
         focus: format!("{:.2}", card.focus_clamped()),
+        focus_y: format!("{:.2}", card.focus_y_clamped()),
         can_draw: !card.is_empty() && has_still,
         hint: card_hint(&card, has_still),
         title: card.title,

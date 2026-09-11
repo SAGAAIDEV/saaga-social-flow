@@ -20,6 +20,7 @@ fn card() -> Card {
         kicker: "SAAGA".into(),
         theme: "light".into(),
         focus: 0.34,
+        focus_y: 0.5,
         format: Default::default(),
     }
 }
@@ -112,6 +113,7 @@ fn the_focus_is_held_inside_the_frame() {
     assert_eq!(
         Card {
             focus: 4.0,
+            focus_y: 0.5,
             ..card()
         }
         .focus_clamped(),
@@ -128,6 +130,7 @@ fn the_focus_is_held_inside_the_frame() {
     assert_eq!(
         Card {
             focus: 0.34,
+            focus_y: 0.5,
             ..card()
         }
         .focus_clamped(),
@@ -167,6 +170,7 @@ fn the_fingerprint_moves_on_an_edit_and_not_on_whitespace() {
         },
         Card {
             focus: 0.35,
+            focus_y: 0.5,
             ..card()
         },
     ] {
@@ -212,11 +216,27 @@ fn the_format_picker_is_persisted_without_retiring_the_artwork() {
     save(&root, &portrait).unwrap();
     assert_eq!(load(&root).format.size(), (720, 1280));
     assert_eq!(
-        render::payload(&portrait, None, 720, 1280)["format"],
+        render::payload(&portrait, None, None, 720, 1280)["format"],
         "vertical"
     );
     assert_eq!(portrait.fingerprint(), card().fingerprint());
     let legacy: Card = serde_json::from_str(r#"{"title":"Legacy"}"#).unwrap();
     assert_eq!(legacy.format.size(), (1280, 720));
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// The tracker's anchor is a point in the camera frame, and the still is that
+/// frame — so the crop is aimed straight at it, clamped, and the set drawn
+/// afterwards is a different picture from the one drawn before.
+#[test]
+fn aiming_at_the_face_moves_both_halves_of_the_focus_and_the_fingerprint() {
+    let mut card = Card::default();
+    let before = card.fingerprint();
+    card.aim((0.31, 0.62));
+    assert_eq!((card.focus, card.focus_y), (0.31, 0.62));
+    assert_ne!(card.fingerprint(), before);
+
+    card.aim((1.7, f64::NAN));
+    assert_eq!((card.focus, card.focus_y), (1.0, 0.5));
+    assert_eq!(card.focus_y_clamped(), 0.5);
 }

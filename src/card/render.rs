@@ -52,7 +52,18 @@ pub fn script(root: &Path) -> PathBuf {
 
 /// The payload the renderer reads. Pure, so the contract can be asserted without
 /// starting a subprocess.
-pub fn payload(card: &Card, photo: Option<&Path>, width: u32, height: u32) -> serde_json::Value {
+///
+/// `photo_size` is the still's pixel size when it could be read. The page needs
+/// it to crop the photo box around the focus point rather than merely aligning
+/// percentages — see `card/components.tsx` — and treats the point as a plain
+/// `object-position` without it, which is what it always did.
+pub fn payload(
+    card: &Card,
+    photo: Option<&Path>,
+    photo_size: Option<(u32, u32)>,
+    width: u32,
+    height: u32,
+) -> serde_json::Value {
     let mut value = json!({
         "format": card.format,
         // Named rather than measured against a literal: the size lives on
@@ -64,6 +75,7 @@ pub fn payload(card: &Card, photo: Option<&Path>, width: u32, height: u32) -> se
         "kicker": card.kicker.trim(),
         "theme": card.theme_or_default(),
         "focus": card.focus_clamped(),
+        "focusY": card.focus_y_clamped(),
         "width": width,
         "height": height,
     });
@@ -73,7 +85,17 @@ pub fn payload(card: &Card, photo: Option<&Path>, width: u32, height: u32) -> se
         // against the *volume root*, which silently draws no photograph.
         value["photo"] = json!(file_url(photo));
     }
+    if let Some((width, height)) = photo_size {
+        value["photoSize"] = json!([width, height]);
+    }
     value
+}
+
+/// The still's pixel size, read off its JPEG header. `None` when the file is
+/// missing or not a JPEG, which costs the centring and nothing else.
+fn photo_size(photo: Option<&Path>) -> Option<(u32, u32)> {
+    let bytes = std::fs::read(photo?).ok()?;
+    crate::thumbnail::still::jpeg_dimensions(&bytes)
 }
 
 /// Renders the card, returning the page.
@@ -85,7 +107,7 @@ pub fn html(
     height: u32,
 ) -> Result<String> {
     let script = script(root);
-    let body = serde_json::to_vec(&payload(card, photo, width, height))
+    let body = serde_json::to_vec(&payload(card, photo, photo_size(photo), width, height))
         .context("serializing the card payload")?;
 
     let mut child = Command::new("bun")
@@ -170,24 +192,46 @@ mod tests {
             kicker: " saaga ".into(),
             theme: "light".into(),
             focus: 0.32,
+            focus_y: 0.41,
             format: Default::default(),
         }
     }
 
     #[test]
     fn the_payload_trims_and_carries_every_field() {
-        let value = payload(&card(), None, 1280, 720);
+        let value = payload(&card(), None, None, 1280, 720);
         assert_eq!(value["title"], "Ship it anyway");
         assert_eq!(value["description"], "Why the queue fell over.");
         assert_eq!(value["kicker"], "saaga");
         assert_eq!(value["theme"], "light");
         assert_eq!(value["focus"], 0.32);
+        assert_eq!(value["focusY"], 0.41);
         assert_eq!(value["width"], 1280);
         assert_eq!(value["height"], 720);
         assert!(
             value.get("photo").is_none(),
             "a card with no still sends none"
         );
+        assert!(
+            value.get("photoSize").is_none(),
+            "no still, no size to centre on"
+        );
+    }
+
+    /// The page can only centre the focus point when it knows how big the still
+    /// is, so the size travels beside the photo when it could be read.
+    #[test]
+    fn the_stills_size_travels_when_known() {
+        let value = payload(
+            &card(),
+            Some(Path::new("/tmp/still.jpg")),
+            Some((1920, 1080)),
+            1280,
+            720,
+        );
+        assert_eq!(value["photoSize"], serde_json::json!([1920, 1080]));
+        assert!(photo_size(Some(Path::new("/nonexistent/still.jpg"))).is_none());
+        assert!(photo_size(None).is_none());
     }
 
     /// A bare path in an `<img src>` on a page loaded from a file URL resolves
@@ -197,6 +241,7 @@ mod tests {
         let value = payload(
             &card(),
             Some(Path::new("/tmp/a project/thumbnails/stills/still-ab.jpg")),
+            None,
             1280,
             720,
         );
@@ -212,16 +257,18 @@ mod tests {
     fn an_unknown_theme_falls_back_rather_than_reaching_the_renderer() {
         let mut odd = card();
         odd.theme = "neon".into();
-        assert_eq!(payload(&odd, None, 1280, 720)["theme"], "dark");
+        assert_eq!(payload(&odd, None, None, 1280, 720)["theme"], "dark");
     }
 
     #[test]
     fn the_focus_is_clamped_before_it_is_sent() {
         let mut wild = card();
         wild.focus = 1.8;
-        assert_eq!(payload(&wild, None, 1280, 720)["focus"], 1.0);
+        assert_eq!(payload(&wild, None, None, 1280, 720)["focus"], 1.0);
         wild.focus = -3.0;
-        assert_eq!(payload(&wild, None, 1280, 720)["focus"], 0.0);
+        assert_eq!(payload(&wild, None, None, 1280, 720)["focus"], 0.0);
+        wild.focus_y = f64::NAN;
+        assert_eq!(payload(&wild, None, None, 1280, 720)["focusY"], 0.5);
     }
 
     /// The script has to be findable from a binary run anywhere, which is what

@@ -18,9 +18,14 @@ pub(super) fn from_youtube(session: &Session) -> Option<payload::VerticalCut> {
     })
 }
 
+/// `targets` are the Render boxes: a vertical longform whose box is off is not
+/// uploaded even when an earlier render left the file behind. A Short already
+/// on YouTube is embedded regardless — it went up when the box was on, and the
+/// page loses nothing by pointing at it.
 pub(super) fn upload(
     client: &strapi::Strapi,
     session: &Session,
+    targets: crate::config::RenderTargets,
     status: impl Fn(String),
 ) -> Result<Option<payload::VerticalCut>> {
     if let Some(short) = from_youtube(session) {
@@ -29,6 +34,13 @@ pub(super) fn upload(
     }
     let video = session.render_dir().join("vertical/longform.mp4");
     if !video.is_file() {
+        return Ok(None);
+    }
+    if !targets.vertical {
+        eprintln!(
+            "stream-recorder: the vertical longform is switched off above the Render button — not \
+             uploading it to the CMS"
+        );
         return Ok(None);
     }
     status("Uploading the vertical cut…".into());
@@ -64,7 +76,13 @@ mod tests {
         let session = session("none");
         // Reaching the network at all is the failure here: a horizontal-only
         // project is a normal project, not a degraded one.
-        let got = upload(&strapi::Strapi::for_test(), &session, |_| {}).unwrap();
+        let got = upload(
+            &strapi::Strapi::for_test(),
+            &session,
+            Default::default(),
+            |_| {},
+        )
+        .unwrap();
         assert!(got.is_none());
         assert!(from_youtube(&session).is_none());
         let _ = std::fs::remove_dir_all(&session.root);
@@ -87,11 +105,34 @@ mod tests {
             ),
         )
         .unwrap();
-        let got = upload(&strapi::Strapi::for_test(), &session, |_| {})
-            .unwrap()
-            .expect("the short is the vertical video");
+        let got = upload(
+            &strapi::Strapi::for_test(),
+            &session,
+            Default::default(),
+            |_| {},
+        )
+        .unwrap()
+        .expect("the short is the vertical video");
         assert_eq!(got.video_id.as_deref(), Some("short1"));
         assert_eq!(got.url, "https://www.youtube.com/shorts/short1");
+        let _ = std::fs::remove_dir_all(&session.root);
+    }
+
+    /// A vertical longform on disk from before the box was unticked stays on
+    /// disk and off the wire: the client here points nowhere, so an upload
+    /// would fail rather than pass.
+    #[test]
+    fn a_switched_off_vertical_longform_is_not_uploaded() {
+        let session = session("off");
+        std::fs::create_dir_all(session.render_dir().join("vertical")).unwrap();
+        std::fs::write(session.render_dir().join("vertical/longform.mp4"), b"v").unwrap();
+        let off = crate::config::RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: true,
+        };
+        let got = upload(&strapi::Strapi::for_test(), &session, off, |_| {}).unwrap();
+        assert!(got.is_none());
         let _ = std::fs::remove_dir_all(&session.root);
     }
 }

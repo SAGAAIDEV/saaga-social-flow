@@ -90,6 +90,7 @@ mod tests {
             kicker: "SAAGA".into(),
             theme: "dark".into(),
             focus: 0.5,
+            focus_y: 0.5,
             format: Default::default(),
         }
     }
@@ -125,6 +126,7 @@ mod tests {
             },
             Card {
                 focus: 0.31,
+                focus_y: 0.5,
                 ..card()
             },
         ] {

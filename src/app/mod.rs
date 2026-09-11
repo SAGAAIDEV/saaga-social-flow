@@ -310,6 +310,7 @@ impl App {
             Pair::ALL.iter().position(|p| *p == self.pair).unwrap_or(0),
             self.face_tracking_wanted(),
             self.mouse_tracking_wanted(),
+            crate::config::load().render,
             self.youtube_privacy,
             self.notes_pick.menu(),
             self.notes_pick.menu_index(),
@@ -402,6 +403,8 @@ impl App {
                 hold,
             );
             live.control_target.set_stage_gates(&self.stages());
+            live.control_target
+                .set_render_targets(crate::config::load().render);
         }
     }
 
@@ -830,6 +833,7 @@ impl App {
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
             UiEvent::SaveBlogFields(fields) => self.save_blog_fields(&fields),
             UiEvent::RepairBlog => self.run_repair_blog(),
+            UiEvent::RenderTarget { name, value } => self.set_render_target(&name, value),
             UiEvent::ThumbnailModelSelected(id) => self.select_thumbnail_model(&id),
             UiEvent::ToggleReference { name, value } => self.toggle_reference(&name, value),
             UiEvent::AddReference { name, data } => self.add_reference(&name, &data),
@@ -1092,6 +1096,15 @@ impl App {
         let stages = self.stages();
         if let Some(reason) = stages.render.missing() {
             self.set_render_status(reason);
+            return;
+        }
+        // Refused before the photo is taken and the cut starts: a render with
+        // nothing to produce would still cost both.
+        if !crate::config::load().render.any() {
+            let reason = "Every render output is switched off — tick the horizontal longform, \
+                          the vertical longform or the shorts above the Render button";
+            self.set_render_status(reason);
+            self.set_thumbnail_status(reason);
             return;
         }
         let photo = match self.take_still() {
@@ -1533,6 +1546,39 @@ impl App {
         self.update_blog_view();
     }
 
+    /// Remembers a Render output box. Config, not the project: which outputs you
+    /// want is a standing preference, like the thumbnail model. The next render
+    /// draws only what the ticked outputs still lack — the plan leaves an
+    /// unticked output out, and the renderer skips anything already current.
+    fn set_render_target(&mut self, name: &str, value: bool) {
+        let mut config = crate::config::load();
+        if !config.render.set(name, value) {
+            return;
+        }
+        let targets = config.render;
+        match crate::config::save(&config) {
+            Ok(()) => {
+                let label = crate::config::RenderTargets::label(name);
+                let message = match (value, targets.any()) {
+                    (true, _) => format!(
+                        "Render will produce {label}. Only what is missing or stale gets drawn."
+                    ),
+                    (false, true) => format!("Render will skip {label}."),
+                    (false, false) => {
+                        "Every render output is off — Render will refuse until one is ticked."
+                            .to_string()
+                    }
+                };
+                self.set_render_status(&message);
+            }
+            Err(err) => {
+                self.set_render_status(&format!("Could not save the render options: {err:#}"))
+            }
+        }
+        self.update_video_view();
+        self.sync_controls();
+    }
+
     /// Saves the fields edited on the Blog tab's "Needs fixing" card and
     /// repaints, so the card shrinks to what is still over and Publish
     /// comes back when nothing is.
@@ -1825,19 +1871,51 @@ impl App {
         };
         let camera = crate::thumbnail::still::write(&self.session.root, frame.pixels.get());
         let screen = self.take_screen_grab();
+        // The photo box shows under half of the still's width, and this is the
+        // one moment the tracker knows where the face is in exactly this frame.
+        let framed = self.aim_card_at_face();
 
         match (camera, screen) {
             (Err(err), _) => Err(format!("Could not save the photo: {err:#}")),
-            (Ok(path), None) => Ok(format!("Took your photo ({})", file_name(&path))),
+            (Ok(path), None) => Ok(format!("Took your photo ({}){framed}", file_name(&path))),
             (Ok(path), Some(Ok(shot))) => Ok(format!(
-                "Took your photo ({}) and the screen ({})",
+                "Took your photo ({}) and the screen ({}){framed}",
                 file_name(&path),
                 file_name(&shot)
             )),
             (Ok(path), Some(Err(err))) => Ok(format!(
-                "Took your photo ({}) — the screen grab failed: {err:#}",
+                "Took your photo ({}){framed} — the screen grab failed: {err:#}",
                 file_name(&path)
             )),
+        }
+    }
+
+    /// Points the card's photo crop at the face, using the tracker's anchor for
+    /// the frame the still was just taken from.
+    ///
+    /// The still is the raw camera frame and the tracker samples the same
+    /// buffer, so the anchor's normalized point is a point in the still with no
+    /// mirroring or flip between them. The card page then crops the photo box
+    /// around that point — see `card/components.tsx`. Returns the clause for the
+    /// status line: what was done, or why nothing was — tracking off, or no face
+    /// found — because a crop left at centre should never look like one aimed.
+    fn aim_card_at_face(&self) -> String {
+        let Some(tracker) = self.face_tracker.as_ref() else {
+            return " — face tracking is off, so the photo crop keeps its Focus setting"
+                .to_string();
+        };
+        let Some(anchor) = tracker.anchor() else {
+            return " — no face found yet, so the photo crop keeps its Focus setting".to_string();
+        };
+        let root = &self.session.root;
+        let mut card = crate::card::load(root);
+        card.aim(anchor);
+        match crate::card::save(root, &card) {
+            Ok(_) => format!(
+                " — photo crop aimed at your face ({:.0}% across)",
+                card.focus * 100.0
+            ),
+            Err(err) => format!(" — could not save the photo framing: {err:#}"),
         }
     }
 
@@ -3082,6 +3160,7 @@ impl App {
             .render_dir()
             .join("vertical/longform.mp4")
             .is_file();
+        let targets = crate::config::load().render;
         match crate::publish::short(&self.session) {
             Some(short) => {
                 info.push_str("\n## Short\n");
@@ -3090,17 +3169,31 @@ impl App {
                 info.push_str(&format!("- Visibility: {}\n", short.privacy.label()));
                 info.push_str("- The blog embeds it as the page's mobile player.\n");
             }
+            None if has_vertical && !targets.vertical => info.push_str(
+                "\n## Short\n- The vertical longform is switched off above the Render button, so it \
+                 is not uploaded as a Short.\n",
+            ),
             None if has_vertical => info.push_str(
                 "\n## Short\n- The vertical cut goes up as a Short with the next Upload, after \
                  the longform.\n",
             ),
             None => {}
         }
+        // Both links with a copy each, and one copy for both: the pair is what
+        // gets pasted into a post, and reading it out of the text above meant
+        // selecting across two headings.
+        let youtube = crate::publish::longform(&self.session).map(|upload| upload.url);
+        let short = crate::publish::short(&self.session).map(|upload| upload.url);
+        let both = match (&youtube, &short) {
+            (Some(long), Some(short)) => Some(format!("{long}\n{short}")),
+            _ => None,
+        };
         live.publish_pane.show_local(
             &ui::render::page(
                 "youtube.html",
                 minijinja::context! {
                     metadata => crate::publish::metadata::load(&self.session), info => info,
+                    youtube => youtube, short => short, both => both,
                 },
             ),
             &self.session.root,

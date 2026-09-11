@@ -7,6 +7,13 @@ use anyhow::{bail, Context, Result};
 use super::cut;
 
 pub const CARD_SECONDS: f64 = 3.0;
+/// Where the workspace records the encoder quality its renders were made at.
+///
+/// Declared as a source of every job, so changing [`super::render::QUALITY`]
+/// re-renders everything exactly once. Without it a quality change passed
+/// every freshness check — the compositions had not changed — and the shorts
+/// on disk stayed at the old setting for as long as the project lived.
+pub const QUALITY_FILE: &str = "render-quality.txt";
 pub const OPENER_SECONDS: f64 = 2.6;
 const HF_VERSION: &str = "0.7.107";
 
@@ -80,6 +87,10 @@ pub struct Plan {
     /// The longform, in order: card, body, card, body… Only the cards are rendered.
     pub h_segments: Vec<Segment>,
     pub v_jobs: Vec<Job>,
+    /// What this plan was asked for. `h_segments` is empty when the horizontal
+    /// longform is off and `v_jobs` when neither vertical output is; the
+    /// renderer reads `vertical` here to know whether to join the chapters.
+    pub targets: crate::config::RenderTargets,
 }
 
 impl Plan {
@@ -127,12 +138,39 @@ pub fn components_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../screencast/components")
 }
 
+/// Everything on: the plan a render made before there were boxes to untick.
+/// Kept for the tests, which are about the layout rather than the boxes.
+#[cfg(test)]
 pub fn prepare(
     edit_root: &Path,
     compose_root: &Path,
     library: &Path,
     titles: &[(u32, String)],
     project_title: &str,
+) -> Result<Plan> {
+    prepare_targets(
+        edit_root,
+        compose_root,
+        library,
+        titles,
+        project_title,
+        crate::config::RenderTargets::default(),
+    )
+}
+
+/// The plan for what `targets` asks for.
+///
+/// An output that is off contributes nothing to the plan — no cards, no
+/// chapter compositions — so nothing is drawn for it. What it does not do is
+/// remove an earlier render's files: a box is "do not spend time on this", not
+/// "throw it away", and the pane lists what is on disk either way.
+pub fn prepare_targets(
+    edit_root: &Path,
+    compose_root: &Path,
+    library: &Path,
+    titles: &[(u32, String)],
+    project_title: &str,
+    targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
         .join("compositions/chapter-title-card.html")
@@ -172,37 +210,34 @@ pub fn prepare(
 
     let mut h_segments: Vec<Segment> = Vec::new();
     let mut v_jobs = Vec::new();
-    // How many chapter cards the viewer has been shown, which is what they are
-    // numbered by — see the loop below.
-    let mut shown = 0u32;
     for (n, title) in titles {
         let chapter = edit_root.join(format!("chapter-{n:02}"));
         let audio = chapter.join("audio.mp3");
         let h_src = chapter.join(format!("chapter-{n:02}-horizontal.mp4"));
         let v_src = chapter.join(format!("chapter-{n:02}-vertical.mp4"));
-        if h_src.exists() {
+        if targets.horizontal && h_src.exists() {
             // The opening title card stands in for chapter one's, so chapter one
             // plays straight out of the title with nothing between them — one
             // card at the front rather than six seconds of two.
             //
-            // Which means the cards no longer carry the chapter's own number. If
-            // they did, the first card a viewer met would read "Chapter 02" and
-            // every card after it would look off by one, which is exactly the
-            // bug this replaced. So they count what the viewer has actually been
-            // shown: chapter one is the opening, and the card in front of
-            // chapter two is "Chapter 01". The id keeps the real chapter number,
-            // because that is what the freshness check and the render output are
-            // keyed on.
+            // Every card carries the chapter's own number. The first card a
+            // viewer meets therefore reads "Chapter 02", and that is right:
+            // chapter one opened under the title, the way a book's first chapter
+            // opens under its own. The cards used to count what had been shown
+            // instead — "01" in front of chapter two — and that number agreed
+            // with nothing else: the vertical cut of the same chapter said
+            // "Chapter 02", the notes and the blog said chapter 2, and a chapter
+            // with no title fell back to its own number, so one card read
+            // "02 / Chapter 3".
             if !h_segments.is_empty() {
-                shown += 1;
-                h_segments.push(Segment::Render(write_card(&horizontal, *n, shown, title)?));
+                h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
             }
             // The cut itself, straight into the longform. Nothing is copied into the
             // horizontal workspace for it either — the cards do not reference chapter
             // media, and this take's footage is hundreds of megabytes.
             h_segments.push(Segment::Passthrough(h_src));
         }
-        if v_src.exists() {
+        if targets.vertical_parts() && v_src.exists() {
             let seconds = cut::probe_duration_seconds(&v_src)?;
             copy_media(&vertical, *n, &v_src, audio.exists().then_some(&audio))?;
             v_jobs.push(write_v_chapter(&vertical, *n, title, seconds)?);
@@ -232,6 +267,7 @@ pub fn prepare(
         write_index(preview_ws, first)?;
     }
     Ok(Plan {
+        targets,
         horizontal,
         vertical,
         h_segments,
@@ -250,6 +286,9 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
     );
     std::fs::write(root.join("package.json"), package)?;
     std::fs::write(root.join("index.html"), blank_index(width, height))?;
+    // Only when it differs, like every other render input: rewriting it each
+    // run would make every composition look stale every run.
+    write_if_changed(&root.join(QUALITY_FILE), super::render::QUALITY)?;
     Ok(())
 }
 
@@ -328,18 +367,20 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `n` is the chapter this card introduces; `shown` is the number printed on it.
+/// The card in front of chapter `n`, numbered `n` — the same number the
+/// vertical cut, the notes and the blog give the chapter. See [`prepare`] for
+/// why the first one a viewer meets is "02".
 ///
-/// They differ because the opening title card stands in for chapter one's, so
-/// the card in front of chapter two is the first one anyone sees — see
-/// [`prepare`].
-fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> {
+/// `title` may be empty: a chapter nobody has titled shows "Chapter 03" from
+/// the label and number alone, and the topic slot collapses. A topic reading
+/// "Chapter 3" under a number reading "03" said the same thing twice.
+fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
         &format!("seg-{n:02}-card"),
         serde_json::json!({
             "chapterLabel": "Chapter",
-            "chapterNumber": format!("{shown:02}"),
+            "chapterNumber": format!("{n:02}"),
             "chapterTopic": title,
             "durationSeconds": CARD_SECONDS,
             // Revealed on a beat, like it always was: a chapter card appears
@@ -357,7 +398,8 @@ fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> 
 /// the branded background.
 ///
 /// It exists because the longform had no opening of its own, so the first thing
-/// a viewer saw was a card reading "Chapter 02" — see [`prepare`].
+/// a viewer saw was a chapter card rather than the video's title — see
+/// [`prepare`].
 fn write_opener(workspace: &Path, project_title: &str) -> Result<Job> {
     title_card(
         workspace,
@@ -399,7 +441,12 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
         // The badge is declared a source as well as the markup: it is drawn on
         // every card, so a new one has to re-render them rather than leaving the
         // old logo on disk looking current.
-        sources: vec![wrapper, baked, workspace.join("assets/badge.svg")],
+        sources: vec![
+            wrapper,
+            baked,
+            workspace.join("assets/badge.svg"),
+            workspace.join(QUALITY_FILE),
+        ],
     })
 }
 
@@ -446,6 +493,7 @@ fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Resul
             baked,
             workspace.join(&camera),
             workspace.join(&audio),
+            workspace.join(QUALITY_FILE),
         ],
     })
 }
@@ -668,9 +716,9 @@ mod tests {
     }
 
     /// The bug this pins, reported as "we see chapter 2 first": chapter one used
-    /// to be the only chapter with no card, so the first card a viewer met read
-    /// "Chapter 02" and every card after it looked off by one. The longform now
-    /// opens on its own title and every chapter is labelled.
+    /// to be the only chapter with no card, so the first thing a viewer met was
+    /// a chapter card rather than the video's title. The longform now opens on
+    /// its own title and every chapter is labelled — by its own number.
     #[test]
     fn the_longform_opens_on_its_own_title_then_labels_every_chapter() {
         let (library, edit, compose) = fixture("order");
@@ -702,15 +750,111 @@ mod tests {
             "the title card stands in for chapter one's, so chapter one follows it"
         );
 
-        // And the card in front of chapter two is the first one anyone sees, so
-        // it reads "01" — numbering what was shown, not the chapter's own index.
+        // The card in front of chapter two reads "02": the chapter's own number,
+        // which is what the vertical cut, the notes and the blog call it. It
+        // used to count cards shown instead, and a chapter with no title then
+        // read "02 / Chapter 3".
         let card =
             std::fs::read_to_string(compose.join("horizontal/compositions/seg-02-card.html"))
                 .unwrap();
-        assert!(card.contains(r#""chapterNumber":"01""#), "{card}");
+        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
         assert!(card.contains("Second"));
         // A chapter card still animates in — it arrives mid-video.
         assert!(card.contains(r#""holdFromStart":0"#), "{card}");
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// A render is made at one quality, and the quality is one of its inputs:
+    /// every job names the workspace's quality file, and the file carries the
+    /// current setting — so raising it re-renders once, and not again.
+    #[test]
+    fn the_render_quality_is_a_source_of_every_job() {
+        let (library, edit, compose) = fixture("quality");
+        let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
+        let plan = prepare(&edit, &compose, &library, &titles, "A video").unwrap();
+        let quality = compose.join("horizontal").join(QUALITY_FILE);
+        assert_eq!(
+            std::fs::read_to_string(&quality).unwrap(),
+            super::super::render::QUALITY
+        );
+        for job in plan.h_segments.iter().filter_map(Segment::job) {
+            assert!(
+                job.sources.contains(&quality),
+                "{}: {:?}",
+                job.id,
+                job.sources
+            );
+        }
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// The boxes decide what is planned, and an output that is off plans
+    /// nothing — no cards, no chapter compositions — rather than planning
+    /// everything and skipping at the render.
+    #[test]
+    fn switched_off_outputs_plan_nothing() {
+        use crate::config::RenderTargets;
+        let (library, edit, compose) = fixture("targets");
+        // Give the fixture verticals too, so both halves of the plan are in play.
+        std::fs::write(
+            library.join("compositions/talking-head-vertical.html"),
+            r#"<div data-duration="10"></div>"#,
+        )
+        .unwrap();
+        for n in 1..=2 {
+            std::fs::write(
+                edit.join(format!("chapter-{n:02}/chapter-{n:02}-vertical.mp4")),
+                b"v",
+            )
+            .unwrap();
+        }
+        let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
+        let plan = |targets: RenderTargets| {
+            prepare_targets(&edit, &compose, &library, &titles, "A video", targets)
+        };
+
+        // Only the horizontal: cards and bodies, no chapter compositions.
+        let horizontal_only = plan(RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: false,
+        });
+        match horizontal_only {
+            Ok(plan) => {
+                assert!(!plan.h_segments.is_empty());
+                assert!(plan.v_jobs.is_empty(), "{:?}", plan.v_jobs);
+                assert!(!plan.targets.vertical);
+            }
+            // The fixture's vertical stub has no real duration to probe; only
+            // the horizontal half is exercised on a machine without ffprobe.
+            Err(err) => panic!("{err:#}"),
+        }
+
+        // Nothing horizontal: no opener, no cards, no bodies.
+        let no_horizontal = RenderTargets {
+            horizontal: false,
+            vertical: false,
+            shorts: false,
+        };
+        let plan = plan(no_horizontal).unwrap();
+        assert!(plan.h_segments.is_empty());
+        assert!(plan.v_jobs.is_empty());
+        assert!(plan.is_empty());
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// A chapter nobody has titled gets its number and nothing under it, rather
+    /// than a topic that restates — or, as it did, contradicts — the number.
+    #[test]
+    fn an_untitled_chapter_is_numbered_and_its_topic_left_empty() {
+        let (library, edit, compose) = fixture("untitled");
+        let titles = vec![(1u32, "First".to_string()), (2u32, String::new())];
+        prepare(&edit, &compose, &library, &titles, "A video").unwrap();
+        let card =
+            std::fs::read_to_string(compose.join("horizontal/compositions/seg-02-card.html"))
+                .unwrap();
+        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
+        assert!(card.contains(r#""chapterTopic":"""#), "{card}");
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 

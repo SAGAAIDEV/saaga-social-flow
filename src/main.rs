@@ -167,6 +167,9 @@ fn main() -> Result<()> {
                         kicker: kicker.clone(),
                         theme: theme.clone(),
                         focus: *focus,
+                        // The CLI frames across only; a landscape still has no
+                        // vertical travel in either layout.
+                        focus_y: 0.5,
                     },
                     still: still.as_deref().map(std::path::PathBuf::from),
                     // Use the selected orientation throughout rasterisation.

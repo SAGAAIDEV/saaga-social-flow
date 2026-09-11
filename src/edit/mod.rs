@@ -251,16 +251,26 @@ fn compose_and_render(
         .ok()
         .and_then(|manifest| manifest.longform_title().map(str::to_string))
         .unwrap_or_else(|| session.title());
+    // The boxes above the Render button, read here rather than passed in, so
+    // a re-cut from the Edit tab honours them the same way Render does.
+    let targets = crate::config::load().render;
+    if !targets.any() {
+        bail!(
+            "every render output is switched off — tick the horizontal longform, the vertical \
+             longform or the shorts above the Render button"
+        );
+    }
     status("Preparing HyperFrames compositions…");
-    let plan = compose::prepare(
+    let plan = compose::prepare_targets(
         edit_root,
         &session.compose_dir(),
         &compose::components_root(),
         &titles,
         &longform_title,
+        targets,
     )?;
     if plan.is_empty() {
-        bail!("no horizontal or vertical cuts to compose");
+        bail!("no horizontal or vertical cuts to compose for the outputs that are switched on");
     }
     progress(COMPOSED);
     // Only the title cards and the verticals are drawn; the chapter bodies go into the
@@ -304,10 +314,14 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
                 .and_then(|data| data.chapters.get(n.saturating_sub(1) as usize))
                 .map(|c| c.title.trim())
                 .filter(|t| !t.is_empty());
+            // No fallback title. The cards print "Chapter" and the number from
+            // their own slots, so a topic reading "Chapter 3" beneath them said
+            // it twice — and, while the number counted something else, said
+            // "02 / Chapter 3". Empty, the topic slot collapses.
             let title = from_titles
                 .or(from_notes)
                 .map(str::to_string)
-                .unwrap_or_else(|| format!("Chapter {n}"));
+                .unwrap_or_default();
             (n, title)
         })
         .collect()

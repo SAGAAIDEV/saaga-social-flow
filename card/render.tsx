@@ -29,7 +29,9 @@ Reads a JSON object on stdin:
   title        required, the headline
   description  optional, the line under it
   photo        optional, a file:// URL for the camera still
-  focus        optional, 0..1, where across the still the subject sits
+  focus        optional, 0..1, where across the still the subject sits (centred in the box)
+  focusY       optional, 0..1, where down the still the subject sits
+  photoSize    optional, [width, height] of the still in pixels — needed to centre the point
   theme        optional, "dark" (default) or "light"
   kicker       optional, small orange word above the title
   format       optional, "horizontal" (default) or "vertical"

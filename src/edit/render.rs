@@ -16,7 +16,14 @@ use anyhow::{bail, Context, Result};
 use super::compose::{Job, Kind, Plan, Segment};
 use super::cut;
 
-pub const QUALITY: &str = "draft";
+/// HyperFrames' encoder quality for every deliverable this renders: the title
+/// cards spliced into the horizontal longform, and the vertical chapters that
+/// are the shorts and the vertical longform. Of `draft`, `standard` and `high`
+/// this ran at `draft`, which is the preview setting — the shorts came out
+/// Constrained Baseline at under 4 Mbps and read as compressed. `high` costs
+/// render time and buys the picture; the render is already incremental, so it
+/// is paid once per composition.
+pub const QUALITY: &str = "high";
 /// Pinned so the cache path, the npx fallback and the preflight check cannot
 /// drift apart into three different renderers.
 pub const HF_VERSION: &str = "0.7.107";
@@ -108,16 +115,34 @@ pub fn render_plan(
     })?;
 
     // The one step after the renders with a wait worth naming: the cards are
-    // conformed to the footage and everything is joined.
-    status("Assembling the longform…");
-    let joinable = conform_for_concat(plan, &h_out, &h_dir)?;
-    join(&joinable, &h_dir.join(LONGFORM))?;
+    // conformed to the footage and everything is joined. Each longform only
+    // when it was asked for, and only when a part is newer than the last join —
+    // so ticking the vertical longform after a render that already drew the
+    // shorts costs the join and nothing else.
+    if !plan.h_segments.is_empty() {
+        let longform = h_dir.join(LONGFORM);
+        if is_fresh(&longform, &h_out) {
+            eprintln!("stream-recorder: the horizontal longform is already current");
+        } else {
+            status("Assembling the longform…");
+            let joinable = conform_for_concat(plan, &h_out, &h_dir)?;
+            join(&joinable, &longform)?;
+        }
+    }
     // No `conform_for_concat` for the verticals, and that is not an oversight:
     // every part of the horizontal longform is a different animal — rendered
     // title cards spliced between passthrough camera footage — while the
     // verticals are all the same composition out of the same renderer, so they
     // already agree on profile, pixel format and frame rate.
-    join(&v_out, &v_dir.join(LONGFORM))?;
+    if plan.targets.vertical && !v_out.is_empty() {
+        let longform = v_dir.join(LONGFORM);
+        if is_fresh(&longform, &v_out) {
+            eprintln!("stream-recorder: the vertical longform is already current");
+        } else {
+            status("Assembling the vertical longform…");
+            join(&v_out, &longform)?;
+        }
+    }
     Ok(publish.to_path_buf())
 }
 
@@ -457,6 +482,7 @@ mod tests {
             })
             .collect();
         let plan = Plan {
+            targets: Default::default(),
             horizontal: dir.clone(),
             vertical: dir.clone(),
             // What `prepare` builds: no card before the first chapter.
@@ -511,6 +537,7 @@ mod tests {
     fn a_plan_with_no_chapters_needs_no_reference_frame_rate() {
         let dir = temp("cardsonly");
         let plan = Plan {
+            targets: Default::default(),
             horizontal: dir.clone(),
             vertical: dir.clone(),
             h_segments: vec![Segment::Render(card("seg-02-card"))],
