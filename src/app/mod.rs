@@ -310,6 +310,7 @@ impl App {
             Pair::ALL.iter().position(|p| *p == self.pair).unwrap_or(0),
             self.face_tracking_wanted(),
             self.mouse_tracking_wanted(),
+            crate::config::load().render,
             self.youtube_privacy,
             self.notes_pick.menu(),
             self.notes_pick.menu_index(),
@@ -402,6 +403,8 @@ impl App {
                 hold,
             );
             live.control_target.set_stage_gates(&self.stages());
+            live.control_target
+                .set_render_targets(crate::config::load().render);
         }
     }
 
@@ -1099,7 +1102,7 @@ impl App {
         // nothing to produce would still cost both.
         if !crate::config::load().render.any() {
             let reason = "Every render output is switched off — tick the horizontal longform, \
-                          the vertical longform or the shorts under Video details";
+                          the vertical longform or the shorts above the Render button";
             self.set_render_status(reason);
             self.set_thumbnail_status(reason);
             return;
@@ -2256,8 +2259,6 @@ impl App {
                     // The last stage of the render chain, so the pane's pipeline
                     // strip can show the whole run without a trip to the YouTube tab.
                     youtube => crate::publish::longform(&self.session).map(|upload| upload.url),
-                    // The three Render boxes, remembered in config.
-                    targets => crate::config::load().render,
                     // The vertical cut's Short, listed beside it so neither link
                     // needs the YouTube tab.
                     short => crate::publish::short(&self.session).map(|upload| upload.url),
@@ -3169,7 +3170,7 @@ impl App {
                 info.push_str("- The blog embeds it as the page's mobile player.\n");
             }
             None if has_vertical && !targets.vertical => info.push_str(
-                "\n## Short\n- The vertical longform is switched off under Video details, so it \
+                "\n## Short\n- The vertical longform is switched off above the Render button, so it \
                  is not uploaded as a Short.\n",
             ),
             None if has_vertical => info.push_str(

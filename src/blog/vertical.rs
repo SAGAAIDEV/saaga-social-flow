@@ -38,7 +38,7 @@ pub(super) fn upload(
     }
     if !targets.vertical {
         eprintln!(
-            "stream-recorder: the vertical longform is switched off under Video details — not \
+            "stream-recorder: the vertical longform is switched off above the Render button — not \
              uploading it to the CMS"
         );
         return Ok(None);

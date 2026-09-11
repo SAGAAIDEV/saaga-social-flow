@@ -82,8 +82,8 @@ fn run(session: &Session, tx: &Sender<DistributeEvent>) -> Result<(PathBuf, Dist
     if assets.is_empty() {
         if !targets.horizontal && !targets.shorts {
             bail!(
-                "the horizontal longform and the shorts are both switched off under Video \
-                 details — nothing to upload"
+                "the horizontal longform and the shorts are both switched off above the Render \
+                 button — nothing to upload"
             );
         }
         bail!(

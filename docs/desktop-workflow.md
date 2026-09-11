@@ -12,8 +12,8 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       title, and every chapter after the first gets a card carrying the
       chapter's own number — the same one the vertical cut, the notes and the
       blog use, so the first card a viewer meets reads "Chapter 02". Three
-      boxes on the Video details pane — **Horizontal longform**, **Vertical
-      longform**, **Shorts** — decide what is produced; all three are on by
+      boxes directly above **Render video and thumbnails** — **Horizontal**,
+      **Vertical**, **Shorts** — decide what is produced; all three are on by
       default and remembered. A render draws only what the ticked outputs still
       lack, so ticking one after a render costs that output alone. The vertical
       longform is the shorts joined, so it renders the chapters either way; an

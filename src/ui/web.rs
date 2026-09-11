@@ -156,7 +156,7 @@ pub enum WebEvent {
     BlogCategory {
         value: String,
     },
-    /// A Render output box on the Video details pane: `horizontal`,
+    /// A Render output box above the Render button: `horizontal`,
     /// `vertical` or `shorts`, and whether it is now ticked.
     RenderTarget {
         name: String,

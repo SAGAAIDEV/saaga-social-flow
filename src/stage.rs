@@ -134,7 +134,7 @@ impl Stages {
         let longform_reason = match config.render.horizontal {
             true => "No longform rendered yet — run Render first",
             false => {
-                "The horizontal longform is switched off under Video details — tick it and Render"
+                "The horizontal longform is switched off above the Render button — tick it and Render"
             }
         };
 

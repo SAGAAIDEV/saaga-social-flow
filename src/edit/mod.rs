@@ -251,13 +251,13 @@ fn compose_and_render(
         .ok()
         .and_then(|manifest| manifest.longform_title().map(str::to_string))
         .unwrap_or_else(|| session.title());
-    // The boxes on the Video details pane, read here rather than passed in, so
+    // The boxes above the Render button, read here rather than passed in, so
     // a re-cut from the Edit tab honours them the same way Render does.
     let targets = crate::config::load().render;
     if !targets.any() {
         bail!(
             "every render output is switched off — tick the horizontal longform, the vertical \
-             longform or the shorts under Video details"
+             longform or the shorts above the Render button"
         );
     }
     status("Preparing HyperFrames compositions…");

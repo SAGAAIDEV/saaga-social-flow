@@ -145,13 +145,13 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
         let _ = tx.send(PublishEvent::Status(msg));
     };
 
-    // The Render boxes on the Video details pane. An output that is switched
+    // The Render boxes above the Render button. An output that is switched
     // off is not uploaded even when an earlier render left its file behind:
     // the box is the decision, the file is history.
     let targets = crate::config::load().render;
     if !targets.horizontal {
         bail!(
-            "the horizontal longform is switched off under Video details — tick it and Render \
+            "the horizontal longform is switched off above the Render button — tick it and Render \
              before uploading"
         );
     }
@@ -178,7 +178,7 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
     let vertical = session.render_dir().join("vertical/longform.mp4");
     if vertical.is_file() && !targets.vertical {
         status(
-            "The vertical longform is switched off under Video details — not uploading it as a \
+            "The vertical longform is switched off above the Render button — not uploading it as a \
              Short."
                 .into(),
         );

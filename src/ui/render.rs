@@ -385,63 +385,6 @@ mod tests {
         assert!(steps[youtube..].contains("done"), "{steps}");
     }
 
-    /// The three Render boxes reflect the config they were read from, so an
-    /// unticked output shows unticked — and a page rendered without the config
-    /// shows all three on, which is the config's own default.
-    #[test]
-    fn the_render_boxes_show_what_is_remembered() {
-        let html = page(
-            "video.html",
-            context! {
-                brief => crate::video_brief::Brief::default(),
-                root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
-                targets => context! { horizontal => true, vertical => true, shorts => false },
-            },
-        );
-        assert!(!html.contains("template error"), "{html}");
-        let boxes = &html[html
-            .find(r#"aria-label="What Render produces""#)
-            .expect("the row")..];
-        let shorts = boxes.find(r#""name":"shorts""#).expect("the shorts box");
-        let vertical = boxes
-            .find(r#""name":"vertical""#)
-            .expect("the vertical box");
-        // Each input carries `checked` before its payload when it is on.
-        let before = |at: usize| &boxes[..at];
-        assert!(
-            before(vertical)
-                .rsplit("<input")
-                .next()
-                .unwrap()
-                .contains("checked"),
-            "{boxes}"
-        );
-        assert!(
-            !before(shorts)
-                .rsplit("<input")
-                .next()
-                .unwrap()
-                .contains("checked"),
-            "{boxes}"
-        );
-
-        let html = page(
-            "video.html",
-            context! {
-                brief => crate::video_brief::Brief::default(),
-                root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
-            },
-        );
-        assert!(!html.contains("template error"), "{html}");
-        assert_eq!(
-            html.matches(r#"type="checkbox" checked"#).count(),
-            3,
-            "{html}"
-        );
-    }
-
     /// Both cuts get their link on the pane, the longform first. The Short
     /// lands second and its status line used to be the only link left on
     /// screen.

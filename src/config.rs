@@ -974,7 +974,7 @@ mod tests {
 }
 
 /// What Render produces: the horizontal longform, the vertical longform, the
-/// shorts. Each is a checkbox on the Video details pane and remembered here.
+/// shorts. Each is a checkbox above the Render button and remembered here.
 ///
 /// The shorts are the vertical chapter renders, and the vertical longform is
 /// those same renders joined — so asking for the vertical longform renders the
