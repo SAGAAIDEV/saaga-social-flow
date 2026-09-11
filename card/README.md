@@ -19,9 +19,14 @@ Both cards read words first, then the presenter: the landscape card puts the hea
 on the left and the photo on the right, the portrait card puts the headline on top and
 the photo beneath it — which also keeps the presenter out from under a portrait
 player's top-edge controls and crop.
-Without a photo, text uses the full frame. Focus controls the horizontal photo crop —
-it has roughly half the travel in portrait, where the photo box is much closer to the
-camera's own aspect. Keep headlines concise; secondary copy is limited to three lines.
+Without a photo, text uses the full frame. **Focus** is a point in the still — where the
+presenter is, 0–1 across and down — and the photo box is cropped so that point sits in
+its middle. The recorder sets it from the face tracker's anchor at the moment the photo
+is taken (`App::aim_card_at_face`), and the two Focus boxes on the Video details pane
+nudge it. Centring needs the still's size, which the payload carries as `photoSize`;
+without it the point is used as a plain `object-position`, as older pages did. The
+vertical component only moves anything when the still is taller than its box — a
+portrait camera. Keep headlines concise; secondary copy is limited to three lines.
 
 The **format** picker chooses the aspect ratio asked of the image models under
 *Optional AI image experiments*. It does not change the artwork set, which is always

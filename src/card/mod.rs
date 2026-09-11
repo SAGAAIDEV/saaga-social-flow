@@ -77,11 +77,21 @@ pub struct Card {
     /// Where across the camera still the presenter is, 0–1.
     ///
     /// The still is a wide frame and the photo column is nearly portrait, so
-    /// most of the width is cropped and this decides which part survives. It is
-    /// the one control that cannot be judged from the text boxes — you move it
-    /// and redraw.
+    /// most of the width is cropped and this decides which part survives: the
+    /// box is cropped so this point sits in its middle. Set from the face
+    /// tracker's anchor at the moment the photo is taken — see
+    /// `App::aim_card_at_face` — and nudged by hand from the pane; either way it
+    /// is the one control that cannot be judged from the text boxes.
     #[serde(default = "default_focus")]
     pub focus: f64,
+    /// And where down it, 0–1: the other half of the same point.
+    ///
+    /// Inert for a landscape still in either layout, because neither photo box
+    /// is taller than the still is, so nothing on this axis can move. Carried
+    /// so a portrait camera frames right too, and so the point the tracker
+    /// hands over is stored whole rather than halved.
+    #[serde(default = "default_focus")]
+    pub focus_y: f64,
 }
 
 fn default_theme() -> String {
@@ -103,6 +113,7 @@ impl Default for Card {
             kicker: String::new(),
             theme: default_theme(),
             focus: default_focus(),
+            focus_y: default_focus(),
         }
     }
 }
@@ -128,6 +139,8 @@ impl Card {
     /// words moving to the other side of the photo, say — because a set drawn
     /// under the old layout is then the wrong picture for the same words, and
     /// without the bump it would pass every freshness check and never be redrawn.
+    /// v5: the focus became a point the box is centred on rather than a raw
+    /// `object-position`, which moves the crop for every value but 0.5.
     ///
     /// `format` is deliberately *not*. The set is always all three destinations
     /// and each one composes on its own artboard — see `assets::Kind` — so the
@@ -136,12 +149,13 @@ impl Card {
     /// only real effect is on the prompt sent to an image model.
     pub fn fingerprint(&self) -> String {
         format!(
-            "card-v4\n{}\n{}\n{}\n{}\n{:.4}",
+            "card-v5\n{}\n{}\n{}\n{}\n{:.4}\n{:.4}",
             self.title.trim(),
             self.description.trim(),
             self.kicker.trim(),
             self.theme.trim(),
             self.focus,
+            self.focus_y,
         )
     }
 
@@ -160,11 +174,28 @@ impl Card {
     /// The focus, clamped. Outside 0–1 `object-position` clamps anyway, but the
     /// stored value would keep drifting further every time it was nudged.
     pub fn focus_clamped(&self) -> f64 {
-        if self.focus.is_finite() {
-            self.focus.clamp(0.0, 1.0)
-        } else {
-            default_focus()
-        }
+        clamped(self.focus)
+    }
+
+    pub fn focus_y_clamped(&self) -> f64 {
+        clamped(self.focus_y)
+    }
+
+    /// Points the photo crop at `anchor` — where the face tracker says the
+    /// presenter is in the camera frame, which is the frame the still was taken
+    /// from. Stored clamped, so a tracker reading at the edge does not leave a
+    /// value the pane's boxes cannot show.
+    pub fn aim(&mut self, anchor: crate::region::framing::Anchor) {
+        self.focus = clamped(anchor.0);
+        self.focus_y = clamped(anchor.1);
+    }
+}
+
+fn clamped(value: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        default_focus()
     }
 }
 

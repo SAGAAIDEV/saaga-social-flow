@@ -126,6 +126,11 @@ those experiments do not replace the artwork used for publishing.
 | 720×1280 portrait | Strapi `thumbnailVertical`; downloadable/social export. Words on top, photo underneath — the top of a portrait player is where the crop and the controls land. |
 | 1200×630 OG | Strapi `ogImage`; LinkedIn and Facebook image posts |
 
+When the photo is taken, the card's focus point is set from the face tracker's
+anchor, so the photo box is cropped around the face rather than the frame's centre.
+The two Focus boxes on the Video details pane nudge it; the vertical one only moves
+anything when the still is taller than its box.
+
 The current set is recorded in `thumbnails/artwork.json`, with file hashes and measured
 JPEG dimensions. A failed generation leaves the previous complete set active. Editing
 the saved design or changing the photo makes the set stale; the next render redraws it,

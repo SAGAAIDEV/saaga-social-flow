@@ -14,7 +14,16 @@ export function parsePayload(value: unknown): CardProps & { width: number; heigh
   for (const key of ["width", "height"]) {
     if (p[key] !== undefined && (typeof p[key] !== "number" || !Number.isInteger(p[key]) || (p[key] as number) <= 0 || (p[key] as number) > 8192)) throw new Error(`${key} must be an integer between 1 and 8192`);
   }
-  if (p.focus !== undefined && (typeof p.focus !== "number" || !Number.isFinite(p.focus))) throw new Error("focus must be finite");
+  for (const key of ["focus", "focusY"]) {
+    if (p[key] !== undefined && (typeof p[key] !== "number" || !Number.isFinite(p[key]))) throw new Error(`${key} must be finite`);
+  }
+  let photoSize: { width: number; height: number } | undefined;
+  if (p.photoSize !== undefined) {
+    const s = p.photoSize;
+    const pair = Array.isArray(s) && s.length === 2 && s.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
+    if (!pair) throw new Error("photoSize must be [width, height], both positive");
+    photoSize = { width: (s as number[])[0], height: (s as number[])[1] };
+  }
   // A link preview is always landscape, so an OG image composes from the
   // horizontal artboard whatever the project's own format is. Enforced here
   // rather than trusted to the caller: a portrait design filled into 1200x630
@@ -23,5 +32,5 @@ export function parsePayload(value: unknown): CardProps & { width: number; heigh
     ? "horizontal"
     : (p.format as Format ?? (Number(p.height) > Number(p.width) ? "vertical" : "horizontal"));
   const base = p.og ? OG_SIZE : SIZES[format];
-  return { ...p, title: p.title, description: p.description ?? "", format, width: p.width ?? base.width, height: p.height ?? base.height } as ReturnType<typeof parsePayload>;
+  return { ...p, title: p.title, description: p.description ?? "", format, photoSize, width: p.width ?? base.width, height: p.height ?? base.height } as ReturnType<typeof parsePayload>;
 }

@@ -1825,19 +1825,51 @@ impl App {
         };
         let camera = crate::thumbnail::still::write(&self.session.root, frame.pixels.get());
         let screen = self.take_screen_grab();
+        // The photo box shows under half of the still's width, and this is the
+        // one moment the tracker knows where the face is in exactly this frame.
+        let framed = self.aim_card_at_face();
 
         match (camera, screen) {
             (Err(err), _) => Err(format!("Could not save the photo: {err:#}")),
-            (Ok(path), None) => Ok(format!("Took your photo ({})", file_name(&path))),
+            (Ok(path), None) => Ok(format!("Took your photo ({}){framed}", file_name(&path))),
             (Ok(path), Some(Ok(shot))) => Ok(format!(
-                "Took your photo ({}) and the screen ({})",
+                "Took your photo ({}) and the screen ({}){framed}",
                 file_name(&path),
                 file_name(&shot)
             )),
             (Ok(path), Some(Err(err))) => Ok(format!(
-                "Took your photo ({}) — the screen grab failed: {err:#}",
+                "Took your photo ({}){framed} — the screen grab failed: {err:#}",
                 file_name(&path)
             )),
+        }
+    }
+
+    /// Points the card's photo crop at the face, using the tracker's anchor for
+    /// the frame the still was just taken from.
+    ///
+    /// The still is the raw camera frame and the tracker samples the same
+    /// buffer, so the anchor's normalized point is a point in the still with no
+    /// mirroring or flip between them. The card page then crops the photo box
+    /// around that point — see `card/components.tsx`. Returns the clause for the
+    /// status line: what was done, or why nothing was — tracking off, or no face
+    /// found — because a crop left at centre should never look like one aimed.
+    fn aim_card_at_face(&self) -> String {
+        let Some(tracker) = self.face_tracker.as_ref() else {
+            return " — face tracking is off, so the photo crop keeps its Focus setting"
+                .to_string();
+        };
+        let Some(anchor) = tracker.anchor() else {
+            return " — no face found yet, so the photo crop keeps its Focus setting".to_string();
+        };
+        let root = &self.session.root;
+        let mut card = crate::card::load(root);
+        card.aim(anchor);
+        match crate::card::save(root, &card) {
+            Ok(_) => format!(
+                " — photo crop aimed at your face ({:.0}% across)",
+                card.focus * 100.0
+            ),
+            Err(err) => format!(" — could not save the photo framing: {err:#}"),
         }
     }
 

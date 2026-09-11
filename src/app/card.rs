@@ -162,15 +162,21 @@ impl App {
         if let Some(theme) = fields.get("theme") {
             card.theme = theme.clone();
         }
-        if let Some(focus) = fields.get("focus") {
-            // A field that will not parse leaves the stored value alone rather
-            // than resetting the framing to centre, which is the one edit here
-            // that is tedious to redo.
-            if let Ok(value) = focus.trim().parse::<f64>() {
-                if value.is_finite() {
-                    card.focus = value.clamp(0.0, 1.0);
-                }
-            }
+        // A field that will not parse leaves the stored value alone rather than
+        // resetting the framing to centre, which is the one edit here that is
+        // tedious to redo.
+        let nudged = |field: &str| {
+            fields
+                .get(field)
+                .and_then(|text| text.trim().parse::<f64>().ok())
+                .filter(|value| value.is_finite())
+                .map(|value| value.clamp(0.0, 1.0))
+        };
+        if let Some(value) = nudged("focus") {
+            card.focus = value;
+        }
+        if let Some(value) = nudged("focus_y") {
+            card.focus_y = value;
         }
         let saved = match card::save(&root, &card) {
             Ok(_) => {
