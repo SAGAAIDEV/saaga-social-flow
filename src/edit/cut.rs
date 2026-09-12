@@ -7,7 +7,22 @@ use anyhow::{bail, Context, Result};
 
 use super::compute::Edit;
 
-const DELIVERABLE_CRF: &str = "18";
+/// The quantiser every deliverable is encoded at: the cut chapters, and the title
+/// cards conformed to sit between them. On the horizontal path this is the only
+/// lossy step between the master and YouTube, so it decides how much of the
+/// master's text survives.
+///
+/// Measured on a 6 s 1080p25 chapter recorded at 13 Mbps. CRF 18 came out at
+/// 3.7 Mbps — under half of what YouTube asks to be fed for 1080p, and the text
+/// came back blurry. 16 gave 5.4 Mbps, 14 gave 7.5, 12 gave 10.1 — back within
+/// sight of the master's own rate, which is what a re-encode that is going to be
+/// re-encoded again has to be fed — and 10 gave 13, which is paying to keep the
+/// master's noise. `medium` ran every one of these at about three times real time.
+///
+/// Not lossless, deliberately: x264's lossless mode signals High 4:4:4 Predictive
+/// whatever the chroma, which QuickTime, Safari and the app's own preview will not
+/// play, at several times the size for nothing YouTube's encode would keep.
+const DELIVERABLE_CRF: &str = "12";
 const DELIVERABLE_PRESET: &str = "medium";
 
 pub fn cut_file(source: &Path, dest: &Path, edits: &[Edit]) -> Result<()> {
