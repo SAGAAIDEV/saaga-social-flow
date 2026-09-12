@@ -308,14 +308,18 @@ pub fn spawn_chapter_transcript(audio: PathBuf) {
     let key = match std::env::var("ASSEMBLYAI_API_KEY") {
         Ok(key) if !key.trim().is_empty() => key,
         _ => {
+            // With the reason the key is missing when the team file has it
+            // and did not decrypt: "unset" alone reads as a key to go and
+            // copy, when the fix is a login and a relaunch.
+            let reason = match crate::settings::sops::unset_hint("ASSEMBLYAI_API_KEY") {
+                Some(hint) => format!("ASSEMBLYAI_API_KEY unset — {hint}"),
+                None => "ASSEMBLYAI_API_KEY unset".to_string(),
+            };
             eprintln!(
-                "stream-recorder: ASSEMBLYAI_API_KEY unset; not transcribing {}",
+                "stream-recorder: {reason}; not transcribing {}",
                 audio.display()
             );
-            let _ = write_transcript(
-                &out,
-                &ChapterTranscript::skipped("ASSEMBLYAI_API_KEY unset"),
-            );
+            let _ = write_transcript(&out, &ChapterTranscript::skipped(&reason));
             return;
         }
     };

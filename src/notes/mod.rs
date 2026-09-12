@@ -64,7 +64,7 @@ impl fmt::Display for NoSpeech {
 impl std::error::Error for NoSpeech {}
 
 /// Why each closed chapter has no words, in the transcript's own terms.
-fn no_speech(session_dir: &Path) -> NoSpeech {
+pub(crate) fn no_speech(session_dir: &Path) -> NoSpeech {
     let chapters = closed_chapter_numbers(session_dir)
         .into_iter()
         .map(|n| {
@@ -106,6 +106,39 @@ pub fn closed_chapter_numbers(session_dir: &Path) -> Vec<u32> {
         }
     }
     out
+}
+
+/// The audio of every closed chapter whose transcript never finished: skipped
+/// for a key that was unset at the time, failed on a blip, left `processing`
+/// by a crash, or never written. A chapter that completed — with words or
+/// without — is not here, and neither is one with no mp3 to send.
+fn unfinished_chapters(session_dir: &Path) -> Vec<PathBuf> {
+    closed_chapter_numbers(session_dir)
+        .into_iter()
+        .filter(|&n| {
+            !load_transcript(session_dir, n)
+                .is_some_and(|t| t.status == TranscriptStatus::Completed)
+        })
+        .map(|n| session_dir.join(format!("chapter-{n:02}.mp3")))
+        .filter(|audio| audio.is_file())
+        .collect()
+}
+
+/// Give every chapter in [`unfinished_chapters`] another go.
+///
+/// Until this existed nothing ever came back for a chapter the job passed
+/// over, so a key that arrived after the take — a login, a paste in Settings —
+/// left every chapter recorded before it wordless for good. Run at launch and
+/// after a save. A chapter that is still silent is skipped again for the same
+/// reason, at the cost of one ffmpeg pass; with the key still unset, the skip
+/// is rewritten with the current reason and nothing is uploaded. Returns how
+/// many chapters were handed to the job.
+pub fn retry_unfinished_transcripts(session_dir: &Path) -> usize {
+    let audio = unfinished_chapters(session_dir);
+    for path in &audio {
+        spawn_chapter_transcript(path.clone());
+    }
+    audio.len()
 }
 
 pub(crate) fn load_transcript(session_dir: &Path, n: u32) -> Option<ChapterTranscript> {
@@ -317,6 +350,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// The retry has to reach every chapter the job passed over and none it
+    /// finished: a completed-but-empty transcript is an answer, and re-sending
+    /// it on every launch would bill for the same silence each time.
+    #[test]
+    fn the_retry_picks_every_unfinished_chapter_and_no_finished_one() {
+        let dir = temp("retry");
+        for n in 1..=5 {
+            std::fs::write(dir.join(format!("chapter-{n:02}.mp3")), b"x").unwrap();
+        }
+        // 06 closed as an mp4 only: nothing to send.
+        std::fs::write(dir.join("chapter-06.mp4"), b"x").unwrap();
+        let transcripts = [
+            (1, r#"{"status":"completed","text":"hello"}"#),
+            (2, r#"{"status":"completed","text":""}"#),
+            (
+                3,
+                r#"{"status":"skipped","text":"","error":"ASSEMBLYAI_API_KEY unset"}"#,
+            ),
+            (
+                4,
+                r#"{"status":"error","text":"","error":"upload refused"}"#,
+            ),
+            // 05 has no transcript file at all.
+        ];
+        for (n, json) in transcripts {
+            std::fs::write(dir.join(format!("chapter-{n:02}.transcript.json")), json).unwrap();
+        }
+        let picked: Vec<String> = unfinished_chapters(&dir)
+            .into_iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            picked,
+            ["chapter-03.mp3", "chapter-04.mp3", "chapter-05.mp3"]
+        );
     }
 
     #[test]

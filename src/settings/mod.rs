@@ -287,6 +287,10 @@ pub struct Status {
     /// pane that showed them as "set" without saying by whom would invite
     /// someone to retype a key they already have.
     pub source: Source,
+    /// Unset here, but named in a team file that did not decrypt this run.
+    /// The pane says so rather than "required", because the fix is a login and
+    /// a relaunch, not a key.
+    pub in_team_file: bool,
 }
 
 /// Which layer supplied a live value. Ordered as they are loaded, first wins —
@@ -362,6 +366,7 @@ pub fn status() -> Vec<Status> {
                     live.to_string()
                 },
                 source,
+                in_team_file: live.is_empty() && sops::undecrypted(f.key),
             }
         })
         .collect()
@@ -451,22 +456,20 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
     writeln!(out, "Local settings file: {path}")?;
 
     match sops::path() {
-        Some(team) => {
-            let count = sops::provided().len();
-            if count == 0 {
-                writeln!(
-                    out,
-                    "Team credentials:    {} — NOT decrypted (see the message above)",
-                    team.display()
-                )?;
-            } else {
-                writeln!(
-                    out,
-                    "Team credentials:    {} — {count} keys decrypted",
-                    team.display()
-                )?;
-            }
-        }
+        Some(team) => match sops::failure() {
+            Some(failed) => writeln!(
+                out,
+                "Team credentials:    {} — NOT decrypted: {}",
+                team.display(),
+                failed.reason
+            )?,
+            None => writeln!(
+                out,
+                "Team credentials:    {} — {} keys decrypted",
+                team.display(),
+                sops::provided().len()
+            )?,
+        },
         None => writeln!(out, "Team credentials:    none in this directory")?,
     }
     writeln!(out)?;
@@ -489,6 +492,7 @@ pub fn report(out: &mut impl std::io::Write) -> anyhow::Result<()> {
                 Source::Team => "team",
                 Source::Local => "local",
                 Source::Shell => "shell",
+                Source::Unset if state.in_team_file => "in the team file, not decrypted",
                 Source::Unset => "",
             };
             writeln!(out, "  {mark:<8} {:<24} {from}", field.key)?;

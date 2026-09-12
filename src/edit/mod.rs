@@ -446,8 +446,12 @@ fn wait_for_words(
                 Some(t) if is_ready(&t) => ready.push((*n, t)),
                 Some(t) if is_terminal(&t) => {
                     eprintln!(
-                        "stream-recorder: chapter {n:02} transcript is {:?} — skipping",
-                        t.status
+                        "stream-recorder: chapter {n:02} transcript is {:?} — skipping{}",
+                        t.status,
+                        t.error
+                            .as_deref()
+                            .map(|reason| format!(" ({reason})"))
+                            .unwrap_or_default()
                     );
                 }
                 _ => pending.push(*n),
@@ -457,10 +461,7 @@ fn wait_for_words(
             // Nothing transcribed is only fatal when nothing was edited by hand
             // either — otherwise there is still real work to cut.
             if ready.is_empty() && by_hand.is_empty() {
-                bail!(
-                    "closed chapters finished transcribing but none have words in {}",
-                    session_dir.display()
-                );
+                return Err(no_words(session_dir));
             }
             return Ok(ready);
         }
@@ -489,6 +490,20 @@ fn wait_for_words(
         status(&msg);
         thread::sleep(WAIT_EVERY);
     }
+}
+
+/// The render's version of [`crate::notes::NoSpeech`]: the same per-chapter
+/// reasons, because "none have words" on its own sends someone to check the
+/// microphone when the transcript file says the key never loaded.
+fn no_words(session_dir: &Path) -> anyhow::Error {
+    let mut msg = format!(
+        "closed chapters finished transcribing but none have words in {}",
+        session_dir.display()
+    );
+    for (n, reason) in crate::notes::no_speech(session_dir).chapters {
+        msg.push_str(&format!("; chapter {n:02}: {reason}"));
+    }
+    anyhow::anyhow!(msg)
 }
 
 fn is_ready(t: &ChapterTranscript) -> bool {
@@ -544,6 +559,28 @@ mod tests {
     fn draft(dir: &Path, n: u32) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join(format!("chapter-{n:02}-horizontal.mp4")), b"nope").unwrap();
+    }
+
+    /// This is the message someone reads after a whole take, so it has to say
+    /// why each chapter has no words — "none have words" alone sent them to the
+    /// microphone when the key had never loaded.
+    #[test]
+    fn the_no_words_failure_carries_each_chapters_reason() {
+        let dir = temp("no-words");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("chapter-01.mp3"), b"").unwrap();
+        std::fs::write(
+            dir.join("chapter-01.transcript.json"),
+            r#"{"status":"skipped","text":"","error":"ASSEMBLYAI_API_KEY unset"}"#,
+        )
+        .unwrap();
+        let msg = no_words(&dir).to_string();
+        assert!(msg.contains("none have words"), "{msg}");
+        assert!(
+            msg.contains("chapter 01: ASSEMBLYAI_API_KEY unset"),
+            "{msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The whole point of the Edit tab: a hand edit survives a cut, rather than the
