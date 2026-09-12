@@ -436,6 +436,7 @@ impl App {
                 readout.peak_dbfs,
                 readout.clipped,
                 readout.recording,
+                readout.warning.as_deref(),
             );
         }
     }

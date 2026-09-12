@@ -21,7 +21,8 @@ use objc2_app_kit::{
     NSControlSize, NSControlStateValueOff, NSControlStateValueOn, NSFont, NSFontWeight,
     NSLevelIndicator, NSLevelIndicatorStyle, NSPopUpButton, NSProgressIndicator,
     NSProgressIndicatorStyle, NSScrollView, NSSplitView, NSSplitViewDividerStyle, NSTabView,
-    NSTabViewItem, NSTabViewType, NSTextField, NSTextView, NSTitlePosition, NSView,
+    NSTabViewItem, NSTabViewType, NSTextAlignment, NSTextField, NSTextView, NSTitlePosition,
+    NSView,
 };
 use objc2_foundation::{NSObject, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -258,6 +259,8 @@ const GROUP_H: f64 = 114.0;
 const ROW_TAG: isize = 1;
 /// One progress row under the render button: a caption and a small bar.
 const BAR_H: f64 = 14.0;
+/// The no-sound banner across the top of the preview.
+const WARNING_H: f64 = 44.0;
 const CAPTION_W: f64 = 72.0;
 const PROMPT_H: f64 = 52.0;
 
@@ -295,6 +298,11 @@ pub struct ControlTargetIvars {
     /// The recording clock and the speech-time ballpark. See `app::clock`.
     timer: RefCell<Option<Retained<NSTextField>>>,
     timer_detail: RefCell<Option<Retained<NSTextField>>>,
+    /// The banner for a take rolling with no sound — white on red across the
+    /// top of the preview, hidden otherwise. The detail line already said "⚠ no
+    /// mic input" in 11pt monospace, and a whole take went into a dead
+    /// interface underneath it.
+    sound_warning: RefCell<Option<Retained<NSTextField>>>,
     /// Live input level, which is also what makes the speech figure believable:
     /// a meter sitting at the bottom explains a speech clock that never moves.
     meter: RefCell<Option<Retained<NSLevelIndicator>>>,
@@ -723,6 +731,7 @@ impl ControlTarget {
             status: RefCell::new(None),
             timer: RefCell::new(None),
             timer_detail: RefCell::new(None),
+            sound_warning: RefCell::new(None),
             meter: RefCell::new(None),
             titles_button: RefCell::new(None),
             render_button: RefCell::new(None),
@@ -1086,6 +1095,7 @@ impl ControlTarget {
         peak_dbfs: f32,
         clipped: bool,
         recording: bool,
+        warning: Option<&str>,
     ) {
         if MainThreadMarker::new().is_none() {
             return;
@@ -1093,13 +1103,18 @@ impl ControlTarget {
         if let Some(timer) = self.ivars().timer.borrow().clone() {
             timer.setStringValue(&NSString::from_str(headline));
             // Dimmed when nothing is recording: the numbers still say what the
-            // session came to, without reading as a running clock.
-            let colour = if recording {
-                objc2_app_kit::NSColor::labelColor()
-            } else {
-                objc2_app_kit::NSColor::secondaryLabelColor()
+            // session came to, without reading as a running clock. Red while
+            // the take is rolling into nothing, to match the banner.
+            let colour = match (warning.is_some(), recording) {
+                (true, _) => objc2_app_kit::NSColor::systemRedColor(),
+                (false, true) => objc2_app_kit::NSColor::labelColor(),
+                (false, false) => objc2_app_kit::NSColor::secondaryLabelColor(),
             };
             timer.setTextColor(Some(&colour));
+        }
+        if let Some(banner) = self.ivars().sound_warning.borrow().clone() {
+            banner.setStringValue(&NSString::from_str(warning.unwrap_or("")));
+            banner.setHidden(warning.is_none());
         }
         if let Some(detail_label) = self.ivars().timer_detail.borrow().clone() {
             detail_label.setStringValue(&NSString::from_str(detail));
@@ -1405,6 +1420,7 @@ pub struct Layout {
     notes_group: (Retained<NSBox>, Vec<Retained<NSButton>>),
     render_status: Retained<NSTextField>,
     progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)>,
+    sound_warning: Retained<NSTextField>,
     last: Cell<(u32, u32, u32, u32)>,
 }
 
@@ -1433,6 +1449,7 @@ impl Layout {
             &self.left_groups,
             &self.render_status,
             &self.progress_rows,
+            &self.sound_warning,
             preview,
         );
         layout_right(
@@ -1483,6 +1500,7 @@ fn layout_left(
     groups: &[(Retained<NSBox>, Vec<Retained<NSButton>>)],
     render_status: &NSTextField,
     progress_rows: &[(Retained<NSTextField>, Retained<NSProgressIndicator>)],
+    sound_warning: &NSTextField,
     preview: &PreviewHost,
 ) {
     let content_w = (width - PAD * 2.0).max(80.0);
@@ -1551,9 +1569,16 @@ fn layout_left(
     }
     let progress_y = y - LABEL_H;
     render_status.setFrame(row(progress_y, LABEL_H));
+    let preview_h = (progress_y - GAP - PAD).max(60.0);
     preview.set_frame(NSRect::new(
         NSPoint::new(PAD, PAD),
-        NSSize::new(content_w, (progress_y - GAP - PAD).max(60.0)),
+        NSSize::new(content_w, preview_h),
+    ));
+    // Across the top of the preview, over it. Hidden until there is something
+    // to say, so it costs the picture nothing the rest of the time.
+    sound_warning.setFrame(NSRect::new(
+        NSPoint::new(PAD, PAD + preview_h - WARNING_H),
+        NSSize::new(content_w, WARNING_H),
     ));
 }
 
@@ -2235,6 +2260,18 @@ pub fn attach_controls(
         face_checkbox,
         mouse_checkbox,
     );
+    // Added after the preview, so it draws over it: the one thing that has to
+    // be seen from across the room while a take is rolling.
+    let sound_warning = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+    sound_warning.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
+    sound_warning.setTextColor(Some(&NSColor::whiteColor()));
+    sound_warning.setDrawsBackground(true);
+    sound_warning.setBackgroundColor(Some(&NSColor::systemRedColor()));
+    sound_warning.setAlignment(NSTextAlignment::Center);
+    sound_warning.setHidden(true);
+    left.addSubview(&sound_warning);
+    *target.ivars().sound_warning.borrow_mut() = Some(sound_warning.clone());
+
     let notes = crate::notes::NotesPane::attach(&right, mtm);
 
     let draft_item = unsafe {
@@ -3029,6 +3066,7 @@ pub fn attach_controls(
         notes_group: (notes_box, notes_buttons.to_vec()),
         render_status,
         progress_rows,
+        sound_warning,
         last: Cell::new((0, 0, 0, 0)),
     };
     layout.sync(&preview, &notes);
