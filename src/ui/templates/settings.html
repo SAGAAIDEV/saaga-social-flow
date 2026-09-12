@@ -32,6 +32,15 @@
   them straight away — no restart.
 </p>
 
+{% if team_failure %}
+<div class="card banner">
+  <strong>The team's shared keys did not load.</strong>
+  <span class="path">{{ team_file }}</span> is in this checkout but could not be decrypted
+  at launch — {{ team_failure }}. Every key it holds shows as unset below until you do that
+  and relaunch; none of them needs to be pasted here.
+</div>
+{% endif %}
+
 <div class="card banner {% if missing | length == 0 %}done{% endif %}">
   {% if missing | length == 0 %}
     <strong>All required keys are set.</strong>
@@ -95,6 +104,8 @@
           <span class="tag warn">from your shell</span>
         {% elif field.set %}
           <span class="tag ok">set here</span>
+        {% elif field.in_team_file %}
+          <span class="tag warn">in dev.sops.env — not decrypted</span>
         {% elif field.need == "Required" %}
           <span class="tag bad">required</span>
         {% else %}
@@ -126,6 +137,12 @@
         <p class="help">
           Exported in the shell you launched from, and that wins for this session. Saving
           still updates the file.
+        </p>
+      {% elif field.in_team_file %}
+        <p class="help">
+          The team\'s <span class="path">dev.sops.env</span> has this one, but it did not
+          decrypt at launch — see the note at the top. Log in and relaunch rather than
+          pasting a key.
         </p>
       {% endif %}
     </div>

@@ -49,6 +49,59 @@ const PROFILE: &str = "dev";
 /// live value came from here.
 static PROVIDED: OnceLock<BTreeMap<String, String>> = OnceLock::new();
 
+/// Why the team file did not decrypt this run, when it did not.
+///
+/// Kept so the places that later find a key missing — the Settings pane, the
+/// transcript job, the render — can say "the file is right there and did not
+/// decrypt, and this is why" instead of "unset", which sends someone off to
+/// copy a key they already have. The launch-time line on stderr said the same
+/// thing, and it had scrolled away long before the first chapter closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub path: PathBuf,
+    /// The sentence [`explain`] produced: what to do, not what sops said.
+    pub reason: String,
+    /// The variable names the file holds. The dotenv store encrypts only the
+    /// values, so these are readable without a key.
+    pub names: Vec<String>,
+}
+
+static FAILED: OnceLock<Failure> = OnceLock::new();
+
+/// The failure this run's decrypt ended in, if it did.
+pub fn failure() -> Option<&'static Failure> {
+    FAILED.get()
+}
+
+/// Whether `key` is named in a team file that did not decrypt this run.
+pub fn undecrypted(key: &str) -> bool {
+    failure().is_some_and(|f| f.names.iter().any(|n| n == key))
+}
+
+/// What to tell someone who found `key` unset when the team file has it and
+/// did not decrypt. `None` when that is not the situation — no file, a clean
+/// decrypt, or a key the file never held — so the caller's plain "unset" stands.
+pub fn unset_hint(key: &str) -> Option<String> {
+    let failed = failure()?;
+    undecrypted(key).then(|| hint(key, &failed.reason))
+}
+
+fn hint(key: &str, reason: &str) -> String {
+    format!(
+        "{key} is in {FILE} but the team file did not decrypt at launch ({reason}); \
+         fix that and relaunch"
+    )
+}
+
+/// The names a sops dotenv file carries, without decrypting it. The `sops_*`
+/// rows are the envelope's own metadata, not credentials.
+fn names_in(encrypted: &str) -> Vec<String> {
+    crate::settings::parse(encrypted)
+        .into_keys()
+        .filter(|key| !key.starts_with("sops_"))
+        .collect()
+}
+
 /// The committed team file, if this checkout has one.
 ///
 /// Only a real checkout: a release ships a bare binary, and there is no
@@ -86,6 +139,12 @@ pub fn load() -> usize {
                  stream-recorder: continuing with local settings only.",
                 path.display()
             );
+            let names = names_in(&std::fs::read_to_string(&path).unwrap_or_default());
+            let _ = FAILED.set(Failure {
+                path,
+                reason,
+                names,
+            });
             return 0;
         }
     };
@@ -254,6 +313,34 @@ Recovery failed because no master key was able to decrypt the file.";
         let odd = explain("Failed to get the data key.\n\n  - | something odd happened\n");
         assert_eq!(odd, "something odd happened");
         assert_eq!(explain(""), "sops failed with no output");
+    }
+
+    /// The store keeps names in the clear, so a failed decrypt can still say
+    /// which keys it was holding — minus the envelope's own `sops_*` rows.
+    #[test]
+    fn names_survive_an_undecrypted_file_without_the_envelope_rows() {
+        let names = names_in(
+            "ASSEMBLYAI_API_KEY=ENC[AES256_GCM,data:abc,type:str]\n\
+             sops_kms__list_0__map_arn=arn:aws:kms:us-east-1:1:key/x\n\
+             sops_mac=ENC[AES256_GCM,data:xyz,type:str]\n\
+             sops_version=3.9.0\n",
+        );
+        assert_eq!(names, ["ASSEMBLYAI_API_KEY"]);
+    }
+
+    /// The hint is read at the moment someone is about to go copy a key they
+    /// already have, so it has to name the key, the file and the fix.
+    #[test]
+    fn the_unset_hint_names_the_key_the_file_and_the_fix() {
+        let said = hint("ASSEMBLYAI_API_KEY", &explain(NO_PROFILE));
+        for expected in [
+            "ASSEMBLYAI_API_KEY",
+            "dev.sops.env",
+            "aws sso login",
+            "relaunch",
+        ] {
+            assert!(said.contains(expected), "missing {expected:?}: {said}");
+        }
     }
 
     /// The team file is a normal dotenv once decrypted, so the parser the rest

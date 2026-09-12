@@ -2129,6 +2129,21 @@ impl App {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_stage_gates(&self.stages());
         }
+        // The transcript job is the one stage that ran without its key rather
+        // than waiting for it: a chapter closed before this paste was skipped,
+        // and would stay that way. `write` folded the key into the environment
+        // only if the save went through, so the live value is the test.
+        let pasted_transcript_key = fields
+            .get("ASSEMBLYAI_API_KEY")
+            .is_some_and(|key| !key.trim().is_empty());
+        if pasted_transcript_key && std::env::var_os("ASSEMBLYAI_API_KEY").is_some() {
+            match crate::notes::retry_unfinished_transcripts(&self.session.dir) {
+                0 => {}
+                n => self.set_render_status(&format!(
+                    "Transcribing {n} chapter(s) that were skipped without the AssemblyAI key…"
+                )),
+            }
+        }
     }
 
     /// Run one group's credential check off the event loop.
@@ -3534,6 +3549,17 @@ impl ApplicationHandler for App {
                     .max()
                     .unwrap_or(0)
                     + 1;
+                // A key that arrived after the take — a login, a paste in
+                // Settings — transcribes the chapters that were skipped
+                // without it. Here, before the panes, so a Render pressed
+                // straight away waits on the job instead of failing on the
+                // stale skip.
+                match crate::notes::retry_unfinished_transcripts(&self.session.dir) {
+                    0 => {}
+                    n => eprintln!(
+                        "stream-recorder: retrying the transcript of {n} chapter(s) that never got one"
+                    ),
+                }
                 if let Ok(manifest) = crate::posts::load_manifest(&self.session.posts_dir()) {
                     live.posts_form.show(&manifest);
                     live.control_target.set_posts_status("Loaded saved posts.");
@@ -3564,6 +3590,18 @@ impl ApplicationHandler for App {
                 self.install_preview();
                 self.report_clock_drift();
                 self.update_render_summary();
+                // Said where the render's own messages will land, because that
+                // is where the consequence surfaces: a chapter transcript
+                // skipped for a key that never loaded reads as "none have
+                // words" an hour later, long after the launch-time line on
+                // stderr scrolled away.
+                if let Some(failed) = crate::settings::sops::failure() {
+                    self.set_render_status(&format!(
+                        "Team credentials did not load: {}. Fix that, then relaunch — the \
+                         keys in dev.sops.env stay unset until you do.",
+                        failed.reason
+                    ));
+                }
                 self.update_video_view();
                 self.update_substack_view();
                 self.update_blog_view();
