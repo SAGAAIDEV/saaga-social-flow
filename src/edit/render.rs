@@ -24,6 +24,24 @@ use super::cut;
 /// render time and buys the picture; the render is already incremental, so it
 /// is paid once per composition.
 pub const QUALITY: &str = "high";
+/// The quantiser HyperFrames encodes at, in place of the 15 that `high` picks.
+/// The cut's own figure — see `cut::DELIVERABLE_CRF` — because a vertical
+/// chapter is the cut composited and encoded again here, and a second
+/// generation looser than the first undoes the first.
+pub const CRF: &str = "12";
+/// How HyperFrames pulls frames out of the footage it composites: PNG, in place
+/// of the JPEG it picks for anything without alpha, so the cut is not run
+/// through a third lossy codec on its way into Chrome.
+pub const VIDEO_FRAME_FORMAT: &str = "png";
+
+/// Everything about the encode a rendered file depends on, as one line.
+///
+/// Written to the workspace as [`super::compose::QUALITY_FILE`] and declared a
+/// source of every job, so a change to any of these re-renders everything
+/// exactly once.
+pub fn encoder_stamp() -> String {
+    format!("{QUALITY} crf={CRF} frames={VIDEO_FRAME_FORMAT}")
+}
 /// Pinned so the cache path, the npx fallback and the preflight check cannot
 /// drift apart into three different renderers.
 pub const HF_VERSION: &str = "0.7.107";
@@ -351,6 +369,10 @@ fn render_job(workspace: &Path, job: &Job, dest: &Path) -> Result<()> {
         &job.composition,
         "--quality",
         QUALITY,
+        "--crf",
+        CRF,
+        "--video-frame-format",
+        VIDEO_FRAME_FORMAT,
         // Bounded rather than left on `auto`, which sizes itself against the whole
         // machine and cannot know how many other renders this pool is running.
         "--workers",
