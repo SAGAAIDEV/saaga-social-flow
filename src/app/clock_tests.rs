@@ -298,51 +298,33 @@ fn the_idle_line_shows_the_peak_and_the_room() {
     assert!(detail.contains("room -52 dB"), "{detail}");
 }
 
-/// A dead input is the one mistake nothing downstream can repair, so it is
-/// the one thing said in a banner rather than the detail line. Only while the
-/// take is rolling, and only once the quiet has lasted — a pause for thought
-/// on a live mic peaks well above the threshold and must never trip it.
+/// The bar rises at once and lets go at a fixed rate, so a word reads as a
+/// level rather than a flash. Painted raw it fell to the floor on the very
+/// next quiet window.
 #[test]
-fn a_take_rolling_into_silence_warns_loudly_and_only_then() {
-    let dead = |buffers| Snapshot {
-        level_dbfs: SILENT_DBFS,
-        peak_dbfs: SILENT_DBFS,
-        speaking: false,
-        ..snapshot(1.0, buffers)
-    };
+fn the_meter_rises_at_once_and_falls_at_a_fixed_rate() {
     let mut clock = RecordClock::default();
-    clock.tick(Some(dead(1)));
-    // Idle: silence is fine, nothing is being lost.
-    assert_eq!(clock.readout().warning, None);
-
-    clock.open(1);
-    clock.tick(Some(dead(2)));
-    // The first seconds of a chapter never warn.
-    assert_eq!(clock.readout().warning, None);
-
-    clock.backdate(Duration::from_secs(6));
-    clock.tick(Some(dead(3)));
-    let warning = clock.readout().warning.expect("a take rolling in silence");
-    assert!(warning.contains("NO SOUND"), "{warning}");
-
-    // A pause is not a take rolling.
-    clock.pause();
-    assert_eq!(clock.readout().warning, None);
-    clock.resume();
-
-    // Sound clears it at once, and a quiet room is sound.
     clock.tick(Some(Snapshot {
-        peak_dbfs: -70.0,
-        ..snapshot(1.0, 4)
+        peak_dbfs: -8.0,
+        ..snapshot(0.0, 1)
     }));
-    assert_eq!(clock.readout().warning, None);
+    let shown = clock.take_paint().expect("first paint").peak_dbfs;
+    assert_eq!(shown, -8.0);
 
-    // A device that stops delivering altogether is its own, sooner warning.
-    clock.backdate(Duration::from_secs(3));
-    clock.tick(Some(snapshot(1.0, 4)));
-    let warning = clock
-        .readout()
-        .warning
-        .expect("a mic that stopped delivering");
-    assert!(warning.contains("NO MIC INPUT"), "{warning}");
+    // Half a second of quiet windows: down 12 dB, not down to the floor.
+    clock.tick(Some(Snapshot {
+        peak_dbfs: SILENT_DBFS,
+        ..snapshot(0.0, 2)
+    }));
+    clock.backdate(Duration::from_millis(500));
+    let shown = clock.take_paint().expect("a lower paint").peak_dbfs;
+    assert!((shown - -20.0).abs() < 1.5, "shown {shown}");
+
+    // A new peak lifts it straight back up.
+    clock.tick(Some(Snapshot {
+        peak_dbfs: -12.0,
+        ..snapshot(0.0, 3)
+    }));
+    clock.backdate(Duration::from_millis(200));
+    assert_eq!(clock.take_paint().expect("a paint").peak_dbfs, -12.0);
 }
