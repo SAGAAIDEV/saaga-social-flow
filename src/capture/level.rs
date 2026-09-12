@@ -112,15 +112,16 @@ impl Sample {
 
 /// The layout of a stream this meter can read, or `None` for one it cannot.
 ///
-/// Non-interleaved is the notable rejection: its channels live in separate
-/// blocks, so the stride arithmetic below would read across a channel boundary
-/// and report a level that is not the level of anything. Reporting nothing is
-/// the honest answer — the caller renders the speech figure as unknown, and the
-/// wall clock carries on unaffected.
+/// Non-interleaved streams are read too. Their channels arrive as one plane
+/// per channel, back to back in the block, and `mBytesPerFrame` is then the
+/// width of one channel's sample — so channel 0 is the first plane, walked one
+/// sample at a time, and [`SpeechMeter::observe`] stops at the end of that
+/// plane rather than reading into channel 1. This used to be refused, and the
+/// refusal was the bar that died a few seconds after launch: the Elgato XLR
+/// Dock starts as 24-bit packed interleaved and renegotiates to 32-bit float
+/// non-interleaved as AppKit spins up, so the meter read the first format,
+/// latched itself unreadable on the second, and never moved again.
 pub fn layout_of(asbd: &AudioStreamBasicDescription) -> Option<Layout> {
-    if asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 {
-        return None;
-    }
     let float = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0;
     let integer = asbd.mFormatFlags & kAudioFormatFlagIsSignedInteger != 0;
     let sample = match (float, integer, asbd.mBitsPerChannel) {
@@ -130,7 +131,12 @@ pub fn layout_of(asbd: &AudioStreamBasicDescription) -> Option<Layout> {
         (_, true, 32) => Sample::I32,
         _ => return None,
     };
-    let stride = asbd.mBytesPerFrame as usize;
+    // Within a plane the samples are packed; across an interleaved frame they
+    // are `mBytesPerFrame` apart.
+    let stride = match is_planar(asbd) {
+        true => sample.width(),
+        false => asbd.mBytesPerFrame as usize,
+    };
     if stride < sample.width() {
         return None;
     }
@@ -139,6 +145,12 @@ pub fn layout_of(asbd: &AudioStreamBasicDescription) -> Option<Layout> {
         stride,
         big_endian: asbd.mFormatFlags & kAudioFormatFlagIsBigEndian != 0,
     })
+}
+
+/// Whether the stream carries one plane per channel rather than interleaved
+/// frames.
+pub fn is_planar(asbd: &AudioStreamBasicDescription) -> bool {
+    asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
 }
 
 /// Channel 0's RMS across `bytes`, in dBFS.
@@ -488,15 +500,24 @@ impl SpeechMeter {
         if asbd.mSampleRate <= 0.0 {
             return;
         }
-        let frames = unsafe { sample_buffer.num_samples() }.max(0) as f64;
-        let secs = Duration::from_secs_f64(frames / asbd.mSampleRate);
+        let frames = unsafe { sample_buffer.num_samples() }.max(0) as usize;
+        let secs = Duration::from_secs_f64(frames as f64 / asbd.mSampleRate);
         self.buffers.fetch_add(1, Ordering::Relaxed);
 
         let Some(layout) = layout_of(&asbd) else {
             self.readable.store(false, Ordering::Relaxed);
             return;
         };
-        let Some(levels) = with_pcm(sample_buffer, |bytes| levels_dbfs(bytes, layout)) else {
+        // Non-interleaved: the block holds one plane per channel, back to back,
+        // so channel 0 is the first `frames` samples and nothing after them.
+        let plane = is_planar(&asbd).then(|| frames * layout.sample.width());
+        let Some(levels) = with_pcm(sample_buffer, |bytes| {
+            let bytes = match plane {
+                Some(len) => &bytes[..bytes.len().min(len)],
+                None => bytes,
+            };
+            levels_dbfs(bytes, layout)
+        }) else {
             self.readable.store(false, Ordering::Relaxed);
             return;
         };
