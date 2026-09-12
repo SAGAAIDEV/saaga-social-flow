@@ -58,8 +58,10 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    The input meter sits directly under the Microphone selector, the full width
    of the column, so that sound is going into the take is visible at a glance —
    a mic that has picked nothing up is a bar that has not moved, right where
-   the mic was chosen. It draws the peak level and goes red once anything has
-   clipped.
+   the mic was chosen. It draws the peak level with a meter's ballistics —
+   up at once, down at 24 dB/s — green where speech should peak, yellow in the
+   last of the headroom, red at the top, and all red once anything has clipped.
+   It listens whenever the mic is open, recording or not.
 2. **YouTube** — edit and save the title and description, choose visibility,
    connect the channel, and upload (or re-upload) the longform by hand.
 3. **Blog (Strapi)** — write and review the companion article, then publish it live at

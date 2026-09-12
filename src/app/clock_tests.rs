@@ -297,3 +297,34 @@ fn the_idle_line_shows_the_peak_and_the_room() {
     assert!(detail.contains("-12 dB pk"), "{detail}");
     assert!(detail.contains("room -52 dB"), "{detail}");
 }
+
+/// The bar rises at once and lets go at a fixed rate, so a word reads as a
+/// level rather than a flash. Painted raw it fell to the floor on the very
+/// next quiet window.
+#[test]
+fn the_meter_rises_at_once_and_falls_at_a_fixed_rate() {
+    let mut clock = RecordClock::default();
+    clock.tick(Some(Snapshot {
+        peak_dbfs: -8.0,
+        ..snapshot(0.0, 1)
+    }));
+    let shown = clock.take_paint().expect("first paint").peak_dbfs;
+    assert_eq!(shown, -8.0);
+
+    // Half a second of quiet windows: down 12 dB, not down to the floor.
+    clock.tick(Some(Snapshot {
+        peak_dbfs: SILENT_DBFS,
+        ..snapshot(0.0, 2)
+    }));
+    clock.backdate(Duration::from_millis(500));
+    let shown = clock.take_paint().expect("a lower paint").peak_dbfs;
+    assert!((shown - -20.0).abs() < 1.5, "shown {shown}");
+
+    // A new peak lifts it straight back up.
+    clock.tick(Some(Snapshot {
+        peak_dbfs: -12.0,
+        ..snapshot(0.0, 3)
+    }));
+    clock.backdate(Duration::from_millis(200));
+    assert_eq!(clock.take_paint().expect("a paint").peak_dbfs, -12.0);
+}

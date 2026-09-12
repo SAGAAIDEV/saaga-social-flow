@@ -24,6 +24,16 @@ const MIC_SILENT_AFTER: Duration = Duration::from_secs(2);
 /// How often the labels are allowed to repaint. They show whole seconds and a
 /// meter, and the event loop ticks at ~60Hz.
 const PAINT_EVERY: Duration = Duration::from_millis(100);
+/// How fast the input meter falls once a peak has passed, in dB per second.
+///
+/// The bar rises at once and lets go slowly — the ballistics every peak meter
+/// has, and the difference between a meter and a strobe. Painted raw, each
+/// 100ms window's peak stood on its own: a word lit the bar for one paint and
+/// the next window's quiet dropped it to the floor, which read as a green
+/// flash rather than a level. At 24 dB/s a −6 dBFS peak takes just over two
+/// seconds to reach the floor, long enough to read and short enough to follow
+/// the next phrase.
+const METER_DECAY_DB_PER_S: f32 = 24.0;
 
 /// The chapter currently being recorded.
 struct Open {
@@ -70,9 +80,10 @@ pub struct Readout {
     pub detail: String,
     /// RMS dBFS — how loud it sounds, and what the label reads.
     pub level_dbfs: f32,
-    /// Peak dBFS since the last paint, which is what the bar draws. Amplitude,
-    /// not loudness: this is the number that moves when you speak and the one
-    /// that reaches the top before anything distorts.
+    /// What the bar draws: the peak since the last paint, held and let down at
+    /// [`METER_DECAY_DB_PER_S`]. Amplitude, not loudness: this is the number
+    /// that moves when you speak and the one that reaches the top before
+    /// anything distorts.
     pub peak_dbfs: f32,
     /// Latched once anything has hit full scale this session.
     pub clipped: bool,
@@ -108,6 +119,9 @@ pub struct RecordClock {
     /// Peak since the last paint, and whether anything has clipped. Held here so
     /// a paint skipped by the dedupe does not drop a transient on the floor.
     peak_dbfs: f32,
+    /// The bar's level as last let down — see [`METER_DECAY_DB_PER_S`]. The
+    /// readout shows the louder of this and the peak since the last paint.
+    shown_dbfs: f32,
     clipped: bool,
     /// Whether the gate is open right now — the speech clock's own state, shown
     /// so it is visible that it tracks talking rather than noise.
@@ -133,6 +147,7 @@ impl Default for RecordClock {
             level_dbfs: SILENT_DBFS,
             floor_dbfs: SILENT_DBFS,
             peak_dbfs: SILENT_DBFS,
+            shown_dbfs: SILENT_DBFS,
             clipped: false,
             speaking: false,
             readable: true,
@@ -284,6 +299,7 @@ impl RecordClock {
             open.paused_since = open.paused_since.map(back);
         }
         self.heard_at = self.heard_at.map(back);
+        self.painted_at = self.painted_at.map(back);
     }
 
     /// Which chapter is open and how many seconds into it we are.
@@ -344,7 +360,7 @@ impl RecordClock {
                 "ch {number:02}  {} · {}      {}{}{}",
                 clock(elapsed),
                 speech(spoken, self.readable),
-                mic(self.level_dbfs, self.peak_dbfs),
+                mic(self.level_dbfs, self.bar_dbfs()),
                 if self.speaking { "  ●" } else { "" },
                 clip(self.clipped),
             )
@@ -353,7 +369,7 @@ impl RecordClock {
             // measures against is worth showing.
             format!(
                 "listening      {}  (room {}){}",
-                mic(self.level_dbfs, self.peak_dbfs),
+                mic(self.level_dbfs, self.bar_dbfs()),
                 level(self.floor_dbfs),
                 clip(self.clipped),
             )
@@ -363,7 +379,7 @@ impl RecordClock {
             headline,
             detail,
             level_dbfs: self.level_dbfs,
-            peak_dbfs: self.peak_dbfs,
+            peak_dbfs: self.bar_dbfs(),
             clipped: self.clipped,
             recording,
         }
@@ -379,6 +395,15 @@ impl RecordClock {
         {
             return None;
         }
+        // The bar's ballistics: let the last shown level down for the time since
+        // it was shown, and lift it to any peak that arrived meanwhile.
+        let since = self
+            .painted_at
+            .map(|at| now.duration_since(at).as_secs_f32())
+            .unwrap_or(0.0);
+        self.shown_dbfs = (self.shown_dbfs - METER_DECAY_DB_PER_S * since)
+            .max(SILENT_DBFS)
+            .max(self.peak_dbfs);
         let readout = self.readout();
         if self.painted.as_ref() == Some(&readout) {
             return None;
@@ -390,6 +415,12 @@ impl RecordClock {
         // shown its peak to anyone yet.
         self.peak_dbfs = SILENT_DBFS;
         Some(readout)
+    }
+
+    /// What the bar draws right now: the peak since the last paint, or the
+    /// last shown level on its way down, whichever is louder.
+    fn bar_dbfs(&self) -> f32 {
+        self.shown_dbfs.max(self.peak_dbfs)
     }
 }
 

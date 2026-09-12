@@ -1121,7 +1121,7 @@ impl ControlTarget {
             meter.setCriticalValue(if clipped {
                 crate::capture::level::METER_FLOOR_DBFS as f64
             } else {
-                -2.0
+                -3.0
             });
         }
     }
@@ -1884,12 +1884,13 @@ pub fn attach_controls(
         NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, METER_H)),
     );
     meter.setLevelIndicatorStyle(NSLevelIndicatorStyle::ContinuousCapacity);
-    // dBFS, drawn from the meter floor up to full scale, so the yellow and red
-    // sections are the levels that are actually about to clip.
+    // dBFS, drawn from the meter floor up to full scale. Green is where speech
+    // should peak, yellow the last stretch of headroom, red where the next
+    // plosive clips — a peak meter's bands, not a warning light's.
     meter.setMinValue(crate::capture::level::METER_FLOOR_DBFS as f64);
     meter.setMaxValue(0.0);
-    meter.setWarningValue(-6.0);
-    meter.setCriticalValue(-2.0);
+    meter.setWarningValue(-12.0);
+    meter.setCriticalValue(-3.0);
     meter.setDoubleValue(crate::capture::level::METER_FLOOR_DBFS as f64);
     left.addSubview(&meter);
     *target.ivars().meter.borrow_mut() = Some(meter.clone());
