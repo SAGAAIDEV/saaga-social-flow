@@ -20,16 +20,6 @@ use crate::capture::level::{Snapshot, METER_FLOOR_DBFS, SILENT_DBFS};
 /// stopped delivering looks exactly like a silent room, and the difference is a
 /// take you have to record again.
 const MIC_SILENT_AFTER: Duration = Duration::from_secs(2);
-/// A peak at or under this is not a quiet room, it is no signal. A live mic on
-/// a real interface peaks above −90 dBFS on its own electronics; a muted input,
-/// a wrong device or an interface with its channel off sends digital silence
-/// at [`SILENT_DBFS`]. Well under the −60 dBFS meter floor on purpose: this is
-/// about a dead input, and a take spent thinking must never trip it.
-const NO_SOUND_DBFS: f32 = -90.0;
-/// How long the input has to stay dead, while recording, before the warning.
-/// Longer than the mic-gone grace: a device that has stopped delivering is
-/// certain, while a dead-quiet reading needs a few seconds to be sure of.
-const NO_SOUND_AFTER: Duration = Duration::from_secs(5);
 
 /// How often the labels are allowed to repaint. They show whole seconds and a
 /// meter, and the event loop ticks at ~60Hz.
@@ -88,11 +78,6 @@ pub struct Readout {
     pub clipped: bool,
     /// Whether a chapter is open, so the labels can be dimmed when it is not.
     pub recording: bool,
-    /// The one thing that has to be seen from across the room: the take is
-    /// rolling and nothing is coming from the microphone. `None` whenever a
-    /// warning would be noise — idle, paused, on a break, or the first seconds
-    /// of a chapter.
-    pub warning: Option<String>,
 }
 
 /// What a closed chapter ran to, for the line printed when it finishes.
@@ -116,9 +101,6 @@ pub struct RecordClock {
     last_buffers: u64,
     /// When a buffer last arrived, as seen from here. `None` before the first.
     heard_at: Option<Instant>,
-    /// When the input went dead quiet — every peak since at or under
-    /// [`NO_SOUND_DBFS`]. `None` while there is sound.
-    quiet_since: Option<Instant>,
     level_dbfs: f32,
     /// The noise floor the gate is working against, shown while idle: it is the
     /// number that explains a speech clock which will not move.
@@ -148,7 +130,6 @@ impl Default for RecordClock {
             resync: true,
             last_buffers: 0,
             heard_at: None,
-            quiet_since: None,
             level_dbfs: SILENT_DBFS,
             floor_dbfs: SILENT_DBFS,
             peak_dbfs: SILENT_DBFS,
@@ -237,18 +218,8 @@ impl RecordClock {
             self.level_dbfs = SILENT_DBFS;
             self.speaking = false;
             self.resync = true;
-            // No session is the mic-gone case, not the no-sound one.
-            self.quiet_since = None;
             return;
         };
-        // Sound resets the no-sound clock; a dead reading starts it. On the
-        // snapshot's own peak rather than the held one, which only ever rises
-        // between paints.
-        if snap.peak_dbfs > NO_SOUND_DBFS {
-            self.quiet_since = None;
-        } else if self.quiet_since.is_none() {
-            self.quiet_since = Some(Instant::now());
-        }
         self.level_dbfs = snap.level_dbfs;
         self.floor_dbfs = snap.floor_dbfs;
         // Held at the maximum rather than overwritten. `take_paint` drops a tick
@@ -301,22 +272,6 @@ impl RecordClock {
             .is_none_or(|at| at.elapsed() > MIC_SILENT_AFTER)
     }
 
-    /// True while the take is rolling and every reading for [`NO_SOUND_AFTER`]
-    /// has been dead quiet. Buffers are arriving — that is [`Self::mic_gone`]'s
-    /// case — but they carry nothing: a muted input, the wrong device, an
-    /// interface with the channel off. Never in the first seconds of a chapter,
-    /// for the same reason as the mic-gone grace.
-    fn no_sound(&self) -> bool {
-        let Some(open) = self.open.as_ref() else {
-            return false;
-        };
-        if open.paused_since.is_some() || open.started.elapsed() <= NO_SOUND_AFTER {
-            return false;
-        }
-        self.quiet_since
-            .is_some_and(|since| since.elapsed() >= NO_SOUND_AFTER)
-    }
-
     /// Moves the open chapter and the last-heard reading `by` into the past, so
     /// a test can reach a state that otherwise takes seconds of waiting.
     #[cfg(test)]
@@ -329,7 +284,6 @@ impl RecordClock {
             open.paused_since = open.paused_since.map(back);
         }
         self.heard_at = self.heard_at.map(back);
-        self.quiet_since = self.quiet_since.map(back);
     }
 
     /// Which chapter is open and how many seconds into it we are.
@@ -405,14 +359,6 @@ impl RecordClock {
             )
         };
 
-        // Loud, and only while it matters: a take rolling into a dead input is
-        // the one mistake nothing downstream can repair.
-        let warning = match (recording && self.mic_gone(), self.no_sound()) {
-            (true, _) => Some("NO MIC INPUT — check the microphone".to_string()),
-            (false, true) => Some("NO SOUND — check the microphone".to_string()),
-            (false, false) => None,
-        };
-
         Readout {
             headline,
             detail,
@@ -420,7 +366,6 @@ impl RecordClock {
             peak_dbfs: self.peak_dbfs,
             clipped: self.clipped,
             recording,
-            warning,
         }
     }
 

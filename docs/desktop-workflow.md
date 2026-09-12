@@ -55,11 +55,11 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    places into the article. A pipeline strip at the top of the pane shows which
    of the five stages are done. Speaking notes keep their own panel beside it.
    There is no Thumbnails tab and no Review sub-tab any more.
-   While a take is rolling the recording clock watches the microphone: if the
-   input goes dead — the device stops delivering, or five seconds pass at
-   digital silence — a red **NO SOUND** banner covers the top of the preview and
-   the clock turns red until sound returns. A pause for thought on a live mic
-   never trips it; the threshold sits far below any room's noise.
+   The input meter sits directly under the Microphone selector, the full width
+   of the column, so that sound is going into the take is visible at a glance —
+   a mic that has picked nothing up is a bar that has not moved, right where
+   the mic was chosen. It draws the peak level and goes red once anything has
+   clipped.
 2. **YouTube** — edit and save the title and description, choose visibility,
    connect the channel, and upload (or re-upload) the longform by hand.
 3. **Blog (Strapi)** — write and review the companion article, then publish it live at
