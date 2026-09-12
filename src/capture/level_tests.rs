@@ -138,10 +138,11 @@ fn big_endian_is_read_the_right_way_round() {
     assert!((level + 6.02).abs() < 0.05, "big endian i16: {level} dBFS");
 }
 
-/// Non-interleaved is refused rather than measured: its channels are in separate
-/// blocks, so the stride arithmetic would read across the boundary.
+/// The format the XLR dock renegotiates to a few seconds after launch: 32-bit
+/// float, one plane per channel. It is read, with the stride of one sample —
+/// refusing it was the bar that died right after the app came up.
 #[test]
-fn unreadable_layouts_are_refused() {
+fn a_non_interleaved_stream_is_read_plane_by_plane() {
     let mut asbd = AudioStreamBasicDescription {
         mSampleRate: 48_000.0,
         mFormatID: 0,
@@ -153,9 +154,25 @@ fn unreadable_layouts_are_refused() {
         mBitsPerChannel: 32,
         mReserved: 0,
     };
-    assert!(layout_of(&asbd).is_none(), "non-interleaved was accepted");
+    assert!(is_planar(&asbd));
+    let planar = layout_of(&asbd).expect("non-interleaved float is readable");
+    assert_eq!((planar.sample, planar.stride), (Sample::F32, 4));
+
+    // Two planes: channel 0 at half scale, channel 1 silent. Read to the end of
+    // the first plane — what `observe` does — the level is channel 0's alone;
+    // read whole, the silent plane would halve the power and misreport.
+    let frames = 480;
+    let mut bytes = float_bytes(&vec![0.5; frames]);
+    bytes.extend(float_bytes(&vec![0.0; frames]));
+    let plane = frames * planar.sample.width();
+    let first = levels_dbfs(&bytes[..plane], planar);
+    assert!((first.rms_dbfs - -6.02).abs() < 0.05, "{first:?}");
+    assert!((first.peak_dbfs - -6.02).abs() < 0.05, "{first:?}");
+    let whole = levels_dbfs(&bytes, planar);
+    assert!(whole.rms_dbfs < first.rms_dbfs - 2.0, "{whole:?}");
 
     asbd.mFormatFlags = kAudioFormatFlagIsFloat;
+    assert!(!is_planar(&asbd));
     assert_eq!(layout_of(&asbd).map(|l| l.sample), Some(Sample::F32));
 
     // A frame narrower than one sample cannot be walked.
