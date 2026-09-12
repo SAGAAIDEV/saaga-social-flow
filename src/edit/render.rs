@@ -29,6 +29,13 @@ pub const QUALITY: &str = "high";
 pub const HF_VERSION: &str = "0.7.107";
 /// The assembled cut, in whichever orientation's directory it lands.
 pub const LONGFORM: &str = "longform.mp4";
+/// Beside each longform, the list of parts it was joined from.
+///
+/// One more input for the join's freshness check. The parts' own mtimes are not
+/// enough: a layout change that touches no part — the opening title card coming
+/// out — left the previous longform newer than everything it was made of, and
+/// so "already current" with the card still in it.
+const PARTS_FILE: &str = "longform.parts.txt";
 
 /// One render: which workspace it runs in, what it renders, where it lands.
 struct Task<'a> {
@@ -121,7 +128,7 @@ pub fn render_plan(
     // shorts costs the join and nothing else.
     if !plan.h_segments.is_empty() {
         let longform = h_dir.join(LONGFORM);
-        if is_fresh(&longform, &h_out) {
+        if is_fresh(&longform, &join_inputs(&h_dir, &h_out)?) {
             eprintln!("stream-recorder: the horizontal longform is already current");
         } else {
             status("Assembling the longform…");
@@ -136,7 +143,7 @@ pub fn render_plan(
     // already agree on profile, pixel format and frame rate.
     if plan.targets.vertical && !v_out.is_empty() {
         let longform = v_dir.join(LONGFORM);
-        if is_fresh(&longform, &v_out) {
+        if is_fresh(&longform, &join_inputs(&v_dir, &v_out)?) {
             eprintln!("stream-recorder: the vertical longform is already current");
         } else {
             status("Assembling the vertical longform…");
@@ -144,6 +151,23 @@ pub fn render_plan(
         }
     }
     Ok(publish.to_path_buf())
+}
+
+/// Records `parts` beside the longform in `dir`, touching the file only when the
+/// list changes, and returns everything the join is fresh against — see
+/// [`PARTS_FILE`].
+fn join_inputs(dir: &Path, parts: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let list = dir.join(PARTS_FILE);
+    let body = parts
+        .iter()
+        .map(|part| part.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    super::compose::write_if_changed(&list, &body)?;
+    let mut inputs = parts.to_vec();
+    inputs.push(list);
+    Ok(inputs)
 }
 
 /// Joins the parts into one file, or copies the only part there is.
@@ -548,6 +572,34 @@ mod tests {
             conform_for_concat(&plan, &rendered, &dir).unwrap(),
             rendered
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The join is fresh against its part list as well as its parts: a layout
+    /// change that touches no part — the opening title card coming out — used
+    /// to leave the old longform "current" with the card still in it.
+    #[test]
+    fn a_changed_part_list_makes_the_longform_stale() {
+        let dir = temp("parts");
+        let parts: Vec<PathBuf> = ["a.mp4", "b.mp4"]
+            .iter()
+            .map(|name| {
+                let part = dir.join(name);
+                std::fs::write(&part, b"x").unwrap();
+                part
+            })
+            .collect();
+        let inputs = join_inputs(&dir, &parts).unwrap();
+        let longform = dir.join(LONGFORM);
+        std::fs::write(&longform, b"joined").unwrap();
+        assert!(is_fresh(&longform, &inputs), "just joined from these parts");
+        // Same parts, same list: the list is not rewritten, so still current.
+        assert!(is_fresh(&longform, &join_inputs(&dir, &parts).unwrap()));
+        // One part gone and nothing else touched: the list changes, the join is due.
+        assert!(!is_fresh(
+            &longform,
+            &join_inputs(&dir, &parts[1..]).unwrap()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
