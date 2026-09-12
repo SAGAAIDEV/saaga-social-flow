@@ -244,13 +244,6 @@ fn compose_and_render(
         );
     }
     let titles = chapter_titles(session, &numbers);
-    // The opening card carries the video's own title once Titles has written
-    // one; the project folder's name is only a fallback for a render that runs
-    // before that.
-    let longform_title = crate::titles::load(&session.titles_dir())
-        .ok()
-        .and_then(|manifest| manifest.longform_title().map(str::to_string))
-        .unwrap_or_else(|| session.title());
     // The boxes above the Render button, read here rather than passed in, so
     // a re-cut from the Edit tab honours them the same way Render does.
     let targets = crate::config::load().render;
@@ -266,14 +259,13 @@ fn compose_and_render(
         &session.compose_dir(),
         &compose::components_root(),
         &titles,
-        &longform_title,
         targets,
     )?;
     if plan.is_empty() {
         bail!("no horizontal or vertical cuts to compose for the outputs that are switched on");
     }
     progress(COMPOSED);
-    // Only the title cards and the verticals are drawn; the chapter bodies go into the
+    // Only the chapter cards and the verticals are drawn; the chapter bodies go into the
     // longform as they were cut. Saying so keeps the count honest against the log.
     let total = plan.render_count();
     status(&format!("Rendering {total} HyperFrames composition(s)…"));

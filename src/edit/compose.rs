@@ -146,14 +146,12 @@ pub fn prepare(
     compose_root: &Path,
     library: &Path,
     titles: &[(u32, String)],
-    project_title: &str,
 ) -> Result<Plan> {
     prepare_targets(
         edit_root,
         compose_root,
         library,
         titles,
-        project_title,
         crate::config::RenderTargets::default(),
     )
 }
@@ -169,7 +167,6 @@ pub fn prepare_targets(
     compose_root: &Path,
     library: &Path,
     titles: &[(u32, String)],
-    project_title: &str,
     targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
@@ -216,19 +213,20 @@ pub fn prepare_targets(
         let h_src = chapter.join(format!("chapter-{n:02}-horizontal.mp4"));
         let v_src = chapter.join(format!("chapter-{n:02}-vertical.mp4"));
         if targets.horizontal && h_src.exists() {
-            // The opening title card stands in for chapter one's, so chapter one
-            // plays straight out of the title with nothing between them — one
-            // card at the front rather than six seconds of two.
+            // Chapter one has no card: the longform opens on its footage, with
+            // nothing in front of it. The opening title card that used to stand
+            // there was taken out — three seconds of plate before a word is
+            // said, on every video.
             //
             // Every card carries the chapter's own number. The first card a
             // viewer meets therefore reads "Chapter 02", and that is right:
-            // chapter one opened under the title, the way a book's first chapter
-            // opens under its own. The cards used to count what had been shown
-            // instead — "01" in front of chapter two — and that number agreed
-            // with nothing else: the vertical cut of the same chapter said
-            // "Chapter 02", the notes and the blog said chapter 2, and a chapter
-            // with no title fell back to its own number, so one card read
-            // "02 / Chapter 3".
+            // chapter one opened the video, the way a book's first chapter
+            // opens under its own number. The cards used to count what had been
+            // shown instead — "01" in front of chapter two — and that number
+            // agreed with nothing else: the vertical cut of the same chapter
+            // said "Chapter 02", the notes and the blog said chapter 2, and a
+            // chapter with no title fell back to its own number, so one card
+            // read "02 / Chapter 3".
             if !h_segments.is_empty() {
                 h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
             }
@@ -243,17 +241,6 @@ pub fn prepare_targets(
             v_jobs.push(write_v_chapter(&vertical, *n, title, seconds)?);
         }
     }
-    // The longform's own title, in front of everything. Added last so it is not
-    // mistaken for a chapter above, and whenever there is any body to open —
-    // asking for a *rendered* segment here meant a single-chapter video got no
-    // title card at all, because chapter one no longer has a card of its own.
-    if !h_segments.is_empty() {
-        h_segments.insert(
-            0,
-            Segment::Render(write_opener(&horizontal, project_title)?),
-        );
-    }
-
     let first_render = h_segments
         .iter()
         .find_map(Segment::job)
@@ -386,34 +373,6 @@ fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
             // Revealed on a beat, like it always was: a chapter card appears
             // mid-video where the animation is the point.
             "holdFromStart": 0,
-        }),
-    )
-}
-
-/// The longform's own opening title, in front of chapter one's card.
-///
-/// The same component as a chapter card with the two chapter slots left empty:
-/// the label is a 48px kicker and the number is 420px, and both collapse in the
-/// centred flex column when they carry no text, leaving the project's title on
-/// the branded background.
-///
-/// It exists because the longform had no opening of its own, so the first thing
-/// a viewer saw was a chapter card rather than the video's title — see
-/// [`prepare`].
-fn write_opener(workspace: &Path, project_title: &str) -> Result<Job> {
-    title_card(
-        workspace,
-        "seg-00-opener",
-        serde_json::json!({
-            "chapterLabel": "",
-            "chapterNumber": "",
-            "chapterTopic": project_title,
-            "durationSeconds": CARD_SECONDS,
-            // Composed from frame one. Every element on this card is hidden
-            // until its beat, so frame 0 was the background and nothing else —
-            // and frame 0 is the frame a social platform grabs for its preview.
-            // The title of the video has to be legible in it.
-            "holdFromStart": 1,
         }),
     )
 }
@@ -715,15 +674,16 @@ mod tests {
         (library, edit, compose)
     }
 
-    /// The bug this pins, reported as "we see chapter 2 first": chapter one used
-    /// to be the only chapter with no card, so the first thing a viewer met was
-    /// a chapter card rather than the video's title. The longform now opens on
-    /// its own title and every chapter is labelled — by its own number.
+    /// The longform opens on chapter one's footage, and every chapter after it
+    /// is labelled by its own number. There used to be an opening title card in
+    /// front — three seconds of plate on every video — and before that, a
+    /// chapter card in front of chapter one that made "Chapter 02" the first
+    /// thing a viewer read.
     #[test]
-    fn the_longform_opens_on_its_own_title_then_labels_every_chapter() {
+    fn the_longform_opens_on_chapter_one_then_labels_every_chapter_after_it() {
         let (library, edit, compose) = fixture("order");
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
-        let plan = prepare(&edit, &compose, &library, &titles, "Why watermarking fails").unwrap();
+        let plan = prepare(&edit, &compose, &library, &titles).unwrap();
 
         let order: Vec<String> = plan
             .h_segments
@@ -739,15 +699,14 @@ mod tests {
         assert_eq!(
             order,
             vec![
-                "seg-00-opener",
                 "chapter-01-horizontal",
                 "seg-02-card",
-                "chapter-02-horizontal",
+                "chapter-02-horizontal"
             ]
             .into_iter()
             .map(String::from)
             .collect::<Vec<_>>(),
-            "the title card stands in for chapter one's, so chapter one follows it"
+            "nothing in front of chapter one, and a card in front of every chapter after it"
         );
 
         // The card in front of chapter two reads "02": the chapter's own number,
@@ -771,7 +730,7 @@ mod tests {
     fn the_render_quality_is_a_source_of_every_job() {
         let (library, edit, compose) = fixture("quality");
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
-        let plan = prepare(&edit, &compose, &library, &titles, "A video").unwrap();
+        let plan = prepare(&edit, &compose, &library, &titles).unwrap();
         let quality = compose.join("horizontal").join(QUALITY_FILE);
         assert_eq!(
             std::fs::read_to_string(&quality).unwrap(),
@@ -809,9 +768,8 @@ mod tests {
             .unwrap();
         }
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
-        let plan = |targets: RenderTargets| {
-            prepare_targets(&edit, &compose, &library, &titles, "A video", targets)
-        };
+        let plan =
+            |targets: RenderTargets| prepare_targets(&edit, &compose, &library, &titles, targets);
 
         // Only the horizontal: cards and bodies, no chapter compositions.
         let horizontal_only = plan(RenderTargets {
@@ -830,7 +788,7 @@ mod tests {
             Err(err) => panic!("{err:#}"),
         }
 
-        // Nothing horizontal: no opener, no cards, no bodies.
+        // Nothing horizontal: no cards, no bodies.
         let no_horizontal = RenderTargets {
             horizontal: false,
             vertical: false,
@@ -849,7 +807,7 @@ mod tests {
     fn an_untitled_chapter_is_numbered_and_its_topic_left_empty() {
         let (library, edit, compose) = fixture("untitled");
         let titles = vec![(1u32, "First".to_string()), (2u32, String::new())];
-        prepare(&edit, &compose, &library, &titles, "A video").unwrap();
+        prepare(&edit, &compose, &library, &titles).unwrap();
         let card =
             std::fs::read_to_string(compose.join("horizontal/compositions/seg-02-card.html"))
                 .unwrap();
@@ -864,14 +822,7 @@ mod tests {
     #[test]
     fn the_badge_the_card_draws_travels_into_the_workspace() {
         let (library, edit, compose) = fixture("badge");
-        prepare(
-            &edit,
-            &compose,
-            &library,
-            &[(1u32, "Only".into())],
-            "A video",
-        )
-        .unwrap();
+        prepare(&edit, &compose, &library, &[(1u32, "Only".into())]).unwrap();
         assert!(
             compose.join("horizontal/assets/badge.svg").is_file(),
             "the separator mark is missing from the workspace"
@@ -879,58 +830,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
-    /// A one-chapter video still opens on its title. The opener used to be added
-    /// only when something else was being rendered, and chapter one has no card
-    /// of its own — so the only video that needed the title most got none.
+    /// A one-chapter video is its one cut and nothing else: no card in front of
+    /// it, and nothing for the horizontal to render at all.
     #[test]
-    fn a_single_chapter_video_still_gets_its_title_card() {
+    fn a_single_chapter_video_is_just_its_footage() {
         let (library, edit, compose) = fixture("single");
-        let plan = prepare(
-            &edit,
-            &compose,
-            &library,
-            &[(1u32, "Only".to_string())],
-            "A short one",
-        )
-        .unwrap();
-        assert_eq!(plan.h_segments.len(), 2, "the title and the one body");
-        assert_eq!(
-            plan.h_segments[0].job().map(|j| j.id.as_str()),
-            Some("seg-00-opener")
+        let plan = prepare(&edit, &compose, &library, &[(1u32, "Only".to_string())]).unwrap();
+        assert_eq!(plan.h_segments.len(), 1, "the one body, and no card");
+        assert!(
+            plan.h_segments[0].job().is_none(),
+            "the body passes through"
         );
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
-    /// The opener carries the video's title, not a chapter's, and leaves the two
-    /// chapter slots empty so they collapse.
+    /// Cards only is not a longform, so there is nothing to plan.
     #[test]
-    fn the_opener_says_the_videos_name_and_claims_no_chapter_number() {
-        let (library, edit, compose) = fixture("opener");
-        let titles = vec![(1u32, "First".to_string())];
-        prepare(&edit, &compose, &library, &titles, "Why watermarking fails").unwrap();
-        let html =
-            std::fs::read_to_string(compose.join("horizontal/compositions/seg-00-opener.html"))
-                .unwrap();
-        assert!(html.contains("Why watermarking fails"), "{html}");
-        // `write_wrapper` escapes single quotes only, so the JSON keeps its
-        // double quotes inside the single-quoted attribute.
-        assert!(html.contains(r#""chapterNumber":"""#), "{html}");
-        assert!(html.contains(r#""chapterLabel":"""#), "{html}");
-        // Composed from frame one: a social preview grabs frame 0, and a blank
-        // plate there tells a scroller nothing about the video.
-        assert!(html.contains(r#""holdFromStart":1"#), "{html}");
-        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
-    }
-
-    /// Cards only is not a longform, so there is nothing to open.
-    #[test]
-    fn a_project_with_no_cuts_gets_no_opener() {
+    fn a_project_with_no_cuts_plans_nothing() {
         let (library, edit, compose) = fixture("empty");
         for n in 1..=2 {
             let _ = std::fs::remove_dir_all(edit.join(format!("chapter-{n:02}")));
         }
         std::fs::create_dir_all(&edit).unwrap();
-        let plan = prepare(&edit, &compose, &library, &[], "A video").unwrap();
+        let plan = prepare(&edit, &compose, &library, &[]).unwrap();
         assert!(plan.h_segments.is_empty());
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
@@ -1045,7 +967,6 @@ mod library_tests {
             &compose,
             &components_root(),
             &[(1, "First".into()), (2, "Second".into())],
-            "A real video",
         )
         .expect("prepare against the vendored library");
 
