@@ -82,7 +82,7 @@ pub fn build(session: &Session) -> Longform {
         .map(|(n, transcript)| {
             let deck = notes
                 .as_ref()
-                .and_then(|data| data.chapters.get(n.saturating_sub(1) as usize));
+                .and_then(|data| crate::notes::deck_chapter(data, &session.dir, n));
             ChapterContext {
                 n,
                 // The approved card title first: it is the one a human has

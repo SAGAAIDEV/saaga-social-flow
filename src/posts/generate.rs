@@ -241,10 +241,13 @@ fn longform_context(session_dir: &Path, notes: Option<&NotesData>) -> VideoConte
 }
 
 fn chapter_contexts(session_dir: &Path, notes: Option<&NotesData>) -> Vec<VideoContext> {
-    crate::notes::closed_chapter_numbers(session_dir)
+    // Only the chapters with speech: an empty one has no short — the render
+    // drops it — so a post for it would sell a clip that does not exist.
+    crate::notes::collect_completed(session_dir)
         .into_iter()
+        .map(|(n, _)| n)
         .map(|n| {
-            let ch_notes = notes.and_then(|d| d.chapters.get(n.saturating_sub(1) as usize));
+            let ch_notes = notes.and_then(|d| crate::notes::deck_chapter(d, session_dir, n));
             let transcript_path = session_dir.join(format!("chapter-{n:02}.transcript.json"));
             VideoContext {
                 id: format!("chapter-{n:02}"),

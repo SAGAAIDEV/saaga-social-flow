@@ -15,6 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
 pub mod compose;
 pub mod compute;
@@ -108,7 +109,10 @@ pub fn run_cut(
     if by_hand.is_empty() {
         status("Waiting for chapter transcripts…");
     }
-    let transcribed = wait_for_words(&session.dir, &by_hand, status)?;
+    let Waited {
+        ready: transcribed,
+        mut dropped,
+    } = wait_for_words(&session.dir, &by_hand, status)?;
     progress(CUT.0);
 
     let mut chapters: Vec<(u32, Option<ChapterTranscript>)> = transcribed
@@ -129,6 +133,11 @@ pub fn run_cut(
         status(&format!("Cutting chapter {n:02}…"));
         if edit_chapter(&session.dir, &edit_root, *n, transcript.as_ref())? {
             cut_count += 1;
+        } else {
+            dropped.push(Dropped {
+                n: *n,
+                reason: "nothing left to cut".to_string(),
+            });
         }
         progress(within(CUT, i + 1, chapters.len()));
     }
@@ -138,6 +147,9 @@ pub fn run_cut(
             session.dir.display()
         );
     }
+    dropped.sort_by_key(|dropped| dropped.n);
+    write_dropped(&edit_root, &dropped)?;
+    report_dropped(&dropped, status);
     Ok(edit_root)
 }
 
@@ -303,7 +315,7 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
             let from_titles = titles.as_ref().and_then(|t| t.title_for(n));
             let from_notes = notes
                 .as_ref()
-                .and_then(|data| data.chapters.get(n.saturating_sub(1) as usize))
+                .and_then(|data| crate::notes::deck_chapter(data, &session.dir, n))
                 .map(|c| c.title.trim())
                 .filter(|t| !t.is_empty());
             // No fallback title. The cards print "Chapter" and the number from
@@ -407,17 +419,81 @@ fn cut_inputs(source: &Path, edits_path: &Path) -> Vec<PathBuf> {
     vec![source.to_path_buf(), edits_path.to_path_buf()]
 }
 
+/// Beside the cuts, what the cut left out and why — see [`Dropped`].
+pub const DROPPED_JSON: &str = "dropped.json";
+
+/// A closed chapter the render leaves out, and the reason, in the words the
+/// status line and the Video tab's summary use.
+///
+/// The common case is two presses of New Chapter in a row: a three-second
+/// chapter with nothing said in it. Rendered, it would be three seconds of
+/// nothing behind its own card; dropped, the chapters after it close up and
+/// are numbered as though it had never happened — see
+/// [`compose::prepare_targets`]. A hand edit in the Edit tab still wins: a
+/// dropped chapter someone keeps a span of is cut like any other.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Dropped {
+    pub n: u32,
+    pub reason: String,
+}
+
+/// What the last cut dropped, for the Video tab's summary. Empty when the cut
+/// kept everything, or has not run.
+pub fn load_dropped(edit_root: &Path) -> Vec<Dropped> {
+    std::fs::read_to_string(edit_root.join(DROPPED_JSON))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_dropped(edit_root: &Path, dropped: &[Dropped]) -> Result<()> {
+    let path = edit_root.join(DROPPED_JSON);
+    if dropped.is_empty() {
+        // A list left over would report the last render's drops against this one.
+        if path.exists() {
+            std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+        }
+        return Ok(());
+    }
+    compose::write_if_changed(
+        &path,
+        &(serde_json::to_string_pretty(dropped).context("serializing dropped chapters")? + "\n"),
+    )
+}
+
+/// Why a finished transcript leaves its chapter out of the render.
+fn why_dropped(t: &ChapterTranscript) -> String {
+    match t.status {
+        TranscriptStatus::Completed => "no speech in its transcript".to_string(),
+        _ => match t.error.as_deref() {
+            Some(reason) => format!("transcript {:?}: {reason}", t.status),
+            None => format!("transcript {:?}", t.status),
+        },
+    }
+}
+
+fn report_dropped(dropped: &[Dropped], status: &dyn Fn(&str)) {
+    for Dropped { n, reason } in dropped {
+        let line = format!("Chapter {n:02} dropped from the render — {reason}");
+        eprintln!("stream-recorder: {line}");
+        status(&line);
+    }
+}
+
+/// What [`wait_for_words`] came back with: the chapters to cut from their words,
+/// and the ones whose transcript finished with nothing to cut from.
+struct Waited {
+    ready: Vec<(u32, ChapterTranscript)>,
+    dropped: Vec<Dropped>,
+}
+
 /// Blocks until every closed chapter's transcript has landed, or given up.
 ///
 /// `by_hand` names the chapters that already have an edit. They are not waited on and
 /// their absence is not an error — a hand edit is expressed in milliseconds, so it needs
 /// no words, and a chapter whose transcription failed is the very case someone reaches
 /// for the Edit tab to rescue.
-fn wait_for_words(
-    session_dir: &Path,
-    by_hand: &[u32],
-    status: &dyn Fn(&str),
-) -> Result<Vec<(u32, ChapterTranscript)>> {
+fn wait_for_words(session_dir: &Path, by_hand: &[u32], status: &dyn Fn(&str)) -> Result<Waited> {
     let closed = closed_chapter_numbers(session_dir);
     if closed.is_empty() {
         bail!("no closed chapters in {}", session_dir.display());
@@ -427,25 +503,23 @@ fn wait_for_words(
         .filter(|n| !by_hand.contains(n))
         .collect();
     if closed.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Waited {
+            ready: Vec::new(),
+            dropped: Vec::new(),
+        });
     }
     let deadline = Instant::now() + WAIT_FOR;
     loop {
         let mut pending = Vec::new();
         let mut ready = Vec::new();
+        let mut dropped = Vec::new();
         for n in &closed {
             match load_transcript(session_dir, *n) {
                 Some(t) if is_ready(&t) => ready.push((*n, t)),
-                Some(t) if is_terminal(&t) => {
-                    eprintln!(
-                        "stream-recorder: chapter {n:02} transcript is {:?} — skipping{}",
-                        t.status,
-                        t.error
-                            .as_deref()
-                            .map(|reason| format!(" ({reason})"))
-                            .unwrap_or_default()
-                    );
-                }
+                Some(t) if is_terminal(&t) => dropped.push(Dropped {
+                    n: *n,
+                    reason: why_dropped(&t),
+                }),
                 _ => pending.push(*n),
             }
         }
@@ -455,7 +529,7 @@ fn wait_for_words(
             if ready.is_empty() && by_hand.is_empty() {
                 return Err(no_words(session_dir));
             }
-            return Ok(ready);
+            return Ok(Waited { ready, dropped });
         }
         if Instant::now() > deadline {
             if ready.is_empty() && by_hand.is_empty() {
@@ -468,7 +542,11 @@ fn wait_for_words(
                 "stream-recorder: timed out waiting for chapter {pending:?}; editing {} ready",
                 ready.len()
             );
-            return Ok(ready);
+            dropped.extend(pending.into_iter().map(|n| Dropped {
+                n,
+                reason: "its transcript never landed".to_string(),
+            }));
+            return Ok(Waited { ready, dropped });
         }
         let msg = format!(
             "Waiting for chapter {} transcript…",
@@ -573,6 +651,84 @@ mod tests {
             "{msg}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The accident this closes: two presses of New Chapter in a row leave a
+    /// chapter with nothing said in it. Its transcript completes empty, and the
+    /// render drops it with that reason rather than cutting three seconds of
+    /// nothing — while a chapter with words is cut as before.
+    #[test]
+    fn a_chapter_with_no_speech_is_dropped_with_the_reason() {
+        let root = temp("dropped");
+        let drafts = root.join("drafts");
+        std::fs::create_dir_all(&drafts).unwrap();
+        for n in 1..=2 {
+            std::fs::write(drafts.join(format!("chapter-{n:02}.mp3")), b"a").unwrap();
+        }
+        std::fs::write(
+            drafts.join("chapter-01.transcript.json"),
+            r#"{"status":"completed","text":"hello","words":[{"text":"hello","start":0,"end":500}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            drafts.join("chapter-02.transcript.json"),
+            r#"{"status":"completed","text":""}"#,
+        )
+        .unwrap();
+        let waited = wait_for_words(&drafts, &[], &|_| {}).unwrap();
+        assert_eq!(
+            waited.ready.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            waited.dropped,
+            vec![Dropped {
+                n: 2,
+                reason: "no speech in its transcript".into()
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The reason names what happened in the transcript's own terms, so a key
+    /// that never loaded is not reported as a chapter with nothing said in it.
+    #[test]
+    fn a_failed_transcript_is_dropped_for_its_own_reason() {
+        let empty = ChapterTranscript {
+            status: TranscriptStatus::Completed,
+            text: String::new(),
+            words: Vec::new(),
+            error: None,
+        };
+        assert_eq!(why_dropped(&empty), "no speech in its transcript");
+        let skipped = ChapterTranscript {
+            status: TranscriptStatus::Skipped,
+            text: String::new(),
+            words: Vec::new(),
+            error: Some("ASSEMBLYAI_API_KEY unset".into()),
+        };
+        assert_eq!(
+            why_dropped(&skipped),
+            "transcript Skipped: ASSEMBLYAI_API_KEY unset"
+        );
+    }
+
+    /// The Video tab reads the drops back after the cut; an empty list leaves no
+    /// file, so the last render's drops cannot be reported against this one.
+    #[test]
+    fn the_dropped_list_round_trips_and_clears() {
+        let root = temp("dropped-file");
+        std::fs::create_dir_all(&root).unwrap();
+        let dropped = vec![Dropped {
+            n: 5,
+            reason: "no speech in its transcript".into(),
+        }];
+        write_dropped(&root, &dropped).unwrap();
+        assert_eq!(load_dropped(&root), dropped);
+        write_dropped(&root, &[]).unwrap();
+        assert!(load_dropped(&root).is_empty());
+        assert!(!root.join(DROPPED_JSON).exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The whole point of the Edit tab: a hand edit survives a cut, rather than the
@@ -760,7 +916,7 @@ mod tests {
         assert_eq!(by_hand, vec![1, 2]);
         let waited = wait_for_words(&drafts, &by_hand, &|_| {}).unwrap();
         assert!(
-            waited.is_empty(),
+            waited.ready.is_empty(),
             "nothing to wait for, nothing transcribed"
         );
         let _ = std::fs::remove_dir_all(&root);

@@ -3042,6 +3042,14 @@ impl App {
             }
             summary.push('\n');
         }
+        // What the cut left out, and why — beside what it kept, so a chapter
+        // that vanished from the video is accounted for rather than missing.
+        for dropped in crate::edit::load_dropped(&edit_dir) {
+            summary.push_str(&format!(
+                "## Chapter {:02} — dropped\n- {}\n\n",
+                dropped.n, dropped.reason
+            ));
+        }
         if !cut_any {
             summary.push_str("No cut yet.\n\n");
         }

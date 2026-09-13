@@ -207,7 +207,14 @@ pub fn prepare_targets(
 
     let mut h_segments: Vec<Segment> = Vec::new();
     let mut v_jobs = Vec::new();
-    for (n, title) in titles {
+    for (index, (n, title)) in titles.iter().enumerate() {
+        // The number the viewer sees: this chapter's place among the chapters
+        // that render, not its number in the drafts. A chapter with nothing
+        // said in it is dropped before the plan is made — see `super::Dropped`
+        // — and a viewer counting cards must not meet "Chapter 06" after
+        // "Chapter 04" because of it. Paths and ids keep the draft number,
+        // which is what every file is named by.
+        let shown = index as u32 + 1;
         let chapter = edit_root.join(format!("chapter-{n:02}"));
         let audio = chapter.join("audio.mp3");
         let h_src = chapter.join(format!("chapter-{n:02}-horizontal.mp4"));
@@ -218,17 +225,17 @@ pub fn prepare_targets(
             // there was taken out — three seconds of plate before a word is
             // said, on every video.
             //
-            // Every card carries the chapter's own number. The first card a
-            // viewer meets therefore reads "Chapter 02", and that is right:
-            // chapter one opened the video, the way a book's first chapter
-            // opens under its own number. The cards used to count what had been
-            // shown instead — "01" in front of chapter two — and that number
-            // agreed with nothing else: the vertical cut of the same chapter
-            // said "Chapter 02", the notes and the blog said chapter 2, and a
-            // chapter with no title fell back to its own number, so one card
-            // read "02 / Chapter 3".
+            // Every card carries its chapter's shown number, so the first card
+            // a viewer meets reads "Chapter 02": chapter one opened the video,
+            // the way a book's first chapter opens under its own number. The
+            // cards used to count *cards* instead — "01" in front of chapter
+            // two — and that number agreed with nothing else: the vertical cut
+            // of the same chapter said "Chapter 02", the notes and the blog
+            // said chapter 2, and a chapter with no title fell back to its own
+            // number, so one card read "02 / Chapter 3". The vertical cut takes
+            // the same shown number below, so the two still agree.
             if !h_segments.is_empty() {
-                h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
+                h_segments.push(Segment::Render(write_card(&horizontal, *n, shown, title)?));
             }
             // The cut itself, straight into the longform. Nothing is copied into the
             // horizontal workspace for it either — the cards do not reference chapter
@@ -238,7 +245,7 @@ pub fn prepare_targets(
         if targets.vertical_parts() && v_src.exists() {
             let seconds = cut::probe_duration_seconds(&v_src)?;
             copy_media(&vertical, *n, &v_src, audio.exists().then_some(&audio))?;
-            v_jobs.push(write_v_chapter(&vertical, *n, title, seconds)?);
+            v_jobs.push(write_v_chapter(&vertical, *n, shown, title, seconds)?);
         }
     }
     let first_render = h_segments
@@ -361,13 +368,15 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
 /// `title` may be empty: a chapter nobody has titled shows "Chapter 03" from
 /// the label and number alone, and the topic slot collapses. A topic reading
 /// "Chapter 3" under a number reading "03" said the same thing twice.
-fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
+/// The card in front of draft chapter `n`, which the viewer meets as chapter
+/// `shown`.
+fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
         &format!("seg-{n:02}-card"),
         serde_json::json!({
             "chapterLabel": "Chapter",
-            "chapterNumber": format!("{n:02}"),
+            "chapterNumber": format!("{shown:02}"),
             "chapterTopic": title,
             "durationSeconds": CARD_SECONDS,
             // Revealed on a beat, like it always was: a chapter card appears
@@ -409,14 +418,16 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
     })
 }
 
-fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Result<Job> {
+/// Draft chapter `n` as a vertical, opening on the number the viewer meets it
+/// as — `shown`, the same one its card in the longform carries.
+fn write_v_chapter(workspace: &Path, n: u32, shown: u32, title: &str, seconds: f64) -> Result<Job> {
     let id = format!("chapter-{n:02}");
     let block = "talking-head-vertical";
     let camera = format!("assets/videos/chapter-{n:02}/chapter-{n:02}-vertical.mp4");
     let audio = format!("assets/videos/chapter-{n:02}/audio.mp3");
     let values = serde_json::json!({
         "chapterLabel": "Chapter",
-        "chapterNumber": format!("{n:02}"),
+        "chapterNumber": format!("{shown:02}"),
         "chapterTopic": title,
         "cameraSrc": camera,
         "audioSrc": audio,
@@ -720,6 +731,36 @@ mod tests {
         assert!(card.contains("Second"));
         // A chapter card still animates in — it arrives mid-video.
         assert!(card.contains(r#""holdFromStart":0"#), "{card}");
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// An accidental empty chapter is dropped before the plan is made, and the
+    /// chapters after it close up: draft chapter three, with two gone, is what
+    /// the viewer meets as "Chapter 02". The files keep the draft number.
+    #[test]
+    fn a_dropped_chapter_leaves_no_gap_in_the_numbers_viewers_see() {
+        let (library, edit, compose) = fixture("gap");
+        let third = edit.join("chapter-03");
+        std::fs::create_dir_all(&third).unwrap();
+        std::fs::write(third.join("chapter-03-horizontal.mp4"), b"v").unwrap();
+        let titles = vec![(1u32, "First".to_string()), (3u32, "Third".to_string())];
+        let plan = prepare(&edit, &compose, &library, &titles).unwrap();
+        let ids: Vec<String> = plan
+            .h_segments
+            .iter()
+            .filter_map(Segment::job)
+            .map(|job| job.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            ["seg-03-card"],
+            "the card is named for the draft chapter"
+        );
+        let card =
+            std::fs::read_to_string(compose.join("horizontal/compositions/seg-03-card.html"))
+                .unwrap();
+        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
+        assert!(card.contains("Third"), "{card}");
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 

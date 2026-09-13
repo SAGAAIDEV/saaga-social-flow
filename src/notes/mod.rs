@@ -141,6 +141,23 @@ pub fn retry_unfinished_transcripts(session_dir: &Path) -> usize {
     audio.len()
 }
 
+/// The deck's chapter for draft chapter `n`.
+///
+/// The deck is built from [`collect_completed`], so it has one chapter per
+/// chapter with speech, in order — not one slot per draft chapter. Indexing it
+/// by `n - 1` held until a chapter with nothing said in it sat in the middle of
+/// a take; every chapter after it then wore the notes of the one before.
+pub fn deck_chapter<'a>(
+    deck: &'a NotesData,
+    session_dir: &Path,
+    n: u32,
+) -> Option<&'a deck::Chapter> {
+    let at = collect_completed(session_dir)
+        .iter()
+        .position(|(spoken, _)| *spoken == n)?;
+    deck.chapters.get(at)
+}
+
 pub(crate) fn load_transcript(session_dir: &Path, n: u32) -> Option<ChapterTranscript> {
     let path = session_dir.join(format!("chapter-{n:02}.transcript.json"));
     let text = std::fs::read_to_string(path).ok()?;
@@ -387,6 +404,42 @@ mod tests {
             picked,
             ["chapter-03.mp3", "chapter-04.mp3", "chapter-05.mp3"]
         );
+    }
+
+    /// The deck has one chapter per chapter with speech. With an empty chapter
+    /// in the middle of the take, draft chapter three is the deck's second —
+    /// not its third, which does not exist.
+    #[test]
+    fn the_deck_is_read_by_position_among_the_spoken_chapters() {
+        let dir = temp("deck-gap");
+        for n in 1..=3 {
+            std::fs::write(dir.join(format!("chapter-{n:02}.mp3")), b"x").unwrap();
+        }
+        for (n, json) in [
+            (1, r#"{"status":"completed","text":"one"}"#),
+            (2, r#"{"status":"completed","text":""}"#),
+            (3, r#"{"status":"completed","text":"three"}"#),
+        ] {
+            std::fs::write(dir.join(format!("chapter-{n:02}.transcript.json")), json).unwrap();
+        }
+        let deck = NotesData {
+            title: "Take".into(),
+            version: None,
+            chapters: ["One", "Three"]
+                .iter()
+                .map(|title| deck::Chapter {
+                    title: title.to_string(),
+                    points: Vec::new(),
+                    verbatim: None,
+                    cues: Vec::new(),
+                })
+                .collect(),
+        };
+        let title = |n: u32| deck_chapter(&deck, &dir, n).map(|c| c.title.as_str());
+        assert_eq!(title(1), Some("One"));
+        assert_eq!(title(2), None, "nothing was said in chapter two");
+        assert_eq!(title(3), Some("Three"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
