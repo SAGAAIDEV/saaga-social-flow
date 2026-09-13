@@ -97,6 +97,9 @@ pub enum Action {
     /// see [`crate::sessions::stale`]. No hotkey: it deletes recordings, so it
     /// costs a click and a confirmation.
     CleanUp,
+    /// Open the rendered longform in the default player. No hotkey: it is
+    /// pressed once the render is done, with a hand already on the mouse.
+    OpenVideo,
 }
 
 const BASE: Modifiers = Modifiers::CONTROL.union(Modifiers::ALT);
