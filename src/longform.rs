@@ -174,33 +174,31 @@ fn timestamps(edit_dir: &Path) -> Vec<(u32, String)> {
             }
         }
     }
-    // The opener is one title card long, so the lead and the per-chapter card
-    // are the same length — named separately because they are different things.
-    offsets(
-        &durations,
-        crate::edit::compose::CARD_SECONDS,
-        crate::edit::compose::CARD_SECONDS,
-    )
-    .into_iter()
-    .map(|(n, seconds)| (n, fmt_timestamp(seconds)))
-    .collect()
+    // No lead: the longform opens on chapter one's footage. The opening title
+    // card that used to stand in front was one card long, and every marker
+    // moved three seconds earlier when it went.
+    offsets(&durations, crate::edit::compose::CARD_SECONDS, 0.0)
+        .into_iter()
+        .map(|(n, seconds)| (n, fmt_timestamp(seconds)))
+        .collect()
 }
 
-/// The longform's shape, from [`crate::edit::compose::prepare`]: the video's own
-/// title card, then chapter one straight away, then a card in front of every
-/// chapter after it.
+/// The longform's shape, from [`crate::edit::compose::prepare_targets`]: chapter
+/// one straight away, then a card in front of every chapter after it.
 ///
-/// `lead` is the opening title card and `card` is one chapter card. Both are
-/// passed in rather than assumed because this is the one function that has to
-/// agree with how the video was actually assembled, and it has been wrong twice:
-/// once when chapter one's card was added and once when it was taken away again.
+/// `lead` is whatever plays before chapter one — nothing, now that the opening
+/// title card is gone — and `card` is one chapter card. Both are passed in
+/// rather than assumed because this is the one function that has to agree with
+/// how the video was actually assembled, and it has been wrong three times: when
+/// chapter one's card was added, when it was taken away again, and when the
+/// opening title came and went.
 /// Either way the error is silent — every marker lands a few seconds off, which
 /// is close enough to look right and far enough to quote the wrong sentence.
 pub fn offsets(durations: &[(u32, f64)], card: f64, lead: f64) -> Vec<(u32, f64)> {
     let mut out = Vec::with_capacity(durations.len());
     let mut cursor = lead.max(0.0);
     for (index, (n, seconds)) in durations.iter().enumerate() {
-        // Chapter one has no card of its own: the opening title stands in for it.
+        // Chapter one has no card of its own; the video opens on it.
         if index > 0 {
             cursor += card;
         }
@@ -315,30 +313,24 @@ mod tests {
         assert!(chapters[0].figures.is_empty());
     }
 
-    /// The regression this pins: the longform opens on its title card, chapter
-    /// one follows it immediately, and only the chapters after that get a card.
-    /// Computing these against either of the other two layouts this has had puts
-    /// every marker three or six seconds out.
+    /// The regression this pins: the longform opens on chapter one, and only the
+    /// chapters after it get a card. Computing these against either of the other
+    /// layouts this has had — a card in front of chapter one, or an opening title
+    /// card — puts every marker three seconds out.
     #[test]
-    fn chapter_offsets_account_for_the_opening_title_and_the_cards_after_it() {
+    fn chapter_offsets_start_at_zero_and_add_a_card_before_each_later_chapter() {
         let durations = vec![(1, 60.0), (2, 120.0), (3, 30.0)];
-        let got = offsets(&durations, 3.0, 3.0);
-        // The opening card, then chapter one with nothing between them.
-        assert_eq!(
-            got[0],
-            (1, 3.0),
-            "the title card stands in for chapter one's"
-        );
-        assert_eq!(got[1], (2, 66.0));
-        assert_eq!(got[2], (3, 189.0));
+        let got = offsets(&durations, 3.0, 0.0);
+        assert_eq!(got[0], (1, 0.0), "chapter one opens the video");
+        assert_eq!(got[1], (2, 63.0));
+        assert_eq!(got[2], (3, 186.0));
     }
 
-    /// With no opening title the first chapter starts the video, which is the
-    /// shape a render produced before Titles had written one.
+    /// A lead, should a layout ever have one again, only moves the start.
     #[test]
-    fn a_missing_opener_only_moves_the_start() {
-        let got = offsets(&[(1, 60.0), (2, 30.0)], 3.0, 0.0);
-        assert_eq!(got, vec![(1, 0.0), (2, 63.0)]);
+    fn a_lead_only_moves_the_start() {
+        let got = offsets(&[(1, 60.0), (2, 30.0)], 3.0, 3.0);
+        assert_eq!(got, vec![(1, 3.0), (2, 66.0)]);
     }
 
     #[test]

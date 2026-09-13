@@ -90,9 +90,9 @@ pub struct Timeline {
 
 /// Shifts every chapter into longform time and emits both representations.
 ///
-/// `lead` is the longform's opening title card, `card` one chapter card. Both go
-/// to [`crate::longform::offsets`], which is the single place that knows how the
-/// video is laid out.
+/// `lead` is whatever plays before chapter one — nothing, now — and `card` is one
+/// chapter card. Both go to [`crate::longform::offsets`], which is the single
+/// place that knows how the video is laid out.
 pub fn timeline(cuts: &[ChapterCut], card: f64, lead: f64) -> Timeline {
     let durations: Vec<(u32, f64)> = cuts.iter().map(|cut| (cut.n, cut.seconds)).collect();
     let starts = crate::longform::offsets(&durations, card, lead);
@@ -157,11 +157,9 @@ pub fn timeline(cuts: &[ChapterCut], card: f64, lead: f64) -> Timeline {
 /// chapter.
 pub fn build(session: &Session, longform: &Longform) -> Timeline {
     match cuts(&session.edit_dir(), &session.dir, longform) {
-        Some(cuts) => timeline(
-            &cuts,
-            crate::edit::compose::CARD_SECONDS,
-            crate::edit::compose::CARD_SECONDS,
-        ),
+        // No lead: the longform opens on chapter one's footage now that the
+        // opening title card is gone, so the first marker is 00:00.
+        Some(cuts) => timeline(&cuts, crate::edit::compose::CARD_SECONDS, 0.0),
         None => Timeline {
             chapters: Vec::new(),
             transcript: flat(longform),
@@ -294,14 +292,14 @@ mod tests {
                 cut(2, "The fix", 120.0, vec![word("second", 0, 500)]),
             ],
             3.0,
-            3.0,
+            0.0,
         );
         let transcript = got.transcript.expect("something was said");
-        // Only the 3s opening title plays before chapter one says a word.
-        assert_eq!(transcript.words[0].start, 3_000);
-        // + 60s of chapter one + chapter two's 3s card = 66s.
-        assert_eq!(transcript.words[1].start, 66_000);
-        assert_eq!(transcript.words[1].end, 66_500);
+        // Nothing plays before chapter one says a word.
+        assert_eq!(transcript.words[0].start, 0);
+        // 60s of chapter one + chapter two's 3s card = 63s.
+        assert_eq!(transcript.words[1].start, 63_000);
+        assert_eq!(transcript.words[1].end, 63_500);
     }
 
     /// Seconds on the component, milliseconds in the transcript, one pass — so
@@ -311,25 +309,25 @@ mod tests {
         let got = timeline(
             &[cut(1, "One", 60.0, vec![]), cut(2, "Two", 120.0, vec![])],
             3.0,
-            3.0,
+            0.0,
         );
-        assert_eq!(got.chapters[0].start_offset, 3);
-        assert_eq!(got.chapters[0].end_offset, 63);
-        assert_eq!(got.chapters[1].start_offset, 66);
-        assert_eq!(got.chapters[1].end_offset, 186);
+        assert_eq!(got.chapters[0].start_offset, 0);
+        assert_eq!(got.chapters[0].end_offset, 60);
+        assert_eq!(got.chapters[1].start_offset, 63);
+        assert_eq!(got.chapters[1].end_offset, 183);
 
         let marks = got.transcript.unwrap().chapters;
-        assert_eq!((marks[0].start, marks[0].end), (3_000, 63_000));
-        assert_eq!((marks[1].start, marks[1].end), (66_000, 186_000));
+        assert_eq!((marks[0].start, marks[0].end), (0, 60_000));
+        assert_eq!((marks[1].start, marks[1].end), (63_000, 183_000));
     }
 
-    /// Chapter one sits behind the opening title and nothing else — the title
-    /// card stands in for a card of its own.
+    /// Chapter one opens the video: no card of its own, and no opening title in
+    /// front of it any more.
     #[test]
-    fn the_first_chapter_sits_behind_the_opening_title_alone() {
-        let got = timeline(&[cut(1, "One", 10.0, vec![])], 3.0, 3.0);
-        assert_eq!(got.chapters[0].start_offset, 3);
-        assert_eq!(got.chapters[0].end_offset, 13);
+    fn the_first_chapter_opens_the_video() {
+        let got = timeline(&[cut(1, "One", 10.0, vec![])], 3.0, 0.0);
+        assert_eq!(got.chapters[0].start_offset, 0);
+        assert_eq!(got.chapters[0].end_offset, 10);
     }
 
     /// Both halves of the heading are filled: the landing renders
