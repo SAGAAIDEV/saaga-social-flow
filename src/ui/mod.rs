@@ -597,6 +597,11 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Render));
         }
 
+        #[unsafe(method(onOpenVideo:))]
+        fn on_open_video(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::OpenVideo));
+        }
+
         #[unsafe(method(onTogglePause:))]
         fn on_toggle_pause(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::TogglePause));
@@ -1401,6 +1406,9 @@ fn device_titles(devices: &[CaptureDevice]) -> impl IntoIterator<Item = String> 
 pub struct Layout {
     left: Retained<NSView>,
     right: Retained<NSView>,
+    /// The team-credentials banner above everything else in the column, only
+    /// when the launch-time decrypt failed. Measured at layout time: it wraps.
+    warning: Option<Retained<NSTextField>>,
     status: Retained<NSTextField>,
     timer: (Retained<NSTextField>, Retained<NSTextField>),
     meter: Retained<NSLevelIndicator>,
@@ -1432,6 +1440,7 @@ impl Layout {
         layout_left(
             left.size.width,
             left.size.height,
+            self.warning.as_deref(),
             &self.status,
             &self.timer,
             &self.meter,
@@ -1482,6 +1491,7 @@ fn pin_bottom(view: &NSView) {
 fn layout_left(
     width: f64,
     height: f64,
+    warning: Option<&NSTextField>,
     status: &NSTextField,
     timer: &(Retained<NSTextField>, Retained<NSTextField>),
     meter: &NSLevelIndicator,
@@ -1495,6 +1505,16 @@ fn layout_left(
     let content_w = (width - PAD * 2.0).max(80.0);
     let row = |y: f64, h: f64| NSRect::new(NSPoint::new(PAD, y), NSSize::new(content_w, h));
     let mut y = height - PAD;
+    if let Some(warning) = warning {
+        let h = warning
+            .sizeThatFits(NSSize::new(content_w, height))
+            .height
+            .ceil()
+            .max(LABEL_H);
+        y -= h;
+        warning.setFrame(row(y, h));
+        y -= SECTION_GAP;
+    }
     y -= LABEL_H;
     status.setFrame(row(y, LABEL_H));
     y -= GAP + TIMER_H;
@@ -1859,6 +1879,25 @@ pub fn attach_controls(
     video_brief_pane.fill_below();
     let right = speaking_host;
 
+    // Whether the team file decrypted is settled before this window exists and
+    // cannot change until a relaunch, so the banner is built once or never.
+    // Top of the column rather than the render status line: that line is the
+    // first thing a render overwrites, and this has to stay up until acted on.
+    let warning = crate::settings::sops::failure().map(|failed| {
+        let label = NSTextField::wrappingLabelWithString(
+            &NSString::from_str(&format!(
+                "Team credentials did not load: {}. Fix that, then relaunch — the \
+                 keys in dev.sops.env stay unset until you do.",
+                failed.reason
+            )),
+            mtm,
+        );
+        label.setFont(Some(&NSFont::boldSystemFontOfSize(12.0)));
+        label.setTextColor(Some(&NSColor::systemRedColor()));
+        left.addSubview(&label);
+        label
+    });
+
     let status = NSTextField::labelWithString(&NSString::from_str(""), mtm);
     left.addSubview(&status);
     *target.ivars().status.borrow_mut() = Some(status.clone());
@@ -2135,7 +2174,7 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 11] = [
+    let buttons: [(&str, Sel); 12] = [
         ("", sel!(onNewChapter:)),                           // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
         ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
@@ -2144,13 +2183,14 @@ pub fn attach_controls(
         ("Notes", sel!(onNotes:)),                           // 5 ┐ Notes (right pane)
         ("Copy Transcript", sel!(onCopyTranscript:)),        // 6 ┘
         ("New Project", sel!(onNewProject:)),                // 7 ┐
-        ("New Version", sel!(onNewVersion:)),                // 8 │ Session
-        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 9 │
-        ("", sel!(onToggleRegions:)),                        // 10 ┘ title set by set_regions
+        ("New Version", sel!(onNewVersion:)),                // 8 │
+        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 9 │ Session
+        ("", sel!(onToggleRegions:)),                        // 10 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),         // 11 ┘
     ];
     const RECORD: Range<usize> = 0..5;
     const NOTES: Range<usize> = 5..7;
-    const SESSION: Range<usize> = 7..11;
+    const SESSION: Range<usize> = 7..12;
     const REGIONS: usize = 10;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
@@ -3025,6 +3065,7 @@ pub fn attach_controls(
     let layout = Layout {
         left: left.clone(),
         right: right.clone(),
+        warning,
         status,
         timer: (timer, timer_detail),
         meter,

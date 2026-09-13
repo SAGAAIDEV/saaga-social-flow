@@ -523,6 +523,7 @@ impl App {
             Action::NewProject => self.new_project(),
             Action::TogglePause => self.toggle_pause(),
             Action::CleanUp => self.run_cleanup(),
+            Action::OpenVideo => self.open_video(),
             Action::Retake => {
                 if self.aside.is_some() {
                     // A retake throws the chapter away; a break is the one
@@ -3000,6 +3001,35 @@ impl App {
         }
     }
 
+    /// Hand the rendered longform to whatever plays video on this machine. The
+    /// horizontal cut first, since it is the one YouTube gets; the vertical
+    /// when a render produced only that.
+    fn open_video(&self) {
+        let render_dir = self.session.render_dir();
+        let Some(path) = ["horizontal/longform.mp4", "vertical/longform.mp4"]
+            .into_iter()
+            .map(|name| render_dir.join(name))
+            .find(|path| path.is_file())
+        else {
+            self.set_render_status(
+                "Nothing rendered yet — press Render video and thumbnails first.",
+            );
+            return;
+        };
+        match std::process::Command::new("open").arg(&path).status() {
+            Ok(status) if status.success() => {
+                self.set_render_status(&format!("Opened {}.", path.display()));
+            }
+            Ok(status) => self.set_render_status(&format!(
+                "`open` exited {status} on {}.",
+                path.display()
+            )),
+            Err(err) => {
+                self.set_render_status(&format!("Could not open {}: {err}", path.display()));
+            }
+        }
+    }
+
     fn update_render_summary(&self) {
         let Some(live) = self.live.as_ref() else {
             return;
@@ -3590,18 +3620,6 @@ impl ApplicationHandler for App {
                 self.install_preview();
                 self.report_clock_drift();
                 self.update_render_summary();
-                // Said where the render's own messages will land, because that
-                // is where the consequence surfaces: a chapter transcript
-                // skipped for a key that never loaded reads as "none have
-                // words" an hour later, long after the launch-time line on
-                // stderr scrolled away.
-                if let Some(failed) = crate::settings::sops::failure() {
-                    self.set_render_status(&format!(
-                        "Team credentials did not load: {}. Fix that, then relaunch — the \
-                         keys in dev.sops.env stay unset until you do.",
-                        failed.reason
-                    ));
-                }
                 self.update_video_view();
                 self.update_substack_view();
                 self.update_blog_view();
