@@ -7,10 +7,11 @@ use anyhow::{bail, Context, Result};
 use super::cut;
 
 pub const CARD_SECONDS: f64 = 3.0;
-/// Where the workspace records the encoder quality its renders were made at.
+/// Where the workspace records the encoder settings its renders were made at.
 ///
-/// Declared as a source of every job, so changing [`super::render::QUALITY`]
-/// re-renders everything exactly once. Without it a quality change passed
+/// Declared as a source of every job, so changing anything in
+/// [`super::render::encoder_stamp`] re-renders everything exactly once. Without
+/// it a quality change passed
 /// every freshness check — the compositions had not changed — and the shorts
 /// on disk stayed at the old setting for as long as the project lived.
 pub const QUALITY_FILE: &str = "render-quality.txt";
@@ -288,7 +289,7 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
     std::fs::write(root.join("index.html"), blank_index(width, height))?;
     // Only when it differs, like every other render input: rewriting it each
     // run would make every composition look stale every run.
-    write_if_changed(&root.join(QUALITY_FILE), super::render::QUALITY)?;
+    write_if_changed(&root.join(QUALITY_FILE), &super::render::encoder_stamp())?;
     Ok(())
 }
 
@@ -775,7 +776,7 @@ mod tests {
         let quality = compose.join("horizontal").join(QUALITY_FILE);
         assert_eq!(
             std::fs::read_to_string(&quality).unwrap(),
-            super::super::render::QUALITY
+            super::super::render::encoder_stamp()
         );
         for job in plan.h_segments.iter().filter_map(Segment::job) {
             assert!(

@@ -220,7 +220,14 @@ unsafe fn ns_key(key: &'static CFString) -> &'static NSString {
 /// 15.6 Mbps, about twice YouTube's recommended upload rate for 1080p30 and
 /// what a master feeding a re-encode should be. Roughly 2.5× the disk of
 /// before: a ten-minute take is about 1.2 GB per orientation.
-const BITS_PER_PIXEL_FRAME: f64 = 0.25;
+///
+/// Then the cut stopped throwing bits away (see `edit::cut::DELIVERABLE_CRF`),
+/// and the master became the softest link: it is the ceiling every later encode
+/// works under, and a hardware encoder's 15 Mbps is where the screen's text is
+/// first quantised. At 0.5 a 1080p master is 31 Mbps — a ten-minute take is
+/// about 2.3 GB per orientation, on an encoder that does not notice the
+/// difference and a disk that has room for it.
+const BITS_PER_PIXEL_FRAME: f64 = 0.5;
 /// Below this even a small capture reads soft; above it a 5K display would be
 /// asking for more than any player needs.
 const BITRATE_FLOOR: i64 = 8_000_000;
@@ -236,11 +243,11 @@ pub fn target_bitrate(width: usize, height: usize) -> i64 {
 mod tests {
     use super::*;
 
-    /// The 1080p master that read soft was 6.2 Mbps. It is now within sight of
-    /// what a re-encode wants fed, and the clamps still hold at both ends.
+    /// The 1080p master that read soft was 6.2 Mbps. It is now well past what
+    /// a re-encode wants fed, and the clamps still hold at both ends.
     #[test]
     fn a_1080p_master_is_encoded_at_a_rate_text_survives() {
-        assert_eq!(target_bitrate(1920, 1080), 15_552_000);
+        assert_eq!(target_bitrate(1920, 1080), 31_104_000);
         assert_eq!(target_bitrate(640, 480), BITRATE_FLOOR);
         assert_eq!(target_bitrate(6016, 3384), BITRATE_CEILING);
         assert!(target_bitrate(1920, 1080) > 2 * 6_200_000);
