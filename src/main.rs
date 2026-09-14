@@ -81,7 +81,6 @@ use crate::cli::{Args, Command};
 
 pub(crate) fn load_dotenv() {
     let next_to_crate = Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
-    let screencast = Path::new(env!("CARGO_MANIFEST_DIR")).join("../screencast/.env");
     let next_to_cwd = std::env::current_dir().ok().map(|d| d.join(".env"));
     // Last, so it never shadows a checkout's own file on a development machine.
     // It is also the only one of these that exists on a machine that installed a
@@ -90,7 +89,7 @@ pub(crate) fn load_dotenv() {
     // launched from. This is the file the Settings tab writes — see
     // `settings::env_path`.
     let per_user = settings::user_env_path().ok();
-    for path in [Some(next_to_crate), Some(screencast), next_to_cwd, per_user]
+    for path in [Some(next_to_crate), next_to_cwd, per_user]
         .into_iter()
         .flatten()
     {

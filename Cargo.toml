@@ -111,6 +111,9 @@ objc2-web-kit = { version = "0.3", features = [
 minijinja = { version = "2.24", features = ["json"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+aws-config = { version = "1.12.0", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.146.1"
+sha2 = "0.11.0"
 
 [profile.release]
 opt-level = 3

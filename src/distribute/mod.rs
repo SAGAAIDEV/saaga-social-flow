@@ -8,13 +8,35 @@ use anyhow::{bail, Context, Result};
 
 use crate::session::Session;
 
-pub mod progress;
 mod s3;
-pub(crate) use s3::screencast_home;
 pub mod schema;
 
-pub use progress::Progress;
 pub use schema::{load, DistributeLinks};
+
+/// One repaint of the upload bar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Progress {
+    pub pct: f64,
+    pub seen_mb: f64,
+    pub total_mb: f64,
+    pub label: String,
+}
+
+impl Progress {
+    fn at(seen: u64, total: u64, label: &str) -> Self {
+        let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+        Self {
+            pct: if total == 0 {
+                100.0
+            } else {
+                (seen as f64 / total as f64 * 100.0).min(100.0)
+            },
+            seen_mb: mb(seen.min(total)),
+            total_mb: mb(total),
+            label: label.to_string(),
+        }
+    }
+}
 
 pub enum DistributeEvent {
     Status(String),

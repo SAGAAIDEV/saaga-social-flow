@@ -112,12 +112,12 @@ The HyperFrames compositions and assets a render draws from are vendored in
 clone built fine and then failed at render time on a path nobody outside one
 account could populate.
 
-`cargo run -- doctor` verifies the library, the renderer, and the S3 uploader.
+`cargo run -- doctor` verifies the library and the renderer.
 
-The uploader is the one piece still outside this repo: `distribute` shells out
-to a Python module in a `screencast` checkout. Everything up to and including
-the render works without it; point `SCREENCAST_HOME` at a checkout if you have
-one.
+The S3 upload is native (`distribute::s3`): `S3_BUCKET` comes from the team
+file, the optional `S3_REGION`, `S3_PREFIX`, `S3_PUBLIC_BASE_URL`,
+`S3_ENDPOINT_URL` and `S3_PUBLIC_ACL` from `.env`, and credentials from your
+AWS profile — `AWS_PROFILE=dev` in `.env` plus `aws sso login --profile dev`.
 
 YouTube is the one credential that stays personal in all cases — the OAuth
 client is shared, but each person signs in as themselves with **Connect** on the

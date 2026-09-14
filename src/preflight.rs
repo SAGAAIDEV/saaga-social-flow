@@ -166,43 +166,9 @@ fn renderer() -> Finding {
     }
 }
 
-/// The uploader the distribute stage shells out to.
-///
-/// Still the one piece living in the `screencast` sibling. Degrades rather than
-/// breaks: everything up to and including the render works without it.
-fn uploader() -> Finding {
-    let home = crate::distribute::screencast_home();
-    if home
-        .join("src/screencast/platforms/upload_cli.py")
-        .is_file()
-        && on_path("uv").is_some()
-    {
-        return Finding::ok("S3 uploader", format!("{}", home.display()));
-    }
-    if on_path("uv").is_none() {
-        return Finding::bad(
-            "S3 uploader",
-            Impact::Degrades,
-            "uv is not installed (brew install uv). Upload to S3 will fail; \
-             everything before it works."
-                .to_string(),
-        );
-    }
-    Finding::bad(
-        "S3 uploader",
-        Impact::Degrades,
-        format!(
-            "nothing at {} — upload to S3 will fail; everything up to the render works \
-             without it. Set SCREENCAST_HOME to a screencast checkout if you have one. \
-             This is the last piece still living outside this repo.",
-            home.display()
-        ),
-    )
-}
-
 /// Everything worth knowing before a render, cheapest first.
 pub fn check() -> Vec<Finding> {
-    vec![library(), renderer(), uploader()]
+    vec![library(), renderer()]
 }
 
 /// The startup line, or nothing at all when the machine is ready.
