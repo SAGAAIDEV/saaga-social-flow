@@ -1468,9 +1468,21 @@ fn fill_parent(view: &NSView) {
     );
 }
 
+/// Hangs from the top and tracks the width: the trailing status line of a
+/// row, a bar, a pane — anything that should take the space a wider window
+/// brings.
 fn pin_top(view: &NSView) {
     view.setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewMinYMargin,
+    );
+}
+
+/// Hangs from the top-left at its own size: a button, a popup, a short label.
+/// Under `pin_top` these grew with the window, each into whatever sat to its
+/// right, and shrank to nothing under the minimum width.
+fn pin_top_left(view: &NSView) {
+    view.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewMinYMargin | NSAutoresizingMaskOptions::ViewMaxXMargin,
     );
 }
 
@@ -2304,7 +2316,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 60.0),
         NSSize::new(600.0, 24.0),
     ));
-    pin_top(&post_title);
+    pin_top_left(&post_title);
     post_view.addSubview(&post_title);
 
     // Provider first, then Model — same reasoning as the Notes tab. The prompt
@@ -2314,7 +2326,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 170.0, bounds.size.height - 86.0),
         NSSize::new(60.0, LABEL_H),
     ));
-    pin_top(&p_model_label);
+    pin_top_left(&p_model_label);
     post_view.addSubview(&p_model_label);
 
     let posts_model_popup = make_model_popup(
@@ -2328,7 +2340,7 @@ pub fn attach_controls(
         &target,
         sel!(onPostsModelChanged:),
     );
-    pin_top(&posts_model_popup);
+    pin_top_left(&posts_model_popup);
     post_view.addSubview(&posts_model_popup);
     *target.ivars().posts_model_popup.borrow_mut() = Some(posts_model_popup.clone());
 
@@ -2337,7 +2349,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 86.0),
         NSSize::new(80.0, LABEL_H),
     ));
-    pin_top(&p_provider_label);
+    pin_top_left(&p_provider_label);
     post_view.addSubview(&p_provider_label);
 
     let posts_provider_popup = make_popup(
@@ -2351,7 +2363,7 @@ pub fn attach_controls(
         &target,
         sel!(onPostsProviderChanged:),
     );
-    pin_top(&posts_provider_popup);
+    pin_top_left(&posts_provider_popup);
     post_view.addSubview(&posts_provider_popup);
     *target.ivars().posts_provider_popup.borrow_mut() = Some(posts_provider_popup.clone());
 
@@ -2365,7 +2377,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 400.0, bounds.size.height - 86.0),
         NSSize::new(420.0, LABEL_H),
     ));
-    pin_top(&p_prompt_label);
+    pin_top_left(&p_prompt_label);
     post_view.addSubview(&p_prompt_label);
 
     // A text area rather than a one-line field: this is standing guidance —
@@ -2426,7 +2438,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 156.0),
         NSSize::new(180.0, 32.0),
     ));
-    pin_top(&gen_posts_btn);
+    pin_top_left(&gen_posts_btn);
     post_view.addSubview(&gen_posts_btn);
     *target.ivars().posts_button.borrow_mut() = Some(gen_posts_btn.clone());
 
@@ -2442,7 +2454,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 190.0, bounds.size.height - 156.0),
         NSSize::new(120.0, 32.0),
     ));
-    pin_top(&save_posts_btn);
+    pin_top_left(&save_posts_btn);
     post_view.addSubview(&save_posts_btn);
 
     // Below the buttons, not beside them: the prompt text area now occupies the
@@ -2490,7 +2502,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 48.0),
         NSSize::new(600.0, 20.0),
     ));
-    pin_top(&dist_title);
+    pin_top_left(&dist_title);
     distribute_view.addSubview(&dist_title);
 
     let upload_btn = unsafe {
@@ -2505,7 +2517,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
         NSSize::new(140.0, 28.0),
     ));
-    pin_top(&upload_btn);
+    pin_top_left(&upload_btn);
     distribute_view.addSubview(&upload_btn);
     *target.ivars().distribute_button.borrow_mut() = Some(upload_btn.clone());
 
@@ -2590,7 +2602,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 48.0),
         NSSize::new(600.0, 20.0),
     ));
-    pin_top(&publish_title);
+    pin_top_left(&publish_title);
     publish_view.addSubview(&publish_title);
 
     let publish_btn = unsafe {
@@ -2605,7 +2617,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
         NSSize::new(160.0, 28.0),
     ));
-    pin_top(&publish_btn);
+    pin_top_left(&publish_btn);
     publish_view.addSubview(&publish_btn);
     *target.ivars().publish_button.borrow_mut() = Some(publish_btn.clone());
 
@@ -2624,7 +2636,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 172.0, bounds.size.height - 84.0),
         NSSize::new(110.0, 28.0),
     ));
-    pin_top(&connect_btn);
+    pin_top_left(&connect_btn);
     publish_view.addSubview(&connect_btn);
 
     // Beside Upload, not buried in the summary text below it, because it is the
@@ -2638,7 +2650,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 294.0, bounds.size.height - 82.0),
         NSSize::new(62.0, 24.0),
     ));
-    pin_top(&privacy_label);
+    pin_top_left(&privacy_label);
     publish_view.addSubview(&privacy_label);
 
     let privacy_popup = make_popup(
@@ -2654,7 +2666,7 @@ pub fn attach_controls(
         &target,
         sel!(onYoutubePrivacyChanged:),
     );
-    pin_top(&privacy_popup);
+    pin_top_left(&privacy_popup);
     publish_view.addSubview(&privacy_popup);
     *target.ivars().privacy_popup.borrow_mut() = Some(privacy_popup.clone());
 
@@ -2737,7 +2749,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 48.0),
         NSSize::new(600.0, 20.0),
     ));
-    pin_top(&schedule_title);
+    pin_top_left(&schedule_title);
     schedule_view.addSubview(&schedule_title);
 
     // Two steps, deliberately separate: Build Plan only reads, Queue only sends
@@ -2754,7 +2766,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
         NSSize::new(120.0, 28.0),
     ));
-    pin_top(&plan_btn);
+    pin_top_left(&plan_btn);
     schedule_view.addSubview(&plan_btn);
     *target.ivars().plan_button.borrow_mut() = Some(plan_btn.clone());
 
@@ -2770,7 +2782,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 128.0, bounds.size.height - 84.0),
         NSSize::new(110.0, 28.0),
     ));
-    pin_top(&approve_all_btn);
+    pin_top_left(&approve_all_btn);
     schedule_view.addSubview(&approve_all_btn);
     *target.ivars().approve_button.borrow_mut() = Some(approve_all_btn.clone());
 
@@ -2786,7 +2798,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 246.0, bounds.size.height - 84.0),
         NSSize::new(150.0, 28.0),
     ));
-    pin_top(&queue_btn);
+    pin_top_left(&queue_btn);
     schedule_view.addSubview(&queue_btn);
     *target.ivars().queue_button.borrow_mut() = Some(queue_btn.clone());
 
@@ -2802,7 +2814,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 404.0, bounds.size.height - 84.0),
         NSSize::new(130.0, 28.0),
     ));
-    pin_top(&clear_btn);
+    pin_top_left(&clear_btn);
     schedule_view.addSubview(&clear_btn);
 
     let sched_status = NSTextField::labelWithString(
@@ -2888,7 +2900,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 48.0),
         NSSize::new(600.0, 20.0),
     ));
-    pin_top(&analytics_title);
+    pin_top_left(&analytics_title);
     analytics_view.addSubview(&analytics_title);
 
     let pull_btn = unsafe {
@@ -2903,7 +2915,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
         NSSize::new(140.0, 28.0),
     ));
-    pin_top(&pull_btn);
+    pin_top_left(&pull_btn);
     analytics_view.addSubview(&pull_btn);
 
     let collect_btn = unsafe {
@@ -2918,7 +2930,7 @@ pub fn attach_controls(
         NSPoint::new(PAD * 2.0 + 148.0, bounds.size.height - 84.0),
         NSSize::new(140.0, 28.0),
     ));
-    pin_top(&collect_btn);
+    pin_top_left(&collect_btn);
     analytics_view.addSubview(&collect_btn);
 
     let analytics_status = NSTextField::labelWithString(

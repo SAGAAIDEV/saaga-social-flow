@@ -3020,10 +3020,9 @@ impl App {
             Ok(status) if status.success() => {
                 self.set_render_status(&format!("Opened {}.", path.display()));
             }
-            Ok(status) => self.set_render_status(&format!(
-                "`open` exited {status} on {}.",
-                path.display()
-            )),
+            Ok(status) => {
+                self.set_render_status(&format!("`open` exited {status} on {}.", path.display()))
+            }
             Err(err) => {
                 self.set_render_status(&format!("Could not open {}: {err}", path.display()));
             }
