@@ -90,6 +90,7 @@ fn library() -> Finding {
         "assets/badge.svg",
         "assets/silence.mp3",
         "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Medium.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Bold.woff2",
     ];

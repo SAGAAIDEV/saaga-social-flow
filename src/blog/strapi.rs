@@ -367,16 +367,8 @@ impl Strapi {
     /// around it, so a long cut costs twice its own size in RAM before a single
     /// byte is sent. A figure is a screenshot; this can be a talk.
     pub fn upload_video(&self, path: &Path) -> Result<Uploaded> {
-        let size = std::fs::metadata(path)
-            .with_context(|| format!("reading {}", path.display()))?
-            .len();
-        if size > VIDEO_UPLOAD_MAX {
-            bail!(
-                "{} is {} MB, past the {} MB this uploads — host it and set the URL by hand",
-                path.display(),
-                size / 1_048_576,
-                VIDEO_UPLOAD_MAX / 1_048_576
-            );
+        if let Some(why) = video_upload_block(path) {
+            bail!("{why}");
         }
         self.upload(path, None)
     }
@@ -430,6 +422,34 @@ impl Strapi {
         }
     }
 
+    /// Whether a video post with this slug already exists on this CMS, draft or
+    /// published.
+    ///
+    /// `slug` is a `uid`, so a second post under a taken one is either refused
+    /// or quietly suffixed, and by then the media is already up. Asked with
+    /// the draft status because every document has a draft version, published
+    /// ones included — so one read sees them all.
+    pub fn slug_taken(&self, slug: &str) -> Result<bool> {
+        let url = format!("{}{VIDEO_POSTS_PATH}", self.base);
+        let response = ureq::get(&url)
+            .set("Authorization", &self.bearer())
+            .query("filters[slug][$eq]", slug)
+            .query("fields[0]", "slug")
+            .query("pagination[pageSize]", "1")
+            .query(STATUS, status_for(false))
+            .timeout(LOOKUP_TIMEOUT)
+            .call();
+        let body: serde_json::Value = match response {
+            Ok(response) => response.into_json().context("parsing the slug lookup")?,
+            Err(ureq::Error::Status(code, response)) => {
+                let detail = response.into_string().unwrap_or_default();
+                bail!("strapi refused the slug lookup ({code}): {}", detail.trim());
+            }
+            Err(err) => return Err(err).context("looking up the slug on strapi"),
+        };
+        Ok(body["data"].as_array().is_some_and(|rows| !rows.is_empty()))
+    }
+
     // -------------------------------------------------------------- create
 
     /// Creates the entry, verifies its relations, and publishes it.
@@ -461,6 +481,7 @@ impl Strapi {
 
         let mut warnings = Vec::new();
         warnings.extend(compat::warning(&dropped));
+        warnings.extend(slug_warning(&post.article.slug, &slug));
         for (field, sent) in post.relations() {
             if entry[field].is_null() || entry.get(field).is_none() {
                 eprintln!(
@@ -535,11 +556,45 @@ impl Strapi {
     }
 }
 
+/// Why this video file cannot go up through [`Strapi::upload_video`], or `None`
+/// when it can. Free — a `stat`, no network — so a caller can decide before it
+/// has uploaded anything else whether the file is going at all.
+///
+/// A file whose size cannot be read is blocked too, with the reason: the guard
+/// exists to stop a gigabyte being read into memory, and an unreadable file is
+/// not one to guess about.
+pub fn video_upload_block(path: &Path) -> Option<String> {
+    match std::fs::metadata(path) {
+        Ok(meta) => video_size_block(meta.len()).map(|why| format!("{} {why}", path.display())),
+        Err(err) => Some(format!("{} could not be read ({err})", path.display())),
+    }
+}
+
+/// The pure half of [`video_upload_block`], for the size alone. Reads
+/// mid-sentence after the file's name.
+pub fn video_size_block(size: u64) -> Option<String> {
+    (size > VIDEO_UPLOAD_MAX).then(|| {
+        format!(
+            "is {} MB, past the {} MB one request to the CMS carries",
+            size / 1_048_576,
+            VIDEO_UPLOAD_MAX / 1_048_576
+        )
+    })
+}
+
 fn env(key: &str) -> Option<String> {
     std::env::var(key)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+/// A slug the CMS changed on the way in is worth a line on the row: the slug
+/// is chosen on the Blog tab, and the page went up somewhere else.
+fn slug_warning(sent: &str, got: &str) -> Option<String> {
+    (sent != got).then(|| {
+        format!("the CMS changed the slug from {sent:?} to {got:?} — the one sent was taken")
+    })
 }
 
 fn admin_url(base: &str, document_id: &str) -> String {
@@ -855,5 +910,52 @@ mod lookup_tests {
         assert_eq!(name_in(&json!({ "data": [] })), None);
         assert_eq!(name_in(&json!({ "data": null })), None);
         assert_eq!(name_in(&json!({ "data": [{ "id": 3 }] })), None);
+    }
+}
+
+#[cfg(test)]
+mod video_upload_tests {
+    use super::*;
+
+    /// The cap is strictly over, reads as megabytes beside the file's name, and
+    /// a file that is not there is blocked with the reason rather than sized
+    /// as zero and waved through.
+    #[test]
+    fn a_video_past_the_cap_is_blocked_with_both_sizes() {
+        assert_eq!(video_size_block(0), None);
+        assert_eq!(video_size_block(VIDEO_UPLOAD_MAX), None);
+        let why = video_size_block(1260 * 1_048_576).expect("over the cap");
+        assert!(why.contains("1260 MB"), "{why}");
+        assert!(why.contains("512 MB"), "{why}");
+        let missing = video_upload_block(Path::new("/nonexistent/longform.mp4")).expect("blocked");
+        assert!(missing.contains("could not be read"), "{missing}");
+        assert!(missing.contains("longform.mp4"), "{missing}");
+    }
+}
+
+#[cfg(test)]
+mod slug_tests {
+    use super::*;
+
+    /// The slug that comes back is the one the page is at. When it is not the
+    /// one sent, the row says so; when it is, there is nothing to say.
+    #[test]
+    fn a_slug_the_cms_changed_is_a_warning_and_an_unchanged_one_is_not() {
+        assert_eq!(slug_warning("go-to-market", "go-to-market"), None);
+        let why = slug_warning("go-to-market", "go-to-market-2").expect("changed");
+        assert!(why.contains("\"go-to-market\""), "{why}");
+        assert!(why.contains("\"go-to-market-2\""), "{why}");
+        assert!(why.contains("taken"), "{why}");
+    }
+
+    /// The lookup is a read against the CMS this client posts to; a client
+    /// pointed nowhere fails rather than answering "free".
+    #[test]
+    fn a_slug_lookup_that_cannot_reach_the_cms_is_an_error_not_a_free_slug() {
+        let err = Strapi::for_test().slug_taken("anything").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("looking up the slug"),
+            "{err:#}"
+        );
     }
 }

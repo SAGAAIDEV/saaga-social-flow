@@ -98,7 +98,9 @@ pub fn build_plan(
                 Ok(_) if post.platform == "youtube" => {
                     Some("uploaded straight to YouTube — see the YouTube tab".to_string())
                 }
-                Ok(_) if url.is_empty() => Some("no distributed url — run Distribute".to_string()),
+                Ok(_) if url.is_empty() => {
+                    Some("not on S3 yet — press Upload to S3 on the Buffer tab".to_string())
+                }
                 Ok(channel) => channel_block(channel)
                     .or_else(|| already.map(|row| format!("already queued {}", row.queued_at))),
             };
@@ -489,7 +491,7 @@ mod tests {
         assert_eq!(item.url, "");
         assert_eq!(
             item.skip.as_deref(),
-            Some("no distributed url — run Distribute")
+            Some("not on S3 yet — press Upload to S3 on the Buffer tab")
         );
         assert_eq!(plan.queueable().count(), 0);
     }

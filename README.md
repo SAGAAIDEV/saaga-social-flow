@@ -169,7 +169,10 @@ See `.env.example` for the complete reference.
    - Microphone: Select audio device (auto-fallback on silence)
 4. Press Start to begin recording
 5. Use chapter markers (⌃⇧S) to split takes
-6. Export when done
+6. To redo one chapter after the rest are recorded, stop, pick it from the
+   chapter menu under Start Recording, and press **Retake Chapter NN**. The
+   earlier take moves to the take folder's `.discarded/`; nothing is deleted.
+7. Export when done
 
 ### Thumbnail Generation
 

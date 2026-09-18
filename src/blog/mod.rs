@@ -492,16 +492,16 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
         article,
     };
     // The one thing the dry run knows and cannot show. Said out loud rather
-    // than left to be inferred from a field that is missing for two different
-    // reasons — no cut, or a cut not yet uploaded.
-    if post.vertical.is_none()
-        && cfg.render.vertical
-        && session.render_dir().join("vertical/longform.mp4").is_file()
-    {
-        eprintln!(
-            "stream-recorder: a vertical cut is rendered but not on YouTube; the publish will \
-             upload it into the CMS as videoVertical (this body cannot, having uploaded nothing)"
-        );
+    // than left to be inferred from a field that is missing for three different
+    // reasons — no cut, a cut the publish will upload, or a cut it will not.
+    match vertical::plan(session, cfg.render) {
+        vertical::Plan::Upload(path) => eprintln!(
+            "stream-recorder: the publish will upload {} into the CMS as videoVertical (this \
+             body cannot, having uploaded nothing)",
+            path.display()
+        ),
+        vertical::Plan::Skip(Some(why)) => eprintln!("stream-recorder: {why}"),
+        _ => {}
     }
     let body = post.body();
     // Said rather than refused: the JSON is the thing being asked for here, and
@@ -693,6 +693,28 @@ fn run(
         }
     };
 
+    // The slug is chosen on the Blog tab now, so a taken one is checked for
+    // here, before any upload, like the byline is. Found out later it is
+    // either a 400 with the media already in the library, or a page quietly
+    // minted at `slug-2` — a URL nobody chose. A lookup that fails is not a
+    // reason to stop: the create still answers, and the row records what the
+    // CMS did with the slug.
+    status(format!(
+        "Checking /blog/{} is free on the CMS…",
+        article.slug
+    ));
+    match client.slug_taken(&article.slug) {
+        Ok(true) => bail!(
+            "/blog/{} is already on {} — set another slug on the Blog tab",
+            article.slug,
+            client.base()
+        ),
+        Ok(false) => {}
+        Err(err) => eprintln!(
+            "stream-recorder: could not check the slug on the CMS ({err:#}) — going ahead"
+        ),
+    }
+
     // Refused before any upload, and refused rather than dropped for the reason
     // `figures::upload` gives: the article was read and approved *with* that
     // component in it, and a page published silently short is a page nobody
@@ -715,6 +737,14 @@ fn run(
     // config; the media ids and figure URLs still missing are the only fields
     // not measured. Three publishes each put three images into the media
     // library and then failed on a pull quote — see [`limits`].
+    // The portrait cut is decided here, off the network, rather than found out
+    // at its upload: a ten-minute vertical render is over a gigabyte, and the
+    // publish used to die on it *after* the thumbnail and figures were in the
+    // media library. Whatever the answer, the longform post goes up.
+    let vertical = vertical::plan(session, cfg.render);
+    if let Some(why) = vertical.reason() {
+        status(format!("{}.", capitalize(why)));
+    }
     let mut new_post = payload::NewVideoPost {
         date: payload::today(),
         video_url: upload.url.clone(),
@@ -722,7 +752,7 @@ fn run(
         duration: duration.round().max(1.0) as u32,
         thumbnail_id: None,
         thumbnail_vertical_id: None,
-        vertical: vertical::from_youtube(session),
+        vertical: vertical.embedded(),
         og_image_id: None,
         cta: cta(&cfg, None),
         embeds,
@@ -776,7 +806,8 @@ fn run(
     status("Uploading the thumbnail…".into());
     let title = new_post.article.title.clone();
     new_post.thumbnail_id = Some(client.upload_media(&thumbnail, Some(&title))?);
-    new_post.vertical = vertical::upload(&client, session, cfg.render, status)?;
+    let vertical = vertical::upload(&client, vertical, status);
+    new_post.vertical = vertical.cut;
     new_post.og_image_id = Some(og::upload(&client, &og_path, &title, status)?);
     new_post.cta = cta(&cfg, cta_image(&client, &cfg, status));
     new_post.thumbnail_vertical_id = Some(client.upload_media(&portrait, Some(&title))?);
@@ -799,6 +830,12 @@ fn run(
         true,
     )?;
 
+    // The row carries both kinds of shortfall: what the CMS did not keep, and
+    // the portrait player that was meant to go up and did not.
+    let warnings: Vec<String> = [vertical.note, created.warning]
+        .into_iter()
+        .flatten()
+        .collect();
     let post = Post {
         document_id: created.document_id,
         slug: created.slug,
@@ -807,7 +844,7 @@ fn run(
         video_id: upload.video_id.clone(),
         published: created.published,
         created_at: crate::schedule::ledger::now_rfc3339(),
-        warning: created.warning,
+        warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
     };
     append(session, &post)?;
     Ok(post)
@@ -838,13 +875,17 @@ fn confirm(
     }
 }
 
-/// Writes the fields edited on the Blog tab's "Needs fixing" card into the
-/// draft on disk.
+/// Writes the fields edited on the Blog tab — the "Needs fixing" card, and
+/// the slug — into the draft on disk.
 ///
 /// Keys are [`limits::Target::key`]s; anything else in the form is ignored
 /// rather than written somewhere. A field posted back unchanged is not a
-/// change. The message says what was saved and what is still over, because
-/// the card is about to be repainted from the same file and should agree.
+/// change, and "unchanged" is judged on what would be written — a slug typed
+/// with capitals and spaces that folds to the slug already there is not an
+/// edit. A slug that folds to nothing is refused rather than saved as a blank
+/// the CMS would then reject. The message says what was saved and what is
+/// still over, because the pane is about to be repainted from the same file
+/// and should agree.
 pub fn save_fields(
     session: &Session,
     fields: &std::collections::BTreeMap<String, String>,
@@ -852,26 +893,38 @@ pub fn save_fields(
     let dir = session.blog_dir();
     let mut article = schema::load(&dir).context("no draft to edit — press Write Article first")?;
     let mut written = 0;
+    let mut slug = None;
     for (key, text) in fields {
         let Some(target) = limits::Target::parse(key) else {
             continue;
         };
-        if limits::value_of(&article, target) == Some(text.trim()) {
+        let value = limits::normalized(target, text);
+        if target == limits::Target::Slug && value.is_empty() {
+            bail!("{text:?} does not make a slug — use letters, digits and hyphens");
+        }
+        if limits::value_of(&article, target) == Some(value.as_str()) {
             continue;
         }
         if limits::set(&mut article, target, text) {
             written += 1;
+            if target == limits::Target::Slug {
+                slug = Some(article.slug.clone());
+            }
         }
     }
     if written > 0 {
         schema::save(&dir, &article)?;
     }
     let left = limits::article(&article);
+    let saved = match slug {
+        Some(slug) => format!("Slug set to /blog/{slug}."),
+        None => format!("Saved {written} field(s)."),
+    };
     Ok(match (written, left.is_empty()) {
         (0, true) => "Nothing changed; the draft is within the CMS's limits.".to_string(),
         (0, false) => format!("Nothing changed. Still over: {}", limits::listed(&left)),
-        (n, true) => format!("Saved {n} field(s). The draft is within the CMS's limits."),
-        (n, false) => format!("Saved {n} field(s). Still over: {}", limits::listed(&left)),
+        (_, true) => format!("{saved} The draft is within the CMS's limits."),
+        (_, false) => format!("{saved} Still over: {}", limits::listed(&left)),
     })
 }
 
@@ -976,6 +1029,15 @@ fn cta_image(
         .upload_media(path, Some(&cfg.blog_cta.label))
         .inspect_err(|err| eprintln!("stream-recorder: CTA image not uploaded: {err:#}"))
         .ok()
+}
+
+/// First letter up, for a reason written to read mid-sentence and shown alone.
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// The most recent post made from this exact video, if there is one.
@@ -1507,6 +1569,47 @@ mod save_fields_tests {
             message.contains("Still over: blocks[1] (quote).text is 300"),
             "{message}"
         );
+        let _ = std::fs::remove_dir_all(&session.root);
+    }
+
+    /// The slug is typed on the Blog tab, and whatever is typed is folded to
+    /// URL shape on the way in. The same slug spelled differently is not an
+    /// edit, and one that folds to nothing is refused rather than saved blank.
+    #[test]
+    fn a_typed_slug_is_folded_to_url_shape_and_named_in_the_message() {
+        use std::collections::BTreeMap;
+        let session = session("slug");
+        let dir = session.blog_dir();
+        schema::save(
+            &dir,
+            &Article {
+                title: "Title".into(),
+                slug: "title".into(),
+                description: "d".into(),
+                blocks: vec![Block::Text {
+                    html: "<p>a</p>".into(),
+                }],
+                ..Article::default()
+            },
+        )
+        .unwrap();
+        let typed = |text: &str| BTreeMap::from([("slug".to_string(), text.to_string())]);
+        let message = save_fields(&session, &typed("  Go To Market: Update #2  ")).unwrap();
+        assert!(
+            message.starts_with("Slug set to /blog/go-to-market-update-2."),
+            "{message}"
+        );
+        assert_eq!(schema::load(&dir).unwrap().slug, "go-to-market-update-2");
+
+        let message = save_fields(&session, &typed("Go-To-Market Update 2")).unwrap();
+        assert!(message.starts_with("Nothing changed"), "{message}");
+
+        let err = save_fields(&session, &typed("!!!")).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("does not make a slug"),
+            "{err:#}"
+        );
+        assert_eq!(schema::load(&dir).unwrap().slug, "go-to-market-update-2");
         let _ = std::fs::remove_dir_all(&session.root);
     }
 }

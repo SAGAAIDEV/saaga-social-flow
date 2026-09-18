@@ -12,6 +12,11 @@
     <template>
       <div data-hf-id="hf-f7ra" id="root" data-composition-id="screen-camera-rectangle" data-start="0" data-width="1920" data-height="1080" data-duration="10">
         <style>
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Medium.woff2') format('woff2');
+            font-weight: 500; font-style: normal; font-display: block;
+          }
           /* Brand font. Vendored as woff2 under assets/fonts so renders are
              deterministic and do not depend on a system-installed copy. */
           @font-face {
@@ -40,17 +45,29 @@
              video fills the card interior instead. The peach + ring pattern stay behind it
              as a backdrop, so an alpha/keyed source still reads as the original design. */
           #root {
+            /* SAAGA video theme — see components/design.md.
+               Kept inside the template so compiler scoping preserves it. */
+            --saaga-ink: #1d1d1d;
+            --saaga-paper: #f6f6f6;
+            --saaga-muted: #626262;
+            --saaga-orange: #eb5201;
+            --saaga-peach: #ffeee5;
+            --saaga-line: #d1d1cc;
+            --saaga-orange-on-dark: #ff9561;
+            --saaga-radius: 24px;
+            color: var(--saaga-ink);
+            font-weight: 500;
             position: relative;
             width: 1920px;
             height: 1080px;
             overflow: hidden;
-            background: #ffffff;
-            font-family: 'Booton', Inter, system-ui, sans-serif;
+            background: var(--saaga-paper);
+            font-family: 'Booton', system-ui, sans-serif;
           }
           .rect-demo-bg {
             position: absolute;
             inset: 0;
-            background: #ffccb2;
+            background: var(--saaga-paper);
             z-index: 0;
           }
           .rect-demo-screen {
@@ -69,9 +86,10 @@
             width: 466.492px;
             height: 285.419px;
             box-sizing: border-box;
-            background: #fdeee6;
-            border: 4px solid #eb5201;
-            border-radius: 40px;
+            background: var(--saaga-peach);
+            border: 2px solid var(--saaga-line);
+            border-radius: var(--saaga-radius);
+            box-shadow: 0 16px 44px rgba(29, 29, 29, 0.2);
             overflow: hidden;
             z-index: 2;
           }
@@ -82,36 +100,41 @@
             width: 581.813px;
             height: 290.907px;
           }
-          /* Card interior above the name bar: 4px border inset, down to the bar top. */
+          /* Camera and name strip share the same inner width; the 60px strip is reserved. */
           .rect-demo-camera {
             position: absolute;
             left: 0;
             top: 0;
-            width: 458.492px;
-            height: 239.42px;
+            width: 100%;
+            height: calc(100% - 60px);
             object-fit: cover;
             object-position: var(--cameraPosition, center top);
           }
           .rect-demo-name {
             position: absolute;
             left: 0;
-            top: 235.42px;
-            width: 458.492px;
-            height: 42px;
+            bottom: 0;
+            width: 100%;
+            height: 60px;
             box-sizing: border-box;
-            background: #ffffff;
+            background: var(--saaga-paper);
+            border-top: 3px solid var(--saaga-orange);
             display: flex;
             align-items: center;
-            justify-content: center;
-            padding: 0 30px;
-            border-radius: 0 0 36px 36px;
+            justify-content: flex-start;
+            padding: 0 24px;
           }
           .rect-demo-name span {
-            font-weight: 600;
-            font-size: 16px;
-            line-height: 35.837px;
-            color: #eb5201;
+            display: block;
+            width: 100%;
+            font-weight: 500;
+            font-size: 28px;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+            color: var(--saaga-ink);
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
         </style>
 
@@ -120,7 +143,7 @@
         <video data-hf-id="hf-ftqz" id="rect-demo-screen-video" class="rect-demo-screen clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="screenSrc" src="assets/placeholder-screen.mp4" muted playsinline></video>
 
         <div data-hf-id="hf-2tue" id="rect-demo-card" class="rect-demo-card">
-          <img data-hf-id="hf-ybre" id="rect-demo-card-pattern" class="rect-demo-card-pattern" src="assets/pattern-card-rings.svg" alt="">
+          <img data-layout-allow-overflow="true" data-hf-id="hf-ybre" id="rect-demo-card-pattern" class="rect-demo-card-pattern" src="assets/pattern-card-rings.svg" alt="">
           <video data-hf-id="hf-tdmq" id="rect-demo-camera-video" class="rect-demo-camera clip" data-start="0" data-duration="10" data-track-index="2" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
           <div data-hf-id="hf-dyhu" id="rect-demo-name" class="rect-demo-name">
             <span data-hf-id="hf-6b1e" id="rect-demo-name-text" data-var-text="speakerName">Andrew Melnychuk</span>

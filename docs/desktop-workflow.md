@@ -24,7 +24,13 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       recorded at 0.25 bits per pixel per frame — 15.6 Mbps for a 1080p master,
       about 1.2 GB per orientation for a ten-minute take — and HyperFrames
       renders the cards and the vertical chapters at its `high` quality; both
-      were lower, and a soft master is soft at every stage after it.
+      were lower, and a soft master is soft at every stage after it. Those
+      renders run a few at a time — as many as the memory the machine can
+      spare when the render starts will hold, at roughly 6 GB each and never
+      more than the cores allow — and the pool shrinks if the room runs out
+      part way. A render refuses to start, saying what to close, when even one
+      would not fit; `SCREENCAST_RENDER_WORKERS=N` pins the count for an
+      operator who knows better.
    3. Writes the title and description from the completed transcript, using the
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is
@@ -37,11 +43,27 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       and says so; publishing it again as a new video is the YouTube tab's
       button, so tightening a cut never mints a duplicate on the channel. When
       the project has a vertical cut it follows as a Short, and the status line
-      and the Video pane's **On YouTube** card list both links — the longform's
+      and the Video pane's **Published** card list both links — the longform's
       and the Short's — rather than the last one to land. The YouTube tab lists the pair with a copy button on each and one for both.
+   6. Uploads the renders — longform, chapter shorts, their transcripts and the
+      artwork — to the team's public S3 bucket at the same time, which is what
+      the Buffer plan posts from. Every render, not only the first: the keys
+      carry a content hash, so a re-render lands at fresh URLs and an unchanged
+      file is found already there and not sent again. It narrates on the
+      Socials tab beside the plan, and the **Published** card counts the files.
+      It needs `S3_BUCKET` and a live `aws sso login`; when either is missing
+      the status line says so and the rest of the chain is unaffected.
+      **Re-render missing** runs both uploads again by hand.
 
    The chain stops at the first failure and the status line under the button
-   says which step. Everything the press produces lands in the **Video details**
+   says which step. A render that loses some of its clips — "5 of 21 render(s)
+   failed" — names each one and the reason HyperFrames gave, and leaves that
+   reason in a `.log` beside where the clip would have landed under `render/`.
+   **Re-render missing**, directly under the Render button, is the way back:
+   the same cut and render without retaking the photo. Every stage is
+   incremental, so it draws only the clips that are missing or stale, joins the
+   longforms, and then carries on with the title, artwork and upload. Pressing
+   Render again would do the same but retake the photo first. Everything the press produces lands in the **Video details**
    pane on the right, top to bottom in the order it is produced: the notes that
    steer the copy and the copy itself, the artwork set with the photo it was
    drawn from, and the rendered clips to scrub before anything else goes out.
@@ -62,6 +84,17 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    up at once, down at 24 dB/s — green where speech should peak, yellow in the
    last of the headroom, red at the top, and all red once anything has clipped.
    It listens whenever the mic is open, recording or not.
+   A chapter menu sits directly under **Start Recording**. Idle, it offers the
+   next fresh chapter and every chapter already recorded; picking a recorded
+   one turns the button into **Retake Chapter NN**, and pressing it moves that
+   chapter's whole earlier take — camera, screen, composed outputs, audio,
+   transcript, sidecars and any hand edit — into the take folder's
+   `.discarded/` before recording the same number afresh, so a single chapter
+   can be redone after the rest are in the can. Nothing moves until the press.
+   **Stop** closes the retake and the menu returns to the next fresh chapter;
+   **New Chapter** out of a retake opens the first unrecorded number rather
+   than the chapter after it, so it never lands on one already recorded. The
+   **Retake ⌃⌥T** button is unchanged: it redoes the chapter that is rolling.
 2. **YouTube** — edit and save the title and description, choose visibility,
    connect the channel, and upload (or re-upload) the longform by hand.
 3. **Blog (Strapi)** — write and review the companion article, then publish it live at
@@ -85,9 +118,14 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    off until the card is empty. The long description is held to one sentence of
    200 characters the same way: not a CMS limit, but it prints under the heading.
    The existing CMS preview and publishing controls remain here.
-4. **Socials** — generate and edit platform copy; upload video media to create public
-   asset URLs; build the Buffer plan, review/approve it, and queue it. Analytics and
-   Reflect are secondary tabs here.
+4. **Socials** — generate and edit platform copy; build the Buffer plan from the
+   public URLs the render's S3 upload left behind, review/approve it, and queue it.
+   The Buffer pane's S3 line checks every rendered video against that record —
+   on S3 as it is now, rendered again since the upload, or never uploaded — and
+   Build Plan is off until all of them are up. **Upload to S3** beside it runs
+   the upload by hand for the misses; an object already at its key is not sent
+   again, so a needless press is cheap. Analytics and Reflect are secondary tabs
+   here.
 
 Edit and Substack are absent from the navigation. Existing recording data, saved
 edits, and backend modules are retained. The order guides the work without requiring
@@ -162,7 +200,7 @@ require a current set and name the reason when it is not; image upload failures 
 surfaced.
 YouTube can retry/update the thumbnail on an existing upload without duplicating the video.
 
-Upload media exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
+The render's S3 upload exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
 A Buffer plan uses the OG asset as an image post for longform LinkedIn/Facebook copy;
 vertical clips remain video posts. Changing the exported image changes the approval
 identity. Upload jobs freeze their images outside the render cache, so regenerating

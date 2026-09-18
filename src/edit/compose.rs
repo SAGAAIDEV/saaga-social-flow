@@ -191,6 +191,7 @@ pub fn prepare_targets(
             "assets/badge.svg",
             "assets/silence.mp3",
             "assets/fonts/Booton-Regular.woff2",
+            "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
         ],
@@ -200,7 +201,9 @@ pub fn prepare_targets(
         &vertical,
         &[
             "compositions/talking-head-vertical.html",
+            "assets/badge.svg",
             "assets/fonts/Booton-Regular.woff2",
+            "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
         ],
@@ -219,15 +222,9 @@ pub fn prepare_targets(
             // there was taken out — three seconds of plate before a word is
             // said, on every video.
             //
-            // Every card carries the chapter's own number. The first card a
-            // viewer meets therefore reads "Chapter 02", and that is right:
-            // chapter one opened the video, the way a book's first chapter
-            // opens under its own number. The cards used to count what had been
-            // shown instead — "01" in front of chapter two — and that number
-            // agreed with nothing else: the vertical cut of the same chapter
-            // said "Chapter 02", the notes and the blog said chapter 2, and a
-            // chapter with no title fell back to its own number, so one card
-            // read "02 / Chapter 3".
+            // Cards display the source chapter number minus one: chapter one
+            // has no card, so the first inter-chapter card is labeled "01".
+            // Source paths and chapter IDs still use the original number.
             if !h_segments.is_empty() {
                 h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
             }
@@ -355,20 +352,16 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The card in front of chapter `n`, numbered `n` — the same number the
-/// vertical cut, the notes and the blog give the chapter. See [`prepare`] for
-/// why the first one a viewer meets is "02".
-///
-/// `title` may be empty: a chapter nobody has titled shows "Chapter 03" from
-/// the label and number alone, and the topic slot collapses. A topic reading
-/// "Chapter 3" under a number reading "03" said the same thing twice.
+/// The card before source chapter `n`, displaying `n - 1`.
+/// Only the display number is offset; source IDs, titles and media are unchanged.
+/// An empty title leaves the label/number alone, with no invented topic.
 fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
         &format!("seg-{n:02}-card"),
         serde_json::json!({
             "chapterLabel": "Chapter",
-            "chapterNumber": format!("{n:02}"),
+            "chapterNumber": format!("{:02}", n.saturating_sub(1)),
             "chapterTopic": title,
             "durationSeconds": CARD_SECONDS,
             // Revealed on a beat, like it always was: a chapter card appears
@@ -453,6 +446,7 @@ fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Resul
             baked,
             workspace.join(&camera),
             workspace.join(&audio),
+            workspace.join("assets/badge.svg"),
             workspace.join(QUALITY_FILE),
         ],
     })
@@ -710,14 +704,12 @@ mod tests {
             "nothing in front of chapter one, and a card in front of every chapter after it"
         );
 
-        // The card in front of chapter two reads "02": the chapter's own number,
-        // which is what the vertical cut, the notes and the blog call it. It
-        // used to count cards shown instead, and a chapter with no title then
-        // read "02 / Chapter 3".
+        // The first card displays "01" while retaining source chapter two's
+        // title, media order and generated file name.
         let card =
             std::fs::read_to_string(compose.join("horizontal/compositions/seg-02-card.html"))
                 .unwrap();
-        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
+        assert!(card.contains(r#""chapterNumber":"01""#), "{card}");
         assert!(card.contains("Second"));
         // A chapter card still animates in — it arrives mid-video.
         assert!(card.contains(r#""holdFromStart":0"#), "{card}");
@@ -812,8 +804,29 @@ mod tests {
         let card =
             std::fs::read_to_string(compose.join("horizontal/compositions/seg-02-card.html"))
                 .unwrap();
-        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
+        assert!(card.contains(r#""chapterNumber":"01""#), "{card}");
         assert!(card.contains(r#""chapterTopic":"""#), "{card}");
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    #[test]
+    fn card_numbers_subtract_one_without_renaming_the_source_chapter() {
+        let (library, edit, compose) = fixture("card-number-offset");
+        prepare(&edit, &compose, &library, &[]).unwrap();
+        let workspace = compose.join("horizontal");
+        for (source, display) in [(0, "00"), (1, "00"), (2, "01"), (9, "08")] {
+            let job = write_card(&workspace, source, "Keep this title").unwrap();
+            assert_eq!(job.id, format!("seg-{source:02}-card"));
+            let card = std::fs::read_to_string(workspace.join(&job.composition)).unwrap();
+            assert!(
+                card.contains(&format!(r#""chapterNumber":"{display}""#)),
+                "{card}"
+            );
+            assert!(
+                card.contains(r#""chapterTopic":"Keep this title""#),
+                "{card}"
+            );
+        }
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
@@ -883,6 +896,7 @@ mod library_tests {
             "assets/badge.svg",
             "assets/silence.mp3",
             "assets/fonts/Booton-Regular.woff2",
+            "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
         ] {
@@ -980,7 +994,10 @@ mod library_tests {
             "horizontal/assets/pattern-rings.svg",
             "horizontal/assets/silence.mp3",
             "horizontal/assets/fonts/Booton-Regular.woff2",
+            "horizontal/assets/fonts/Booton-Medium.woff2",
             "vertical/compositions/talking-head-vertical.html",
+            "vertical/assets/badge.svg",
+            "vertical/assets/fonts/Booton-Medium.woff2",
             "vertical/assets/fonts/Booton-Bold.woff2",
         ] {
             assert!(

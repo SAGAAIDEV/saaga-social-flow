@@ -209,7 +209,13 @@ pub fn run_record_session(
         .flatten();
     let screen = match wanted {
         Some(uid) => pair_capture(layout.pair, uid)
-            .and_then(|capture| screen_stream::ScreenConnection::start_capture(uid, capture))
+            .and_then(|capture| {
+                screen_stream::ScreenConnection::start_capture(
+                    uid,
+                    capture,
+                    cfg.show_app_in_capture,
+                )
+            })
             .map_err(|e| eprintln!("stream-recorder: could not start screen capture: {e:#}"))
             .ok()
             .inspect(|connection| {
@@ -361,6 +367,7 @@ pub fn run_record_session(
         face_loading: false,
         pointer_config: cfg.mouse_tracking,
         pointer_tracker: None,
+        show_app: cfg.show_app_in_capture,
         notes_pick,
         notes_providers,
         notes_prompt,

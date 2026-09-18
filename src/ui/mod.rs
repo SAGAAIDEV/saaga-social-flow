@@ -46,6 +46,29 @@ pub enum Hold {
     Figure,
 }
 
+/// What the next Start Recording press opens, while nothing is recording.
+///
+/// The Record group's chapter menu is drawn from this: the fresh chapter first,
+/// then every chapter already on disk, offered as a retake. Picking one of
+/// those is how a single chapter gets redone after the whole take is in the
+/// can — the press retitles itself to say so, and the old take moves to
+/// `.discarded/` when recording starts, not when the menu is used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NextTake {
+    /// Every chapter this take already has on disk, ascending.
+    pub recorded: Vec<u32>,
+    /// The chapter the press opens: one past the last of `recorded`, or one of
+    /// them, when it is a retake.
+    pub chapter: u32,
+}
+
+impl NextTake {
+    /// Whether the press would record over a chapter that already exists.
+    pub fn is_retake(&self) -> bool {
+        self.recorded.contains(&self.chapter)
+    }
+}
+
 /// Which queue [`ControlTarget::confirm_clear`] was told to empty.
 ///
 /// Mirrors `schedule::clear::Scope` rather than using it, so the AppKit layer
@@ -136,6 +159,8 @@ pub enum UiEvent {
     FaceTrackToggled(bool),
     /// The Track Mouse checkbox moved.
     MouseTrackToggled(bool),
+    /// The Show App checkbox moved.
+    ShowAppToggled(bool),
     /// The YouTube tab's Visibility popup moved, as an index into
     /// [`crate::publish::youtube::Privacy::ALL`].
     YoutubePrivacySelected(usize),
@@ -150,6 +175,9 @@ pub enum UiEvent {
     PostsProviderSelected(usize),
     PostsPromptChanged(String),
     VersionSelected(u32),
+    /// The Record group's chapter menu: which chapter the next Start Recording
+    /// press should open — see [`NextTake`].
+    ChapterSelected(u32),
     ProjectSelected(usize),
     ValidateRewrite(usize),
     /// A checkbox in an HTML pane moved, carrying its new value.
@@ -279,6 +307,11 @@ pub struct ControlTargetIvars {
     /// The Track Mouse switch, beside it. Same kind of decision, one fewer
     /// state — there is nothing to load, so it is never disabled.
     mouse_checkbox: RefCell<Option<Retained<NSButton>>>,
+    /// The Show App switch, beside those: whether this app's own windows are
+    /// in the screen recording. The same kind of decision again — what the
+    /// recorded frame contains — and set for a take rather than during one,
+    /// though flipping it mid-take works.
+    show_app_checkbox: RefCell<Option<Retained<NSButton>>>,
     /// The three Render output boxes — horizontal longform, vertical longform,
     /// shorts — one row in the Record group directly above the Render button,
     /// so what a press produces is decided where it is pressed. Named, because
@@ -293,6 +326,10 @@ pub struct ControlTargetIvars {
     provider_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     prompt_field: RefCell<Option<Retained<NSTextField>>>,
     chapter_button: RefCell<Option<Retained<NSButton>>>,
+    /// The chapter menu under Start Recording — see [`NextTake`]. Each item's
+    /// tag is its chapter number, so the choice reaches the app as a number
+    /// rather than as a title to parse.
+    chapter_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     retake_button: RefCell<Option<Retained<NSButton>>>,
     pause_button: RefCell<Option<Retained<NSButton>>>,
     regions_button: RefCell<Option<Retained<NSButton>>>,
@@ -312,7 +349,13 @@ pub struct ControlTargetIvars {
     /// [`set_stage_gates`]: ControlTarget::set_stage_gates
     titles_button: RefCell<Option<Retained<NSButton>>>,
     render_button: RefCell<Option<Retained<NSButton>>>,
+    /// Under Render: the same render without the photo, for finishing what a
+    /// failed run left missing. Gated with Render — see [`set_stage_gates`].
+    ///
+    /// [`set_stage_gates`]: ControlTarget::set_stage_gates
+    rerender_button: RefCell<Option<Retained<NSButton>>>,
     posts_button: RefCell<Option<Retained<NSButton>>>,
+    /// Upload to S3, on the Buffer tab above the plan it feeds.
     distribute_button: RefCell<Option<Retained<NSButton>>>,
     plan_button: RefCell<Option<Retained<NSButton>>>,
     approve_button: RefCell<Option<Retained<NSButton>>>,
@@ -333,15 +376,12 @@ pub struct ControlTargetIvars {
     posts_prompt_view: RefCell<Option<Retained<NSTextView>>>,
     posts_status: RefCell<Option<Retained<NSTextField>>>,
 
-    // Distribute tab (S3)
-    distribute_status: RefCell<Option<Retained<NSTextField>>>,
-    distribute_info: RefCell<Option<Retained<NSTextView>>>,
-    distribute_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
-
     // YouTube tab
     publish_status: RefCell<Option<Retained<NSTextField>>>,
 
     // Schedule tab
+    /// The S3 line: the check's one sentence, or the running upload's progress.
+    distribute_status: RefCell<Option<Retained<NSTextField>>>,
     schedule_status: RefCell<Option<Retained<NSTextField>>>,
     schedule_info: RefCell<Option<Retained<NSTextView>>>,
 
@@ -377,6 +417,17 @@ define_class!(
         #[unsafe(method(onRetake:))]
         fn on_retake(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Retake));
+        }
+
+        #[unsafe(method(onChapterChanged:))]
+        fn on_chapter_changed(&self, _sender: Option<&AnyObject>) {
+            if let Some(popup) = self.ivars().chapter_popup.borrow().as_ref() {
+                // The tag is the chapter number; a placeholder item has none.
+                let tag = popup.selectedTag();
+                if tag > 0 {
+                    let _ = self.ivars().tx.send(UiEvent::ChapterSelected(tag as u32));
+                }
+            }
         }
 
         #[unsafe(method(onStop:))]
@@ -430,6 +481,14 @@ define_class!(
             if let Some(checkbox) = self.ivars().mouse_checkbox.borrow().as_ref() {
                 let on = checkbox.state() == NSControlStateValueOn;
                 let _ = self.ivars().tx.send(UiEvent::MouseTrackToggled(on));
+            }
+        }
+
+        #[unsafe(method(onShowAppChanged:))]
+        fn on_show_app_changed(&self, _sender: Option<&AnyObject>) {
+            if let Some(checkbox) = self.ivars().show_app_checkbox.borrow().as_ref() {
+                let on = checkbox.state() == NSControlStateValueOn;
+                let _ = self.ivars().tx.send(UiEvent::ShowAppToggled(on));
             }
         }
 
@@ -597,6 +656,14 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Render));
         }
 
+        #[unsafe(method(onRerenderMissing:))]
+        fn on_rerender_missing(&self, _sender: Option<&AnyObject>) {
+            let _ = self
+                .ivars()
+                .tx
+                .send(UiEvent::Action(Action::RerenderMissing));
+        }
+
         #[unsafe(method(onOpenVideo:))]
         fn on_open_video(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::OpenVideo));
@@ -720,6 +787,7 @@ impl ControlTarget {
             pair_popup: RefCell::new(None),
             face_checkbox: RefCell::new(None),
             mouse_checkbox: RefCell::new(None),
+            show_app_checkbox: RefCell::new(None),
             render_target_boxes: RefCell::new(Vec::new()),
             privacy_popup: RefCell::new(None),
             version_popup: RefCell::new(None),
@@ -729,6 +797,7 @@ impl ControlTarget {
             provider_popup: RefCell::new(None),
             prompt_field: RefCell::new(None),
             chapter_button: RefCell::new(None),
+            chapter_popup: RefCell::new(None),
             retake_button: RefCell::new(None),
             pause_button: RefCell::new(None),
             regions_button: RefCell::new(None),
@@ -738,6 +807,7 @@ impl ControlTarget {
             meter: RefCell::new(None),
             titles_button: RefCell::new(None),
             render_button: RefCell::new(None),
+            rerender_button: RefCell::new(None),
             posts_button: RefCell::new(None),
             distribute_button: RefCell::new(None),
             publish_button: RefCell::new(None),
@@ -755,8 +825,6 @@ impl ControlTarget {
             posts_prompt_view: RefCell::new(None),
             posts_status: RefCell::new(None),
             distribute_status: RefCell::new(None),
-            distribute_info: RefCell::new(None),
-            distribute_bar: RefCell::new(None),
             schedule_status: RefCell::new(None),
             schedule_info: RefCell::new(None),
             edit_status: RefCell::new(None),
@@ -934,6 +1002,9 @@ impl ControlTarget {
         for (button, gate) in [
             (&ivars.titles_button, &stages.titles),
             (&ivars.render_button, &stages.render),
+            // Same inputs as Render: chapters to cut. It only ever draws what
+            // is missing, so there is nothing further to gate it on.
+            (&ivars.rerender_button, &stages.render),
             (&ivars.posts_button, &stages.posts),
             (&ivars.distribute_button, &stages.distribute),
             (&ivars.plan_button, &stages.plan),
@@ -1017,17 +1088,26 @@ impl ControlTarget {
     /// `hold` says why an open chapter is not rolling, if it is not — see
     /// [`Hold`]. It sets the Pause button's title and whether it is offered at
     /// all, and it rewrites the status line, for the same one-writer reason.
+    ///
+    /// `next` fills the chapter menu and, while nothing is recording, decides
+    /// what the first button offers: a fresh chapter, or a retake of one that
+    /// exists — see [`NextTake`]. Mid-take the menu is switched off, because
+    /// the Router owns the number then.
     pub fn set_recording(
         &self,
         chapter: Option<u32>,
         version: Option<u32>,
         pending: Option<&str>,
         hold: Option<Hold>,
+        next: &NextTake,
     ) {
         if MainThreadMarker::new().is_none() {
             return;
         }
         let Some(button) = self.ivars().chapter_button.borrow().clone() else {
+            return;
+        };
+        let Some(menu) = self.ivars().chapter_popup.borrow().clone() else {
             return;
         };
         let Some(retake) = self.ivars().retake_button.borrow().clone() else {
@@ -1039,6 +1119,7 @@ impl ControlTarget {
         let Some(status) = self.ivars().status.borrow().clone() else {
             return;
         };
+        fill_chapter_menu(&menu, chapter, next);
         // Offered while a chapter is open and not on a figure's break: that
         // break ends with the snip chord, and a Resume that lifted it would
         // pull the take back up under the aside still being recorded.
@@ -1048,6 +1129,20 @@ impl ControlTarget {
             _ => "Pause  ⌃⌥P",
         }));
         match chapter {
+            None if next.is_retake() => {
+                // The press says what it is about to do to a chapter that
+                // exists, and the line says where that chapter's take goes:
+                // this is the one path that moves a finished recording, and it
+                // must not read like an ordinary start.
+                let n = next.chapter;
+                button.setTitle(&NSString::from_str(&format!("Retake Chapter {n:02}")));
+                retake.setEnabled(false);
+                let v = version.map(|n| format!("v{n} ")).unwrap_or_default();
+                status.setStringValue(&NSString::from_str(&format!(
+                    "Ready to retake {v}chapter {n:02} — the take it has now moves to \
+                     .discarded/ when recording starts"
+                )));
+            }
             None => {
                 button.setTitle(&NSString::from_str("Start Recording"));
                 retake.setEnabled(false);
@@ -1231,39 +1326,16 @@ impl ControlTarget {
         }
     }
 
-    // Distribute tab
-    pub fn set_distribute_status(&self, text: &str) {
-        if let Some(field) = self.ivars().distribute_status.borrow().clone() {
+    // YouTube tab
+    pub fn set_publish_status(&self, text: &str) {
+        if let Some(field) = self.ivars().publish_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
         }
     }
 
-    /// Shows the upload bar at `pct`. The bar is hidden until the first repaint,
-    /// so an upload too small to report progress never leaves an empty bar sitting
-    /// at zero.
-    pub fn set_distribute_progress(&self, pct: f64) {
-        if let Some(bar) = self.ivars().distribute_bar.borrow().clone() {
-            bar.setHidden(false);
-            bar.setDoubleValue(pct.clamp(0.0, 100.0));
-        }
-    }
-
-    pub fn hide_distribute_progress(&self) {
-        if let Some(bar) = self.ivars().distribute_bar.borrow().clone() {
-            bar.setDoubleValue(0.0);
-            bar.setHidden(true);
-        }
-    }
-
-    pub fn set_distribute_info(&self, text: &str) {
-        if let Some(view) = self.ivars().distribute_info.borrow().clone() {
-            view.setString(&NSString::from_str(text));
-        }
-    }
-
-    // YouTube tab
-    pub fn set_publish_status(&self, text: &str) {
-        if let Some(field) = self.ivars().publish_status.borrow().clone() {
+    /// The S3 line on the Buffer tab.
+    pub fn set_distribute_status(&self, text: &str) {
+        if let Some(field) = self.ivars().distribute_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
         }
     }
@@ -1376,6 +1448,46 @@ fn make_model_popup(
         popup.setAction(Some(action));
     }
     popup
+}
+
+/// Redraw the Record group's chapter menu.
+///
+/// Mid-take it names the open chapter and is switched off. Idle, it offers the
+/// fresh chapter first and then every recorded one as a retake, with the
+/// chapter the next press opens selected. Items carry their chapter number as
+/// the tag — see `on_chapter_changed`.
+fn fill_chapter_menu(popup: &NSPopUpButton, open: Option<u32>, next: &NextTake) {
+    popup.removeAllItems();
+    match open {
+        Some(n) => {
+            add_chapter_item(popup, &format!("Recording chapter {n:02}"), n);
+            popup.selectItemWithTag(n as isize);
+            popup.setEnabled(false);
+        }
+        None => {
+            // The fresh chapter is the one the app would open anyway, unless
+            // the pick is a retake — then it is the first number past what is
+            // recorded, so the menu always offers a way back to a plain start.
+            let fresh = if next.is_retake() {
+                next.recorded.iter().max().map_or(1, |n| n + 1)
+            } else {
+                next.chapter
+            };
+            add_chapter_item(popup, &format!("Next: chapter {fresh:02}"), fresh);
+            for &n in &next.recorded {
+                add_chapter_item(popup, &format!("Retake chapter {n:02}"), n);
+            }
+            popup.selectItemWithTag(next.chapter as isize);
+            popup.setEnabled(true);
+        }
+    }
+}
+
+fn add_chapter_item(popup: &NSPopUpButton, title: &str, chapter: u32) {
+    popup.addItemWithTitle(&NSString::from_str(title));
+    if let Some(item) = popup.lastItem() {
+        item.setTag(chapter as isize);
+    }
 }
 
 fn make_popup(
@@ -1779,6 +1891,7 @@ pub fn attach_controls(
     pair_idx: usize,
     face_tracking: bool,
     mouse_tracking: bool,
+    show_app: bool,
     render_targets: crate::config::RenderTargets,
     youtube_privacy: crate::publish::youtube::Privacy,
     model_menu: &[crate::notes::ModelMenuRow],
@@ -2135,6 +2248,25 @@ pub fn attach_controls(
     });
     *target.ivars().mouse_checkbox.borrow_mut() = Some(mouse_checkbox.clone());
 
+    let show_app_checkbox = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Show App"),
+            Some(&target),
+            Some(sel!(onShowAppChanged:)),
+            mtm,
+        )
+    };
+    show_app_checkbox.setButtonType(NSButtonType::Switch);
+    show_app_checkbox.setToolTip(Some(&NSString::from_str(
+        "Include this app's own windows in the screen recording",
+    )));
+    show_app_checkbox.setState(if show_app {
+        NSControlStateValueOn
+    } else {
+        NSControlStateValueOff
+    });
+    *target.ivars().show_app_checkbox.borrow_mut() = Some(show_app_checkbox.clone());
+
     // The Render output boxes: one row directly above the Render button, in
     // the group it belongs to. Small, so three fit across the Record group;
     // tagged, so `layout_group_buttons` lays the run out side by side.
@@ -2186,24 +2318,25 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 12] = [
+    let buttons: [(&str, Sel); 13] = [
         ("", sel!(onNewChapter:)),                           // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
         ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
         ("Stop", sel!(onStop:)),                             // 3 │
-        ("Render video and thumbnails", sel!(onRunRender:)), // 4 ┘
-        ("Notes", sel!(onNotes:)),                           // 5 ┐ Notes (right pane)
-        ("Copy Transcript", sel!(onCopyTranscript:)),        // 6 ┘
-        ("New Project", sel!(onNewProject:)),                // 7 ┐
-        ("New Version", sel!(onNewVersion:)),                // 8 │
-        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 9 │ Session
-        ("", sel!(onToggleRegions:)),                        // 10 │ title set by set_regions
-        ("Open Rendered Video", sel!(onOpenVideo:)),         // 11 ┘
+        ("Render video and thumbnails", sel!(onRunRender:)), // 4 │
+        ("Re-render missing", sel!(onRerenderMissing:)),     // 5 ┘
+        ("Notes", sel!(onNotes:)),                           // 6 ┐ Notes (right pane)
+        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 ┘
+        ("New Project", sel!(onNewProject:)),                // 8 ┐
+        ("New Version", sel!(onNewVersion:)),                // 9 │
+        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 10 │ Session
+        ("", sel!(onToggleRegions:)),                        // 11 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),         // 12 ┘
     ];
-    const RECORD: Range<usize> = 0..5;
-    const NOTES: Range<usize> = 5..7;
-    const SESSION: Range<usize> = 7..12;
-    const REGIONS: usize = 10;
+    const RECORD: Range<usize> = 0..6;
+    const NOTES: Range<usize> = 6..8;
+    const SESSION: Range<usize> = 8..13;
+    const REGIONS: usize = 11;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
         let button = unsafe {
@@ -2221,7 +2354,26 @@ pub fn attach_controls(
     *target.ivars().pause_button.borrow_mut() = Some(built[2].clone());
     *target.ivars().regions_button.borrow_mut() = Some(built[REGIONS].clone());
 
+    // The chapter menu, which goes directly under the button it retitles. Built
+    // empty and filled by `set_recording`, so nothing here has to know what the
+    // project has on disk — the same arrangement as the version picker.
+    let chapter_popup = NSPopUpButton::initWithFrame_pullsDown(
+        NSPopUpButton::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, BUTTON_H)),
+        false,
+    );
+    unsafe {
+        chapter_popup.setTarget(Some(&target));
+        chapter_popup.setAction(Some(sel!(onChapterChanged:)));
+    }
+    *target.ivars().chapter_popup.borrow_mut() = Some(chapter_popup.clone());
+
     *target.ivars().render_button.borrow_mut() = Some(built[4].clone());
+    built[5].setToolTip(Some(&NSString::from_str(
+        "Render only the clips the last render left missing or failed, without retaking \
+         the photo. Clips already current are skipped; the title, artwork and upload follow.",
+    )));
+    *target.ivars().rerender_button.borrow_mut() = Some(built[5].clone());
     let render_status = NSTextField::labelWithString(
         &NSString::from_str(
             "Record a video, then render it. One press: photo, cut, title, artwork, YouTube.",
@@ -2263,17 +2415,24 @@ pub fn attach_controls(
     .collect();
 
     // The Record group, with the Render boxes as one row directly above the
-    // Render button — the last button in its run.
+    // Render button, and Re-render missing under it — the last two in its run.
     let mut record: Vec<Retained<NSButton>> = built[RECORD].to_vec();
+    // A popup is a button as far as the group's rows are concerned; it takes
+    // the row under Start Recording.
+    record.insert(1, chapter_popup.into_super());
+    let rerender = record
+        .pop()
+        .expect("Re-render missing closes the Record group");
     let render = record
         .pop()
-        .expect("the Render button closes the Record group");
+        .expect("the Render button sits above Re-render missing");
     record.extend(
         render_target_boxes
             .iter()
             .map(|(_, checkbox)| checkbox.clone()),
     );
     record.push(render);
+    record.push(rerender);
     let left_groups = [("Record", record.as_slice()), ("Session", &built[SESSION])]
         .into_iter()
         .map(|(title, group)| {
@@ -2293,6 +2452,7 @@ pub fn attach_controls(
         pair_popup,
         face_checkbox,
         mouse_checkbox,
+        show_app_checkbox,
     );
     let notes = crate::notes::NotesPane::attach(&right, mtm);
 
@@ -2487,102 +2647,6 @@ pub fn attach_controls(
     };
     post_item.setLabel(&NSString::from_str("Generate posts"));
     post_item.setView(Some(&post_view));
-
-    // ==========================================
-    // TAB 4: DISTRIBUTE (AWS S3)
-    // ==========================================
-    let distribute_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-    fill_parent(&distribute_view);
-
-    let dist_title = NSTextField::labelWithString(
-        &NSString::from_str("Upload media — prepare video URLs for Buffer"),
-        mtm,
-    );
-    dist_title.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0, bounds.size.height - 48.0),
-        NSSize::new(600.0, 20.0),
-    ));
-    pin_top_left(&dist_title);
-    distribute_view.addSubview(&dist_title);
-
-    let upload_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Upload to S3"),
-            Some(&target),
-            Some(sel!(onDistribute:)),
-            mtm,
-        )
-    };
-    upload_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
-        NSSize::new(140.0, 28.0),
-    ));
-    pin_top_left(&upload_btn);
-    distribute_view.addSubview(&upload_btn);
-    *target.ivars().distribute_button.borrow_mut() = Some(upload_btn.clone());
-
-    let dist_status =
-        NSTextField::labelWithString(&NSString::from_str("Render first, then upload."), mtm);
-    dist_status.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 150.0, bounds.size.height - 82.0),
-        NSSize::new(620.0, 24.0),
-    ));
-    pin_top(&dist_status);
-    distribute_view.addSubview(&dist_status);
-    *target.ivars().distribute_status.borrow_mut() = Some(dist_status.clone());
-
-    // The uploader reports real byte counts, so this is a determinate bar rather
-    // than a spinner. It stays hidden until the first repaint arrives.
-    let dist_bar = NSProgressIndicator::initWithFrame(
-        NSProgressIndicator::alloc(mtm),
-        NSRect::new(
-            NSPoint::new(PAD * 2.0, bounds.size.height - 112.0),
-            NSSize::new(bounds.size.width - PAD * 4.0, 16.0),
-        ),
-    );
-    dist_bar.setStyle(NSProgressIndicatorStyle::Bar);
-    dist_bar.setIndeterminate(false);
-    dist_bar.setMinValue(0.0);
-    dist_bar.setMaxValue(100.0);
-    dist_bar.setDoubleValue(0.0);
-    dist_bar.setHidden(true);
-    pin_top(&dist_bar);
-    distribute_view.addSubview(&dist_bar);
-    *target.ivars().distribute_bar.borrow_mut() = Some(dist_bar.clone());
-
-    let dist_scroll = NSScrollView::initWithFrame(
-        NSScrollView::alloc(mtm),
-        NSRect::new(
-            NSPoint::new(PAD * 2.0, PAD * 2.0),
-            NSSize::new(bounds.size.width - PAD * 4.0, bounds.size.height - 120.0),
-        ),
-    );
-    fill_below(&dist_scroll);
-    dist_scroll.setHasVerticalScroller(true);
-    let dist_text_view = NSTextView::initWithFrame(
-        NSTextView::alloc(mtm),
-        NSRect::new(
-            NSPoint::new(0.0, 0.0),
-            NSSize::new(bounds.size.width - PAD * 4.0, bounds.size.height - 120.0),
-        ),
-    );
-    dist_text_view.setEditable(false);
-    dist_text_view.setString(&NSString::from_str(
-        "Uploads longform + vertical chapters to public S3.\n\
-         Links land in distribute/vN/links.json.",
-    ));
-    dist_scroll.setDocumentView(Some(&dist_text_view));
-    distribute_view.addSubview(&dist_scroll);
-    *target.ivars().distribute_info.borrow_mut() = Some(dist_text_view.clone());
-
-    let distribute_item = unsafe {
-        NSTabViewItem::initWithIdentifier(
-            NSTabViewItem::alloc(),
-            Some(&NSString::from_str("distribute")),
-        )
-    };
-    distribute_item.setLabel(&NSString::from_str("Upload media"));
-    distribute_item.setView(Some(&distribute_view));
 
     // ==========================================
     // TAB 5: YOUTUBE (the longform, uploaded directly)
@@ -2817,6 +2881,36 @@ pub fn attach_controls(
     pin_top_left(&clear_btn);
     schedule_view.addSubview(&clear_btn);
 
+    // The row above the plan answers the question Build Plan depends on: is
+    // every rendered video on S3 as it is now? The render uploads on its own
+    // when it finishes, so the button is for the miss — an expired AWS login,
+    // a re-render whose upload failed — and the line beside it says which
+    // videos are behind, or narrates the upload while one runs.
+    let s3_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Upload to S3"),
+            Some(&target),
+            Some(sel!(onDistribute:)),
+            mtm,
+        )
+    };
+    s3_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 118.0),
+        NSSize::new(130.0, 28.0),
+    ));
+    pin_top_left(&s3_btn);
+    schedule_view.addSubview(&s3_btn);
+    *target.ivars().distribute_button.borrow_mut() = Some(s3_btn.clone());
+
+    let s3_status = NSTextField::labelWithString(&NSString::from_str("Checking S3…"), mtm);
+    s3_status.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0 + 140.0, bounds.size.height - 116.0),
+        NSSize::new((bounds.size.width - PAD * 4.0 - 140.0).max(120.0), 24.0),
+    ));
+    pin_top(&s3_status);
+    schedule_view.addSubview(&s3_status);
+    *target.ivars().distribute_status.borrow_mut() = Some(s3_status.clone());
+
     let sched_status = NSTextField::labelWithString(
         &NSString::from_str("Build a plan, review it, then queue."),
         mtm,
@@ -2833,7 +2927,8 @@ pub fn attach_controls(
     // the bottom so the rows a human has to tick always get the growing half.
     let sched_w = bounds.size.width - PAD * 4.0;
     let sched_info_h = 150.0;
-    let sched_form_h = (bounds.size.height - 120.0 - sched_info_h - PAD).max(80.0);
+    // 34 more than before the S3 row above it existed.
+    let sched_form_h = (bounds.size.height - 154.0 - sched_info_h - PAD).max(80.0);
     let schedule_form = crate::schedule::ScheduleForm::attach(&schedule_view, mtm);
     schedule_form.set_frame(NSRect::new(
         NSPoint::new(PAD * 2.0, PAD * 2.0 + sched_info_h + PAD),
@@ -3066,7 +3161,6 @@ pub fn attach_controls(
             ("youtube", &publish_item),
             ("blog", &blog_item),
             ("post", &post_item),
-            ("distribute", &distribute_item),
             ("schedule", &schedule_item),
             ("analytics", &analytics_item),
             ("reflect", &reflect_item),

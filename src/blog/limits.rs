@@ -30,7 +30,7 @@ use std::fmt;
 use anyhow::{bail, Result};
 use serde_json::Value;
 
-use super::schema::{Article, Block};
+use super::schema::{slugify, Article, Block};
 
 /// The width of a Strapi `string` column in Postgres, declared or not.
 pub const COLUMN: usize = 255;
@@ -191,15 +191,28 @@ pub fn value_of(article: &Article, target: Target) -> Option<&str> {
     })
 }
 
-/// Writes `text` at `target`, trimmed. `false` when there is no such field — a
-/// block index past the end, or one that is not a quote — so a stale form
-/// cannot write into the wrong block.
+/// What `text` becomes when written at `target`: trimmed, and for the slug
+/// folded to URL shape — lowercase, hyphens, nothing else — because the slug
+/// is typed on the Blog tab now and a URL is not the place to keep a typo.
+/// Not shortened: a slug past the column is reported by [`article`] rather
+/// than cut behind the operator's back.
+pub fn normalized(target: Target, text: &str) -> String {
+    match target {
+        Target::Slug => slugify(text, usize::MAX),
+        _ => text.trim().to_string(),
+    }
+}
+
+/// Writes `text` at `target`, [`normalized`]. `false` when there is no such
+/// field — a block index past the end, or one that is not a quote — so a stale
+/// form cannot write into the wrong block.
 ///
 /// A quote's highlight has to stay a substring of its text or the page
 /// highlights nothing, so a new text that no longer contains it clears it, and
 /// a new highlight the text does not contain is dropped.
 pub fn set(article: &mut Article, target: Target, text: &str) -> bool {
-    let text = text.trim();
+    let text = normalized(target, text);
+    let text = text.as_str();
     match target {
         Target::Title => article.title = text.to_string(),
         Target::H1 => article.h1 = text.to_string(),
@@ -829,6 +842,20 @@ mod tests {
         assert_eq!(found[1].target, Some(Target::QuoteText(0)));
         assert_eq!(found[1].limit, Some(COLUMN));
         assert!(check(&body()["data"]).iter().all(|v| v.target.is_none()));
+    }
+
+    /// Whatever is typed for the slug is folded to URL shape on the way in;
+    /// every other field is only trimmed, and keeps its punctuation.
+    #[test]
+    fn a_slug_is_folded_to_url_shape_and_other_fields_only_trimmed() {
+        use crate::blog::schema::Article;
+        let mut draft = Article::default();
+        assert!(set(&mut draft, Target::Slug, "  Go To Market: Update #2 "));
+        assert_eq!(draft.slug, "go-to-market-update-2");
+        assert_eq!(normalized(Target::Slug, "!!!"), "");
+        assert_eq!(normalized(Target::Slug, "already-a-slug"), "already-a-slug");
+        assert!(set(&mut draft, Target::Title, "  Kept: As Typed!  "));
+        assert_eq!(draft.title, "Kept: As Typed!");
     }
 
     /// Writing a shorter quote keeps the highlight only while it is still in

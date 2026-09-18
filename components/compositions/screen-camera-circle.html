@@ -11,6 +11,11 @@
     <template>
       <div data-hf-id="hf-7nor" id="root" data-composition-id="screen-camera-circle" data-start="0" data-width="1920" data-height="1080" data-duration="10">
         <style>
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Medium.woff2') format('woff2');
+            font-weight: 500; font-style: normal; font-display: block;
+          }
           /* Brand font. Vendored as woff2 under assets/fonts so renders are
              deterministic and do not depend on a system-installed copy. */
           @font-face {
@@ -36,17 +41,29 @@
              keeps the block self-contained. Figma's camera art overflows the circle
              (306.8x420.4) and is clipped by the mask — overflow:hidden does the same. */
           #root {
+            /* SAAGA video theme — see components/design.md.
+               Kept inside the template so compiler scoping preserves it. */
+            --saaga-ink: #1d1d1d;
+            --saaga-paper: #f6f6f6;
+            --saaga-muted: #626262;
+            --saaga-orange: #eb5201;
+            --saaga-peach: #ffeee5;
+            --saaga-line: #d1d1cc;
+            --saaga-orange-on-dark: #ff9561;
+            --saaga-radius: 24px;
+            color: var(--saaga-ink);
+            font-weight: 500;
             position: relative;
             width: 1920px;
             height: 1080px;
             overflow: hidden;
-            background: #ffffff;
-            font-family: 'Booton', Inter, system-ui, sans-serif;
+            background: var(--saaga-paper);
+            font-family: 'Booton', system-ui, sans-serif;
           }
           .circle-demo-bg {
             position: absolute;
             inset: 0;
-            background: #fdeee6;
+            background: var(--saaga-peach);
             z-index: 0;
           }
           .circle-demo-screen {
@@ -65,9 +82,10 @@
             width: 370px;
             height: 370px;
             box-sizing: border-box;
-            background: #fdeee6;
-            border: 4px solid #eb5201;
+            background: var(--saaga-peach);
+            border: 4px solid var(--saaga-orange);
             border-radius: 50%;
+            box-shadow: 0 16px 44px rgba(29, 29, 29, 0.2);
             overflow: hidden;
             z-index: 2;
           }

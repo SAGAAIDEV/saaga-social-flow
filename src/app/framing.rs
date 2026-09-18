@@ -439,12 +439,13 @@ impl App {
             router.set_pair(self.pair);
             let screen = &mut self.screen;
             let screen_uid = self.screen_uid.clone();
+            let show_app = self.show_app;
             router.reopen_with_screen(|| {
                 match (wants, screen.is_some()) {
                     (true, true) => screen.as_mut().expect("checked").set_capture(capture)?,
                     (true, false) => {
                         let uid = screen_uid.context("no display selected")?;
-                        let connection = ScreenConnection::start_capture(&uid, capture)?;
+                        let connection = ScreenConnection::start_capture(&uid, capture, show_app)?;
                         // Not fatal: an idle display legitimately delivers
                         // nothing until something on it changes.
                         let _ = connection.wait_for_warmup(Duration::from_secs(2));
@@ -475,8 +476,8 @@ impl App {
                 // as every other screen failure — drop the Router and let the
                 // next New Chapter press build a fresh one.
                 eprintln!("stream-recorder: layout change failed: {e:#}");
-                if let Some(router) = self.router.as_ref() {
-                    self.next_chapter = router.current_chapter_number() + 1;
+                if let Some(current) = self.router.as_ref().map(|r| r.current_chapter_number()) {
+                    self.next_chapter = self.chapter_after(current);
                 }
                 self.router = None;
             }

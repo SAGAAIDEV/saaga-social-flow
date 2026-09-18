@@ -3,11 +3,14 @@
 //! Each job is an independent headless-browser render writing to its own file, so
 //! they run on a small pool rather than one at a time. The pool is deliberately
 //! *small*: a render is memory- and CPU-hungry, and oversubscribing turns a fast
-//! machine into a swapping one. Concat order comes from the plan, never from the
-//! order jobs happen to finish.
+//! machine into a swapping one. The pool is sized by the memory the machine can
+//! spare when the render starts — see [`plan_pool`] for the day that stopped
+//! being a figure of speech — and only capped by the cores. Concat order comes
+//! from the plan, never from the order jobs happen to finish.
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -251,20 +254,49 @@ fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
     if tasks.is_empty() {
         return Ok(());
     }
-    let workers = worker_count().min(tasks.len());
+    let pool = choose_pool()?;
+    let renders = pool.renders.min(tasks.len());
     let total = tasks.len();
-    eprintln!("stream-recorder: rendering {total} composition(s) on {workers} worker(s)");
+    eprintln!(
+        "stream-recorder: rendering {total} composition(s) on {renders} worker(s) with {} \
+         Chrome capture worker(s) each",
+        pool.workers
+    );
 
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
+    let alive = AtomicUsize::new(renders);
     let failures: Mutex<Vec<(String, anyhow::Error)>> = Mutex::new(Vec::new());
 
     std::thread::scope(|scope| {
-        for _ in 0..workers {
+        for _ in 0..renders {
             scope.spawn(|| loop {
+                // Chrome grows over a render and the other applications do not
+                // stand still, so the room measured at the start is not the room
+                // there is now. A worker that would start its next render into
+                // less than one render's worth of spare memory retires instead,
+                // shrinking the pool — unless it is the last one, because a render
+                // that never finishes helps no one.
+                if let Some(available) = available_memory() {
+                    if available < HEADROOM + render_cost(pool.workers)
+                        && retire_unless_last(&alive)
+                    {
+                        eprintln!(
+                            "stream-recorder: {} of memory available, below the {} a render \
+                             needs; one worker is retiring and {} carry on",
+                            gib(available),
+                            gib(HEADROOM + render_cost(pool.workers)),
+                            alive.load(Ordering::Relaxed)
+                        );
+                        break;
+                    }
+                }
                 let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(task) = tasks.get(index) else { break };
-                let outcome = render_job(task.workspace, task.job, &task.dest);
+                let Some(task) = tasks.get(index) else {
+                    alive.fetch_sub(1, Ordering::Relaxed);
+                    break;
+                };
+                let outcome = render_job(task.workspace, task.job, &task.dest, pool.workers);
                 let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
                 on_done(finished);
                 match outcome {
@@ -304,14 +336,159 @@ fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
     bail!(message)
 }
 
-/// How many renders to run at once. `SCREENCAST_RENDER_WORKERS` overrides.
-fn worker_count() -> usize {
+/// Memory kept free for everything that is not the render — the app, the
+/// system, and whatever the operator is doing in the meantime, which is often a
+/// live call. Bytes.
+const HEADROOM: u64 = 4 << 30;
+/// What one render costs before its first Chrome capture worker: the hyperframes
+/// node process, its ffmpeg, and Chrome's browser and GPU processes. Bytes,
+/// measured at the peak the out-of-memory snapshot of 2026-09-15 recorded.
+const RENDER_BASE: u64 = 2560 << 20;
+/// What each Chrome capture worker adds: one renderer process, which ran at 2.0
+/// to 3.2 GB compositing PNG footage frames at portrait resolution — not the
+/// quarter gigabyte hyperframes' own `--workers` help text promises. Bytes.
+const WORKER_COST: u64 = 3200 << 20;
+
+/// How many renders run at once, and how many Chrome capture workers each gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Pool {
+    renders: usize,
+    workers: usize,
+}
+
+/// What a render of `workers` capture workers costs at its peak, in bytes.
+fn render_cost(workers: usize) -> u64 {
+    RENDER_BASE + WORKER_COST * workers as u64
+}
+
+/// The pool for this machine, right now.
+///
+/// `SCREENCAST_RENDER_WORKERS` pins the number of renders and skips the memory
+/// check — for the operator who has looked at Activity Monitor and knows better —
+/// each with one capture worker. Otherwise the memory decides; when it cannot
+/// be read, the cores do, as they did before, and a line says so.
+fn choose_pool() -> Result<Pool> {
     if let Ok(raw) = std::env::var("SCREENCAST_RENDER_WORKERS") {
         if let Ok(n) = raw.trim().parse::<usize>() {
-            return n.clamp(1, 8);
+            return Ok(Pool {
+                renders: n.clamp(1, 8),
+                workers: 1,
+            });
         }
     }
-    pool_size(cores())
+    match available_memory() {
+        Some(available) => plan_pool(available, cores()),
+        None => {
+            eprintln!(
+                "stream-recorder: could not read free memory from vm_stat; sizing the render \
+                 pool by cores alone"
+            );
+            Ok(Pool {
+                renders: pool_size(cores()),
+                workers: 1,
+            })
+        }
+    }
+}
+
+/// Sizes the pool against the memory the machine can spare, under the ceiling
+/// the cores set.
+///
+/// The cores used to set the whole pool, and the pool they produced — four
+/// renders of two workers each — was right for the CPU and wrong for everything
+/// else. A render is 8 to 9 GB, ten times what hyperframes' help text says, and
+/// four of them landed on a 64 GB machine already carrying a browser, a VM and a
+/// full swap file. macOS wrote three out-of-memory reports and the machine froze
+/// for a quarter of an hour. Memory is the constraint that binds, so it decides
+/// the count and the cores only cap it.
+///
+/// Every render gets one capture worker unless there is memory for a second
+/// across the whole pool. Capture is memory-bound and the encoder is the CPU
+/// sink, so the second worker is the first thing to give up.
+///
+/// An error rather than a pool of one when even one render does not fit: a
+/// render that pushes the machine into swap finishes hours late, if at all, and
+/// takes everything else down with it. The message says what to close.
+fn plan_pool(available: u64, cores: usize) -> Result<Pool> {
+    let spend = available.saturating_sub(HEADROOM);
+    let fits = usize::try_from(spend / render_cost(1)).unwrap_or(usize::MAX);
+    if fits == 0 {
+        bail!(
+            "not enough free memory to render: {} available, and one render needs about {} \
+             with {} kept for the rest of the machine — close some applications (browser \
+             tabs, Docker, stale terminals) and press Re-render missing",
+            gib(available),
+            gib(render_cost(1)),
+            gib(HEADROOM)
+        );
+    }
+    let renders = fits.min(pool_size(cores));
+    let mut workers = 1;
+    while workers < workers_per_render(cores) && spend / render_cost(workers + 1) >= renders as u64
+    {
+        workers += 1;
+    }
+    Ok(Pool { renders, workers })
+}
+
+/// Memory the machine could hand to new processes without swapping, in bytes:
+/// free pages, purgeable pages, and the file cache, which is what macOS drops
+/// first under pressure. Inactive pages are deliberately not counted — most are
+/// anonymous memory that would have to be compressed or swapped out to reclaim,
+/// and counting them read the frozen machine as having 14 GB to spare when the
+/// same snapshot's free pages and file cache came to 3.
+///
+/// `None` when `vm_stat` is missing or says something unexpected.
+fn available_memory() -> Option<u64> {
+    let out = Command::new("vm_stat").output().ok()?;
+    parse_vm_stat(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// See [`available_memory`]; this is the part a test can feed.
+fn parse_vm_stat(text: &str) -> Option<u64> {
+    let page_size: u64 = text
+        .lines()
+        .next()?
+        .split("page size of ")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    let pages = |name: &str| -> Option<u64> {
+        text.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            if key.trim() != name {
+                return None;
+            }
+            value.trim().trim_end_matches('.').parse().ok()
+        })
+    };
+    let available = pages("Pages free")?
+        + pages("Pages purgeable").unwrap_or(0)
+        + pages("File-backed pages").unwrap_or(0);
+    Some(available * page_size)
+}
+
+/// Takes one worker out of `alive` and says so — unless it is the last, which
+/// stays whatever the memory looks like. Two workers deciding at the same
+/// moment cannot both go: the update is atomic, so one of them sees a count of
+/// one and keeps working.
+fn retire_unless_last(alive: &AtomicUsize) -> bool {
+    alive
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            if n > 1 {
+                Some(n - 1)
+            } else {
+                None
+            }
+        })
+        .is_ok()
+}
+
+/// Bytes as a figure a status line can carry: "5.6 GB".
+fn gib(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / (1u64 << 30) as f64)
 }
 
 fn cores() -> usize {
@@ -379,7 +556,7 @@ pub(crate) fn is_fresh(dest: &Path, sources: &[PathBuf]) -> bool {
     })
 }
 
-fn render_job(workspace: &Path, job: &Job, dest: &Path) -> Result<()> {
+fn render_job(workspace: &Path, job: &Job, dest: &Path, workers: usize) -> Result<()> {
     dest.parent()
         .map(std::fs::create_dir_all)
         .transpose()
@@ -400,7 +577,7 @@ fn render_job(workspace: &Path, job: &Job, dest: &Path) -> Result<()> {
         // Bounded rather than left on `auto`, which sizes itself against the whole
         // machine and cannot know how many other renders this pool is running.
         "--workers",
-        &workers_per_render(cores()).to_string(),
+        &workers.to_string(),
         "--resolution",
         match job.kind {
             Kind::Vertical => "portrait",
@@ -410,22 +587,73 @@ fn render_job(workspace: &Path, job: &Job, dest: &Path) -> Result<()> {
     ]);
     cmd.arg(&tmp);
     eprintln!("stream-recorder: {}", command_line(&cmd));
+
+    // hyperframes narrates a render to its terminal — the Chrome pool, the frame
+    // count, and the reason when it gives up. Until this was captured that went
+    // to whichever terminal launched the app, and the app itself could only
+    // report an exit status: five of twenty-one renders failed and the status
+    // line could not say why. So each job writes beside its output, the tail of
+    // that log rides on the error, and the file stays only when it is needed.
+    let log_path = dest.with_extension("log");
+    let log =
+        File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
+    let log_err = log
+        .try_clone()
+        .with_context(|| format!("sharing {}", log_path.display()))?;
+    cmd.stdout(Stdio::from(log)).stderr(Stdio::from(log_err));
     let status = cmd
         .status()
         .with_context(|| format!("starting hyperframes render for {}", job.id))?;
     if !status.success() {
         let _ = std::fs::remove_file(&tmp);
         bail!(
-            "hyperframes render failed for {} ({status})",
-            job.composition
+            "hyperframes render failed for {} ({status}); see {}{}",
+            job.composition,
+            log_path.display(),
+            log_tail(&log_path, 3)
         );
     }
     if !tmp.is_file() || tmp.metadata()?.len() == 0 {
         let _ = std::fs::remove_file(&tmp);
-        bail!("hyperframes produced no output for {}", job.id);
+        bail!(
+            "hyperframes produced no output for {}; see {}{}",
+            job.id,
+            log_path.display(),
+            log_tail(&log_path, 3)
+        );
     }
     std::fs::rename(&tmp, dest).with_context(|| format!("publishing {}", dest.display()))?;
+    let _ = std::fs::remove_file(&log_path);
     Ok(())
+}
+
+/// The last `n` lines of a render log with anything on them, ready to hang off
+/// an error: one indented line each, or nothing when the log is empty or gone.
+fn log_tail(log: &Path, n: usize) -> String {
+    let Ok(text) = std::fs::read_to_string(log) else {
+        return String::new();
+    };
+    tail_lines(&text, n)
+        .into_iter()
+        .map(|line| format!("\n      {line}"))
+        .collect()
+}
+
+/// The last `n` non-blank lines of `text`, in order, each trimmed.
+///
+/// Progress output rewrites its line with carriage returns rather than newlines,
+/// so a `\r` counts as a line break too — otherwise the tail of a hyperframes
+/// log is one enormous line of frame counters with the error somewhere inside.
+fn tail_lines(text: &str, n: usize) -> Vec<&str> {
+    let mut lines: Vec<&str> = text
+        .split(['\n', '\r'])
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(n)
+        .collect();
+    lines.reverse();
+    lines
 }
 
 fn hyperframes_command() -> Result<Command> {
@@ -501,6 +729,134 @@ mod tests {
         // The real machine this runs on: four renders of two workers each.
         assert_eq!(pool_size(10), 4);
         assert_eq!(workers_per_render(10), 2);
+    }
+
+    /// The two `vm_stat` readings this was calibrated on: the machine as it froze
+    /// on 2026-09-15 — 3 GB to spare by this measure, 14 GB had inactive pages
+    /// been counted — and the same machine the next evening, with the page size
+    /// read from the header rather than assumed.
+    #[test]
+    fn free_memory_is_free_pages_plus_purgeable_plus_the_file_cache() {
+        let frozen = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+                      Pages free:                               10595.\n\
+                      Pages active:                            713441.\n\
+                      Pages inactive:                          704226.\n\
+                      Pages speculative:                         7998.\n\
+                      Pages purgeable:                              0.\n\
+                      \"Translation faults\":                 58183286204.\n\
+                      File-backed pages:                       205311.\n\
+                      Anonymous pages:                        1220354.\n";
+        let available = parse_vm_stat(frozen).unwrap();
+        assert_eq!(available, (10595 + 205311) * 16384);
+        assert_eq!(gib(available), "3.3 GB");
+
+        let evening = "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n\
+                       Pages free:                             1367468.\n\
+                       Pages purgeable:                          18712.\n\
+                       File-backed pages:                       830903.\n";
+        assert_eq!(
+            parse_vm_stat(evening).unwrap(),
+            (1367468 + 18712 + 830903) * 4096,
+            "the page size comes from the header"
+        );
+
+        assert_eq!(parse_vm_stat(""), None);
+        assert_eq!(
+            parse_vm_stat(
+                "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages active: 5.\n"
+            ),
+            None,
+            "no free-page count is no answer, not zero"
+        );
+    }
+
+    /// The pool the freeze would have had, and the pool a clear machine gets.
+    #[test]
+    fn the_pool_is_sized_by_spare_memory_and_capped_by_cores() {
+        const GB: u64 = 1 << 30;
+        // The frozen machine: 3.3 GB to spare is no render at all, and the error
+        // names the figures rather than a worker count.
+        let err = plan_pool(3 * GB + GB / 3, 10).unwrap_err().to_string();
+        assert!(err.contains("not enough free memory"), "{err}");
+        assert!(err.contains("3.3 GB available"), "{err}");
+        assert!(err.contains("Re-render missing"), "{err}");
+
+        // The same machine the next evening: room for four renders of one
+        // worker, not four of two — that second worker is the first to go.
+        assert_eq!(
+            plan_pool(34 * GB, 10).unwrap(),
+            Pool {
+                renders: 4,
+                workers: 1
+            }
+        );
+        // A clear 64 GB machine can afford the second worker everywhere.
+        assert_eq!(
+            plan_pool(60 * GB, 10).unwrap(),
+            Pool {
+                renders: 4,
+                workers: 2
+            }
+        );
+        // A 16 GB laptop with 10 GB free renders one at a time, and does render.
+        assert_eq!(
+            plan_pool(10 * GB, 8).unwrap(),
+            Pool {
+                renders: 1,
+                workers: 1
+            }
+        );
+        // The line for one render, from both sides.
+        assert!(plan_pool(HEADROOM + render_cost(1) - 1, 8).is_err());
+        assert_eq!(
+            plan_pool(HEADROOM + render_cost(1), 8).unwrap(),
+            Pool {
+                renders: 1,
+                workers: 1
+            }
+        );
+        // A workstation with memory to burn is still held to the core budget.
+        assert_eq!(
+            plan_pool(200 * GB, 64).unwrap(),
+            Pool {
+                renders: 4,
+                workers: 2
+            }
+        );
+    }
+
+    /// Whatever the memory says, the pool's footprint stays within the core
+    /// budget the previous sizing was written for, and within the memory it was
+    /// given — the two constraints this replaces one with.
+    #[test]
+    fn a_memory_sized_pool_fits_both_budgets() {
+        for cores in [1usize, 2, 4, 8, 10, 16, 64] {
+            for available in [10u64, 16, 32, 64, 128, 512] {
+                let Ok(pool) = plan_pool(available << 30, cores) else {
+                    continue;
+                };
+                assert!(
+                    pool.renders * pool.workers <= capture_budget(cores),
+                    "{cores} cores, {available} GB: {pool:?} exceeds the core budget"
+                );
+                assert!(
+                    HEADROOM + pool.renders as u64 * render_cost(pool.workers) <= available << 30,
+                    "{cores} cores, {available} GB: {pool:?} does not fit in memory"
+                );
+            }
+        }
+    }
+
+    /// Retiring frees memory only while someone is left to finish the work.
+    #[test]
+    fn the_last_worker_never_retires() {
+        let alive = AtomicUsize::new(3);
+        assert!(retire_unless_last(&alive));
+        assert!(retire_unless_last(&alive));
+        assert_eq!(alive.load(Ordering::Relaxed), 1);
+        assert!(!retire_unless_last(&alive), "the last worker stays");
+        assert!(!retire_unless_last(&alive));
+        assert_eq!(alive.load(Ordering::Relaxed), 1);
     }
 
     fn card(id: &str) -> Job {
@@ -622,6 +978,30 @@ mod tests {
             &longform,
             &join_inputs(&dir, &parts[1..]).unwrap()
         ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What rides on a failed render's error: the reason hyperframes gave, not
+    /// the frame counters it printed on the way there.
+    #[test]
+    fn the_log_tail_is_the_last_lines_with_anything_on_them() {
+        let log = "starting\nframe 1\rframe 2\rframe 3\n\n  Error: page crashed  \n\n";
+        assert_eq!(
+            tail_lines(log, 3),
+            vec!["frame 2", "frame 3", "Error: page crashed"]
+        );
+        assert_eq!(tail_lines("", 3), Vec::<&str>::new());
+        assert_eq!(tail_lines("one line", 3), vec!["one line"]);
+
+        let dir = temp("tail");
+        let path = dir.join("chapter-06.log");
+        assert_eq!(
+            log_tail(&path, 3),
+            "",
+            "a log that was never written adds nothing"
+        );
+        std::fs::write(&path, "a\nb\nc\nd\n").unwrap();
+        assert_eq!(log_tail(&path, 3), "\n      b\n      c\n      d");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

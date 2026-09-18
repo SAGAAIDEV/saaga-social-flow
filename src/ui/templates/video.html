@@ -524,7 +524,7 @@
   <div class="card-hd">
     <div>
       <h2 class="card-title">Rendered clips</h2>
-      <p class="card-desc">What YouTube and Upload media send. Scrub before you send it.</p>
+      <p class="card-desc">What goes to YouTube and S3 when the render finishes. Scrub before it does.</p>
     </div>
     {% if review.clips %}<span class="badge secondary">{{ review.clips | length }}</span>
     {% else %}<span class="badge outline">Not yet</span>{% endif %}
@@ -548,13 +548,16 @@
   </div>
 </section>
 
-{% if youtube or short %}
-<!-- 5. On YouTube: one link per cut, so the Short's does not stand in for both -->
+{% if youtube or short or hosted %}
+<!--
+  5. Published: one link per cut, so the Short's does not stand in for both —
+  and the S3 upload beside them, since the tab that used to list it is gone.
+-->
 <section class="card">
   <div class="card-hd">
     <div>
-      <h2 class="card-title">On YouTube</h2>
-      <p class="card-desc">Where each cut went up. The blog embeds the longform, and the Short as its mobile player.</p>
+      <h2 class="card-title">Published</h2>
+      <p class="card-desc">Where each cut went up. The blog embeds the longform, the Short is its mobile player, and Buffer posts from S3.</p>
     </div>
     <span class="badge secondary">Uploaded</span>
   </div>
@@ -568,6 +571,10 @@
         {% if short %}<a href="{{ short }}">{{ short }}</a>
         <button class="copy" data-send='{{ {"type": "copyText", "text": short} | tojson }}'>copy</button>
         {% else %}<span class="none">Not uploaded yet — the vertical cut goes up with the next Upload</span>{% endif %}</li>
+      <li><span class="name">S3</span>
+        {% if hosted %}{{ hosted.count }} public file(s) for Buffer
+        <button class="copy" data-send='{{ {"type": "copyText", "text": hosted.path} | tojson }}'>copy path</button>
+        {% else %}<span class="none">Not on S3 yet — the renders go up when a render finishes</span>{% endif %}</li>
     </ul>
   </div>
 </section>

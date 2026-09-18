@@ -31,6 +31,10 @@ pub enum Action {
     /// neighbour to every other app.
     CopyTranscript,
     Render,
+    /// Render whatever the last render left missing or failed, without
+    /// retaking the photo — see `App::run_rerender`. No hotkey: it is pressed
+    /// while reading the status line that says what failed.
+    RerenderMissing,
     GenerateTitles,
     GeneratePosts,
     SavePosts,
@@ -53,6 +57,11 @@ pub enum Action {
     /// it is a rare housekeeping action, pressed when someone has just added a
     /// row in Strapi admin.
     RefreshBlogLibrary,
+    /// Upload the renders to S3 by hand, from the Buffer tab. The render does
+    /// this on its own when it finishes; the button is for when the check
+    /// above the plan says a video is not up — after an `aws sso login` the
+    /// render's upload missed, say. No hotkey: it is pressed while reading
+    /// that line.
     Distribute,
     SchedulePlan,
     ScheduleApproveAll,

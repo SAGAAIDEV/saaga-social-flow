@@ -49,6 +49,50 @@ pub fn connected_channel() -> Option<String> {
 /// is the one fact a second press must not be free to contradict.
 pub const UPLOADS_JSONL: &str = "youtube.jsonl";
 
+/// The longest video YouTube will file as a Short: three minutes, since
+/// October 2024 (it was sixty seconds before that).
+///
+/// A portrait upload past this is not rejected — it goes up as an ordinary
+/// video. That is the trap: the `/shorts/` URL recorded here would be a lie,
+/// the blog would embed it as the page's mobile player on the strength of that
+/// row, and the Shorts feed would never show it. So the vertical longform is
+/// measured first and skipped when it is over, rather than uploaded and
+/// mislabelled. The chapter shorts through Buffer are unaffected; a chapter
+/// is nowhere near this long.
+pub const SHORT_MAX_SECONDS: f64 = 180.0;
+
+/// Why this vertical cut is not going up as a Short, or `None` when it is.
+///
+/// Reads the file's length with `ffprobe`. A file whose length cannot be read
+/// is skipped too, with the reason: "make sure it is a Short" has to fail
+/// closed, and an unreadable file is not one the upload should be guessing at.
+pub fn short_block(video: &Path) -> Option<String> {
+    match crate::edit::cut::probe_duration_seconds(video) {
+        Ok(seconds) => short_length_block(seconds),
+        Err(err) => Some(format!(
+            "could not read the vertical longform's length ({err:#}) — not uploading it as a Short"
+        )),
+    }
+}
+
+/// The pure half of [`short_block`], for the length alone.
+pub fn short_length_block(seconds: f64) -> Option<String> {
+    (seconds > SHORT_MAX_SECONDS).then(|| {
+        format!(
+            "the vertical longform is {} long, over the {} YouTube allows a Short — not uploading \
+             it. It stays available for the blog's mobile player",
+            mmss(seconds),
+            mmss(SHORT_MAX_SECONDS)
+        )
+    })
+}
+
+/// `245.3` → `4:05`. Rounded, because a Short limit is read to the second.
+fn mmss(seconds: f64) -> String {
+    let whole = seconds.round().max(0.0) as u64;
+    format!("{}:{:02}", whole / 60, whole % 60)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Upload {
     pub video_id: String,
@@ -182,6 +226,12 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
              Short."
                 .into(),
         );
+    } else if let Some(why) = vertical.is_file().then(|| short_block(&vertical)).flatten() {
+        // Over the Shorts limit, or unmeasurable. A skip, not a failure: the
+        // longform is live and that is the press's job; this is the one video
+        // that must not go up under the wrong name.
+        eprintln!("stream-recorder: {why}");
+        status(format!("{}.", capitalize(&why)));
     } else if vertical.is_file() {
         let poster = chosen_thumbnail(session, crate::card::assets::Kind::Vertical);
         let short = upload_one(
@@ -313,6 +363,15 @@ fn video_meta(session: &Session, orientation: Orientation) -> Result<youtube::Vi
         category_id: config.youtube_category_id,
         privacy: config.youtube_privacy,
     })
+}
+
+/// First letter up, for a reason written to read mid-sentence and shown alone.
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// The description with `#Shorts` on the end, unless it is already in there.
@@ -524,6 +583,45 @@ mod tests {
         let root = temp("empty");
         assert!(load(&session(&root)).is_empty());
         assert!(uploaded(&session(&root), "aaaa").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Three minutes is the line YouTube draws: at it a portrait upload is a
+    /// Short, past it the same upload is an ordinary video under a `/shorts/`
+    /// URL that lies. So the check is strictly over, and the reason names both
+    /// lengths so the operator can see how far over it is.
+    #[test]
+    fn a_vertical_over_three_minutes_is_skipped_and_one_at_the_line_is_not() {
+        assert_eq!(short_length_block(59.0), None);
+        assert_eq!(short_length_block(180.0), None);
+        let why = short_length_block(245.3).expect("over the limit");
+        assert!(why.contains("4:05"), "{why}");
+        assert!(why.contains("3:00"), "{why}");
+        assert!(why.contains("not uploading"), "{why}");
+        // Just over rounds to the limit on screen, and is still over.
+        assert!(short_length_block(180.4).is_some());
+    }
+
+    #[test]
+    fn lengths_read_as_minutes_and_seconds() {
+        assert_eq!(mmss(0.0), "0:00");
+        assert_eq!(mmss(59.6), "1:00");
+        assert_eq!(mmss(180.0), "3:00");
+        assert_eq!(mmss(605.0), "10:05");
+        assert_eq!(capitalize("the vertical"), "The vertical");
+        assert_eq!(capitalize(""), "");
+    }
+
+    /// "Make sure we skip it" has to fail closed: a file whose length cannot be
+    /// read is not uploaded as a Short either, and the reason says why.
+    #[test]
+    fn an_unreadable_vertical_is_skipped_rather_than_guessed_at() {
+        let root = temp("unreadable");
+        let bogus = root.join("longform.mp4");
+        std::fs::write(&bogus, b"not a video").unwrap();
+        let why = short_block(&bogus).expect("skipped");
+        assert!(why.contains("could not read"), "{why}");
+        assert!(why.contains("not uploading"), "{why}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

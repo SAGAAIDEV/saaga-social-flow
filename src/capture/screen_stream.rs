@@ -30,7 +30,7 @@ use objc2_foundation::NSError;
 use objc2_screen_capture_kit::{SCDisplay, SCStream, SCStreamConfiguration, SCStreamOutputType};
 
 use super::screen_delegate::ScreenDelegate;
-use super::screen_filter::{content_filter, fetch_content, find_display};
+use super::screen_filter::{content_filter, current_exclusions, find_display, no_exclusions};
 use crate::region::{DisplayGeometry, PixelSize, PointRect};
 
 /// What part of a display to capture, and what size to deliver it at.
@@ -79,6 +79,11 @@ pub struct ScreenConnection {
     /// async content query — which would turn a region drag into a ten-second
     /// timeout risk.
     display: Retained<SCDisplay>,
+    /// Whether this process's own windows are in the recording. Read by
+    /// [`refresh_exclusions`](ScreenConnection::refresh_exclusions), so an
+    /// overlay appearing mid-take rebuilds the filter the way the operator
+    /// left the switch rather than the way the stream was started.
+    show_self: bool,
     /// The display this is capturing, so a caller can size a new region
     /// without re-deriving the backing scale.
     pub geometry: DisplayGeometry,
@@ -106,7 +111,14 @@ impl ScreenConnection {
     /// into this process. It is strictly cheaper than capturing everything and
     /// cropping later, which is why the recorder does its framing here rather
     /// than in the op graph.
-    pub fn start_capture(display_uid: &str, capture: Option<Capture>) -> Result<ScreenConnection> {
+    ///
+    /// `show_self` puts this process's own windows in the shot instead of
+    /// keeping them out — see [`super::screen_filter`] for when that is wanted.
+    pub fn start_capture(
+        display_uid: &str,
+        capture: Option<Capture>,
+        show_self: bool,
+    ) -> Result<ScreenConnection> {
         let target: u32 = display_uid
             .parse()
             .with_context(|| format!("display id {display_uid} is not a CGDirectDisplayID"))?;
@@ -114,7 +126,12 @@ impl ScreenConnection {
         let geometry = super::screen::display_geometry(display_uid)?;
         let (display, own_windows, full_width, full_height) = find_display(target)?;
 
-        let filter = content_filter(&display, &own_windows);
+        let excluded = if show_self {
+            no_exclusions()
+        } else {
+            own_windows
+        };
+        let filter = content_filter(&display, &excluded);
         let config = unsafe { SCStreamConfiguration::new() };
         let (width, height) = apply_capture(&config, capture, (full_width, full_height));
         unsafe {
@@ -162,6 +179,7 @@ impl ScreenConnection {
             delegate,
             _queue: queue,
             display,
+            show_self,
             geometry,
             capture,
             width,
@@ -216,15 +234,16 @@ impl ScreenConnection {
         Ok(())
     }
 
-    /// Re-read the window list and exclude this process's windows again.
+    /// Re-read the window list and exclude this process's windows again — or
+    /// nothing, while the app is meant to be in the shot.
     ///
     /// Needed because `SCShareableContent` is a *snapshot*: a window created
     /// after the filter was built — the region overlay, which only appears when
     /// the operator asks for it — is not in the array the filter was
     /// constructed from, and would otherwise be recorded.
     pub fn refresh_exclusions(&self) -> Result<()> {
-        let (_, own_windows) = fetch_content(unsafe { self.display.displayID() })?;
-        let filter = content_filter(&self.display, &own_windows);
+        let excluded = current_exclusions(unsafe { self.display.displayID() }, self.show_self)?;
+        let filter = content_filter(&self.display, &excluded);
         await_completion(
             |handler| unsafe {
                 self.stream
@@ -232,6 +251,20 @@ impl ScreenConnection {
             },
             "updating the screen stream content filter",
         )
+    }
+
+    /// Put this process's windows into the recording, or back out of it, on
+    /// the running stream.
+    ///
+    /// Safe mid-chapter: the filter changes and the output size does not, so
+    /// the writer keeps receiving the buffers it locked onto. The flag is set
+    /// before the update rather than after it succeeds, so a stream that
+    /// refuses the new filter now still gets it at the next
+    /// [`refresh_exclusions`](ScreenConnection::refresh_exclusions) — the
+    /// overlay appearing, say — instead of quietly keeping the old state.
+    pub fn set_show_self(&mut self, show: bool) -> Result<()> {
+        self.show_self = show;
+        self.refresh_exclusions()
     }
 
     /// The clock ScreenCaptureKit timestamps this stream's buffers against.
@@ -400,8 +433,8 @@ mod tests {
             .expect("av warmup");
         // No region: this measures clocks, and the whole display is the
         // simplest thing to get frames out of.
-        let screen =
-            ScreenConnection::start_capture(&display_uid, None).expect("start screen capture");
+        let screen = ScreenConnection::start_capture(&display_uid, None, false)
+            .expect("start screen capture");
         screen
             .wait_for_warmup(Duration::from_secs(10))
             .expect("screen warmup");

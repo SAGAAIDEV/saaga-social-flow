@@ -120,6 +120,16 @@ pub struct Config {
     /// Whether the vertical screen crop follows the mouse, and how.
     #[serde(default)]
     pub mouse_tracking: MouseTracking,
+    /// Whether this app's own windows appear in the screen recording.
+    ///
+    /// Off by default: the record window and the region overlay are tools, not
+    /// content, and a recorder that films its own UI by accident is a bug. On
+    /// is for the take that is *about* this app — a demo of the recorder
+    /// itself — where hiding it would leave a hole in the desktop. Nothing is
+    /// carved out when it is on, the overlay included; the operator hides the
+    /// regions for that take.
+    #[serde(default)]
+    pub show_app_in_capture: bool,
     /// YouTube category for queued posts, as YouTube's own numeric id.
     ///
     /// Buffer rejects a YouTube post that has none — "YouTube posts require a

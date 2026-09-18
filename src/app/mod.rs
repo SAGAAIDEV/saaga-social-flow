@@ -6,7 +6,7 @@
 //! 3. Render: Titles, then disfluency cut + HyperFrames.
 //! 4. Post: AI social media copy generation for 8 platforms.
 //! 5. Substack: notes to hand-type an essay from. A post step nothing sends.
-//! 6. Distribute: public S3 upload.
+//! 6. Distribute: public S3 upload, run off the end of the render rather than from a tab.
 //! 7. Schedule: build a Buffer plan, review it, queue it.
 //! 8. Analytics: sample sent posts at 7 and 30 days, then report.
 //! 9. Reflect: read every step, propose and validate better prompts.
@@ -192,8 +192,10 @@ pub struct App {
     /// counted and dropped. See the module docs for why this is the default.
     router: Option<Router>,
     connection: Option<av::Connection>,
-    /// The chapter number the next New Chapter press opens while `router` is
-    /// `None`. Survives device switches so numbering never restarts mid-session.
+    /// The chapter the next Start Recording press opens while `router` is
+    /// `None`: one past the highest on disk, unless the Record tab's chapter
+    /// menu picked a recorded chapter to retake — see [`App::select_chapter`].
+    /// Survives device switches so numbering never restarts mid-session.
     next_chapter: u32,
     cameras: Vec<CaptureDevice>,
     mics: Vec<CaptureDevice>,
@@ -250,6 +252,10 @@ pub struct App {
     /// The pointer tracker, when tracking is on. `None` is off — there is no
     /// third state here, unlike `face_tracker`, because nothing has to load.
     pointer_tracker: Option<std::sync::Arc<crate::pointer::PointerTracker>>,
+    /// Whether this app's own windows are in the screen recording. Mirrors
+    /// `config.show_app_in_capture` so the switch, the running stream and the
+    /// next `open_screen` cannot disagree within a session.
+    show_app: bool,
     /// The Notes tab's provider→model choice. One value, because the provider
     /// decides which models exist — see [`crate::notes::Picker`].
     notes_pick: crate::notes::Picker,
@@ -310,6 +316,7 @@ impl App {
             Pair::ALL.iter().position(|p| *p == self.pair).unwrap_or(0),
             self.face_tracking_wanted(),
             self.mouse_tracking_wanted(),
+            self.show_app,
             crate::config::load().render,
             self.youtube_privacy,
             self.notes_pick.menu(),
@@ -401,6 +408,10 @@ impl App {
                 self.session.version,
                 waiting.as_deref(),
                 hold,
+                &ui::NextTake {
+                    recorded: crate::notes::closed_chapter_numbers(&self.session.dir),
+                    chapter: self.next_chapter,
+                },
             );
             live.control_target.set_stage_gates(&self.stages());
             live.control_target
@@ -490,6 +501,7 @@ impl App {
             Action::Notes => self.build_notes(),
             Action::CopyTranscript => self.copy_transcript(),
             Action::Render => self.run_render(),
+            Action::RerenderMissing => self.run_rerender(),
             Action::GenerateTitles => self.run_generate_titles(),
             Action::GeneratePosts => self.run_generate_posts(),
             Action::SavePosts => self.save_edited_posts(),
@@ -701,6 +713,28 @@ impl App {
                 return;
             }
         };
+        // A recorded chapter picked from the chapter menu: its take has to be
+        // out of the way before the writer is built — AVAssetWriter refuses to
+        // start over an existing file — and out of the way *whole*, see
+        // `Router::retire_chapter`. Last of the checks, so a session that
+        // cannot record leaves the old take exactly where it was.
+        if crate::notes::closed_chapter_numbers(&self.session.dir).contains(&self.next_chapter) {
+            let n = self.next_chapter;
+            let edit_dir = crate::edit::pane::chapter_dir(&self.session.edit_dir(), n);
+            match Router::retire_chapter(&self.session.dir, &edit_dir, n) {
+                Ok(moved) => println!(
+                    "stream-recorder: retaking chapter {n:02} — its earlier take is in {}",
+                    moved.display()
+                ),
+                Err(e) => {
+                    eprintln!(
+                        "stream-recorder: could not set chapter {n:02} aside for a retake: {e:#}"
+                    );
+                    self.sync_controls();
+                    return;
+                }
+            }
+        }
         match Router::start_at(
             &self.session.dir,
             &delegate,
@@ -764,6 +798,7 @@ impl App {
                 self.sync_face_control();
             }
             UiEvent::MouseTrackToggled(on) => self.set_mouse_tracking(on),
+            UiEvent::ShowAppToggled(on) => self.set_show_app(on),
             UiEvent::FaceTrackReady(built) => self.face_tracker_ready(built),
             UiEvent::YoutubePrivacySelected(idx) => self.select_youtube_privacy(idx),
             UiEvent::ModelSelected(idx) => self.select_model(idx),
@@ -783,6 +818,7 @@ impl App {
                 }
             }
             UiEvent::VersionSelected(n) => self.switch_version(n),
+            UiEvent::ChapterSelected(n) => self.select_chapter(n),
             UiEvent::ProjectSelected(index) => self.switch_project(index),
             UiEvent::ValidateRewrite(index) => self.run_validate_rewrite(index),
             UiEvent::WebApprove { index, value } => self.set_rewrite_approval(index, value),
@@ -973,7 +1009,6 @@ impl App {
         self.update_video_view();
         self.update_substack_view();
         self.update_blog_view();
-        self.update_distribute_summary();
         self.update_publish_summary();
         self.update_schedule_summary();
         self.sync_controls();
@@ -982,11 +1017,30 @@ impl App {
     /// The chapter a recording would open next: one past the highest already
     /// closed in this take's folder.
     fn resume_chapter_number(&self) -> u32 {
-        crate::notes::closed_chapter_numbers(&self.session.dir)
-            .into_iter()
-            .max()
-            .unwrap_or(0)
-            + 1
+        self.chapter_after(0)
+    }
+
+    /// The chapter to open once `current` closes. Not always `current + 1` —
+    /// see [`crate::router::next_free_chapter`] for the retake that makes the
+    /// two differ.
+    fn chapter_after(&self, current: u32) -> u32 {
+        crate::router::next_free_chapter(&self.session.dir, current)
+    }
+
+    /// The chapter menu on the Record tab: point the next Start Recording press
+    /// at chapter `n`. A recorded chapter makes that press a retake of it, the
+    /// fresh one a plain start — and either way nothing moves on disk until
+    /// the press, so a wrong pick costs nothing. Idle only: mid-take the Router
+    /// owns the number, and the menu is switched off to say so.
+    fn select_chapter(&mut self, n: u32) {
+        if self.router.is_some() {
+            eprintln!(
+                "stream-recorder: a chapter is recording — Stop before picking one to retake"
+            );
+            return;
+        }
+        self.next_chapter = n;
+        self.sync_controls();
     }
 
     /// Points every tab at `next`. Anything missed here would keep showing the
@@ -1030,7 +1084,7 @@ impl App {
         // at the pause point, with the explanation kept beside the figure.
         self.end_break(false);
         if let Some(mut router) = self.router.take() {
-            self.next_chapter = router.current_chapter_number() + 1;
+            self.next_chapter = self.chapter_after(router.current_chapter_number());
             println!(
                 "stream-recorder: finishing chapter {} so the job can include it",
                 router.current_chapter_number()
@@ -1088,24 +1142,7 @@ impl App {
     /// render *requires* a still — it takes one, and refuses to start only
     /// when it cannot and there is none from before to fall back on.
     fn run_render(&mut self) {
-        // The button is switched off in both these cases, but a hotkey and a
-        // queued click both reach here without passing the button.
-        if self.render_busy {
-            self.set_render_status("A render is already running…");
-            return;
-        }
-        let stages = self.stages();
-        if let Some(reason) = stages.render.missing() {
-            self.set_render_status(reason);
-            return;
-        }
-        // Refused before the photo is taken and the cut starts: a render with
-        // nothing to produce would still cost both.
-        if !crate::config::load().render.any() {
-            let reason = "Every render output is switched off — tick the horizontal longform, \
-                          the vertical longform or the shorts above the Render button";
-            self.set_render_status(reason);
-            self.set_thumbnail_status(reason);
+        if !self.render_can_start() {
             return;
         }
         let photo = match self.take_still() {
@@ -1123,6 +1160,59 @@ impl App {
             }
         };
         self.update_video_view();
+        self.launch_render(
+            &format!("{photo}. Cutting disfluencies…"),
+            &format!("{photo}. Rendering — the title, artwork and upload follow."),
+        );
+    }
+
+    /// Re-render missing: the Render press without the photo.
+    ///
+    /// Everything the render stage does is already incremental — the cut, the
+    /// compositions and the renders each skip what is current on disk — so this
+    /// draws exactly the clips the last press left missing or failed, joins the
+    /// longforms, and carries on down the same chain: copy, artwork, upload.
+    /// The photo is the one step of a Render press that is *not* idempotent —
+    /// it replaces the still the artwork is drawn from — which is why finishing
+    /// five failed renders out of twenty-one must not go through it.
+    fn run_rerender(&mut self) {
+        if !self.render_can_start() {
+            return;
+        }
+        self.launch_render(
+            "Re-rendering what the last render left missing — current clips are skipped…",
+            "Re-rendering — the title, artwork and upload follow.",
+        );
+    }
+
+    /// The three refusals Render and Re-render missing share, each written to
+    /// the status line. The buttons are switched off in the first two cases,
+    /// but a hotkey and a queued click both reach here without passing them.
+    fn render_can_start(&mut self) -> bool {
+        if self.render_busy {
+            self.set_render_status("A render is already running…");
+            return false;
+        }
+        let stages = self.stages();
+        if let Some(reason) = stages.render.missing() {
+            self.set_render_status(reason);
+            return false;
+        }
+        // Refused before the photo is taken and the cut starts: a render with
+        // nothing to produce would still cost both.
+        if !crate::config::load().render.any() {
+            let reason = "Every render output is switched off — tick the horizontal longform, \
+                          the vertical longform or the shorts above the Render button";
+            self.set_render_status(reason);
+            self.set_thumbnail_status(reason);
+            return false;
+        }
+        true
+    }
+
+    /// Start the cut-and-render thread and arm the chain that follows it. The
+    /// two status lines are the press's own words about what it is doing.
+    fn launch_render(&mut self, render_status: &str, thumbnail_status: &str) {
         self.finish_open_chapter();
         println!("stream-recorder: cutting disfluencies and rendering…");
         self.render_busy = true;
@@ -1130,10 +1220,8 @@ impl App {
         // Both bars back to the start: the second is what this press owes next.
         self.set_render_progress(0.0);
         self.set_thumbnail_progress(Some(0.0));
-        self.set_render_status(&format!("{photo}. Cutting disfluencies…"));
-        self.set_thumbnail_status(&format!(
-            "{photo}. Rendering — the title, artwork and upload follow."
-        ));
+        self.set_render_status(render_status);
+        self.set_thumbnail_status(thumbnail_status);
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
         self.sync_controls();
     }
@@ -1163,48 +1251,124 @@ impl App {
         }
     }
 
-    /// The artwork set is committed: the last thing the press owes is the
-    /// YouTube upload, and only when it is safe to make one unasked.
+    /// The artwork set is committed: the last things the press owes are the
+    /// uploads — the longform to YouTube, and every render to S3 for Buffer —
+    /// each only when it is safe to make unasked.
     ///
-    /// Only a project that has never been uploaded goes up on its own. A
-    /// re-render of a video that is already on YouTube would otherwise mint a
-    /// second copy on the channel every time a cut was tightened, and that is
-    /// a decision for the YouTube tab's button, not the render's. Likewise a
-    /// shut gate or an unconnected account ends the chain with the reason
-    /// rather than a failure: the render and the artwork are done and good.
+    /// Both start here and run side by side; each streams from disk in small
+    /// parts, so neither costs the memory a render does. A refusal on either
+    /// side ends that half of the chain with the reason rather than a failure:
+    /// the render and the artwork are done and good, and the status line says
+    /// what each upload is doing or why it is not.
     pub(super) fn finish_pipeline_with_upload(&mut self) {
         if !self.pipeline {
             return;
         }
         self.pipeline = false;
+        let youtube = self.youtube_after_render();
+        let hosting = self.host_after_render();
+        self.pipeline_status(&format!("Artwork ready. {youtube} {hosting}"));
+    }
+
+    /// The YouTube half. Only a project that has never been uploaded goes up
+    /// on its own. A re-render of a video that is already on YouTube would
+    /// otherwise mint a second copy on the channel every time a cut was
+    /// tightened, and that is a decision for the YouTube tab's button, not
+    /// the render's. Likewise a shut gate or an unconnected account is a
+    /// sentence here, not an error.
+    fn youtube_after_render(&mut self) -> String {
         if let Some(prior) = crate::publish::longform(&self.session) {
-            self.pipeline_status(&format!(
-                "Artwork ready. Already on YouTube at {} — to publish this render as a new video, press Upload on the YouTube tab.",
+            return format!(
+                "Already on YouTube at {} — to publish this render as a new video, press Upload on the YouTube tab.",
                 prior.url
-            ));
-            return;
+            );
         }
         if crate::publish::connected_channel().is_none() {
-            self.pipeline_status(
-                "Artwork ready. YouTube is not connected — press Connect… on the YouTube tab, then Upload.",
-            );
-            return;
+            return "YouTube is not connected — press Connect… on the YouTube tab, then Upload."
+                .to_string();
         }
         match self.stages().publish {
             crate::stage::Gate::Ready => {
-                self.pipeline_status(&format!(
-                    "Artwork ready — uploading to YouTube as {}…",
-                    self.youtube_privacy.label()
-                ));
                 self.run_youtube_upload();
+                format!("Uploading to YouTube as {}…", self.youtube_privacy.label())
             }
-            crate::stage::Gate::Busy => {
-                self.pipeline_status("Artwork ready. A YouTube upload is already running.");
-            }
-            crate::stage::Gate::Missing(reason) => {
-                self.pipeline_status(&format!("Artwork ready. YouTube upload skipped: {reason}"));
-            }
+            crate::stage::Gate::Busy => "A YouTube upload is already running.".to_string(),
+            crate::stage::Gate::Missing(reason) => format!("YouTube upload skipped: {reason}"),
         }
+    }
+
+    /// The S3 half: the renders Buffer will post, uploaded on every render.
+    ///
+    /// Every render rather than only the first, unlike YouTube, because the
+    /// keys carry a content hash — see [`crate::distribute`] — so a re-render
+    /// lands at fresh URLs and an unchanged file is found already there and
+    /// not sent again. This used to be a button on a tab of its own, pressed
+    /// between the render and Build Plan and forgotten as often as not; the
+    /// tab is gone, and the plan's gate names this step when the URLs are
+    /// missing. Re-render missing is how to run it again by hand — after an
+    /// `aws sso login`, say.
+    ///
+    /// Narrates on the Socials tab beside the Buffer plan, which is where the
+    /// URLs are consumed — and so the YouTube upload running alongside keeps
+    /// the render's own line for its link.
+    fn host_after_render(&mut self) -> String {
+        match self.stages().distribute {
+            crate::stage::Gate::Ready => {
+                self.start_hosting();
+                "The renders are going to S3 for Buffer — progress on the Socials tab, above the plan."
+                    .to_string()
+            }
+            crate::stage::Gate::Busy => "An S3 upload is already running.".to_string(),
+            crate::stage::Gate::Missing(reason) => format!("S3 upload skipped: {reason}"),
+        }
+    }
+
+    /// The Buffer tab's button, for when the check above the plan says a video
+    /// is not on S3: after an `aws sso login` the render's own upload missed,
+    /// or a re-render whose upload failed. Never refused for having nothing to
+    /// do — an object already at its key is not sent again, so a needless
+    /// press costs a few HEAD requests and rewrites the record.
+    fn run_distribute(&mut self) {
+        match self.stages().distribute {
+            crate::stage::Gate::Ready => self.start_hosting(),
+            crate::stage::Gate::Busy => {
+                self.set_distribute_status("An S3 upload is already running…")
+            }
+            crate::stage::Gate::Missing(reason) => self.set_distribute_status(&reason),
+        }
+    }
+
+    fn start_hosting(&mut self) {
+        self.distribute_busy = true;
+        self.set_distribute_status("Uploading the renders to S3…");
+        crate::distribute::spawn_distribute(self.session.clone(), self.distribute_tx.clone());
+        self.sync_controls();
+    }
+
+    /// The S3 line on the Buffer tab.
+    fn set_distribute_status(&self, text: &str) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_distribute_status(text);
+        }
+    }
+
+    /// Repaints the S3 line from the check — unless an upload is narrating on
+    /// it, whose byte counts say strictly more than the check could.
+    fn update_distribute_summary(&self) {
+        if self.distribute_busy {
+            return;
+        }
+        let check = crate::distribute::check(&self.session, crate::config::load().render);
+        let line = match self.stages().distribute {
+            // The check's line still says which videos are behind; the gate's
+            // reason says why the button beside it is off.
+            crate::stage::Gate::Missing(reason) if !check.rows.is_empty() => {
+                format!("{} ({reason})", check.summary())
+            }
+            crate::stage::Gate::Missing(reason) => reason,
+            _ => check.summary(),
+        };
+        self.set_distribute_status(&line);
     }
 
     /// The chain narrates in both places it is watched: under the render
@@ -1724,28 +1888,6 @@ impl App {
             self.set_publish_status(&format!("Could not start the connect job: {err}"));
         }
         self.sync_controls();
-    }
-
-    fn run_distribute(&mut self) {
-        if self.distribute_busy {
-            self.set_distribute_status("An upload is already running…");
-            return;
-        }
-        let stages = self.stages();
-        if let Some(reason) = stages.distribute.missing() {
-            self.set_distribute_status(reason);
-            return;
-        }
-        self.distribute_busy = true;
-        self.set_distribute_status("Uploading renders to S3…");
-        crate::distribute::spawn_distribute(self.session.clone(), self.distribute_tx.clone());
-        self.sync_controls();
-    }
-
-    fn set_distribute_status(&self, text: &str) {
-        if let Some(live) = self.live.as_ref() {
-            live.control_target.set_distribute_status(text);
-        }
     }
 
     /// Step 1: read posts + links + channels and write schedule.json. No posting.
@@ -2278,6 +2420,19 @@ impl App {
                     // The vertical cut's Short, listed beside it so neither link
                     // needs the YouTube tab.
                     short => crate::publish::short(&self.session).map(|upload| upload.url),
+                    // Where the renders went for Buffer — see [`crate::distribute`].
+                    // The tab that listed them is gone, so this is the page that says.
+                    hosted => crate::distribute::load(&self.session.distribute_dir())
+                        .ok()
+                        .map(|links| minijinja::context! {
+                            count => links.items.len(),
+                            path => self
+                                .session
+                                .distribute_dir()
+                                .join(crate::distribute::schema::LINKS_JSON)
+                                .display()
+                                .to_string(),
+                        }),
                     // The figures snipped during the take, each with what was said
                     // over it. Same view the Blog tab embeds — see there for `scale`.
                     figures => crate::figure::pane::build(
@@ -3106,36 +3261,6 @@ impl App {
         live.control_target.set_render_summary(&summary);
     }
 
-    fn update_distribute_summary(&self) {
-        let Some(live) = self.live.as_ref() else {
-            return;
-        };
-        // A running upload is left to narrate itself: it reports per-file byte
-        // counts, which is strictly more than this could say.
-        match self.stages().distribute {
-            crate::stage::Gate::Missing(reason) => {
-                live.control_target.set_distribute_status(&reason)
-            }
-            crate::stage::Gate::Ready => live
-                .control_target
-                .set_distribute_status("Ready to upload to S3."),
-            crate::stage::Gate::Busy => {}
-        }
-        let mut info = format!(
-            "# Distribute ({})\n\n",
-            self.session.distribute_dir().display()
-        );
-        if let Ok(links) = crate::distribute::load(&self.session.distribute_dir()) {
-            info.push_str("## Public URLs\n");
-            for item in &links.items {
-                info.push_str(&format!("- {}: {}\n", item.id, item.url));
-            }
-        } else {
-            info.push_str("No upload yet. Render, then Upload to S3.\n");
-        }
-        live.control_target.set_distribute_info(&info);
-    }
-
     /// What the YouTube tab shows: whether this render is already up, and the
     /// title and description the upload would carry.
     ///
@@ -3199,11 +3324,8 @@ impl App {
         }
         // The vertical cut, as a Short. Said either way once the cut exists, so
         // the tab never leaves anyone guessing whether Upload will send it.
-        let has_vertical = self
-            .session
-            .render_dir()
-            .join("vertical/longform.mp4")
-            .is_file();
+        let vertical = self.session.render_dir().join("vertical/longform.mp4");
+        let has_vertical = vertical.is_file();
         let targets = crate::config::load().render;
         match crate::publish::short(&self.session) {
             Some(short) => {
@@ -3217,10 +3339,18 @@ impl App {
                 "\n## Short\n- The vertical longform is switched off above the Render button, so it \
                  is not uploaded as a Short.\n",
             ),
-            None if has_vertical => info.push_str(
-                "\n## Short\n- The vertical cut goes up as a Short with the next Upload, after \
-                 the longform.\n",
-            ),
+            // The same length check Upload makes, made here first, so a cut
+            // that is too long is announced before the press rather than
+            // discovered in the status line after it.
+            None if has_vertical => match crate::publish::short_block(&vertical) {
+                Some(why) => info.push_str(&format!(
+                    "\n## Short\n- Not with this cut: {why}.\n"
+                )),
+                None => info.push_str(
+                    "\n## Short\n- The vertical cut goes up as a Short with the next Upload, after \
+                     the longform.\n",
+                ),
+            },
             None => {}
         }
         // Both links with a copy each, and one copy for both: the pair is what
@@ -3251,9 +3381,10 @@ impl App {
         let Some(live) = self.live.as_ref() else {
             return;
         };
+        self.update_distribute_summary();
         let schedule_dir = self.session.schedule_dir();
         let plan = crate::schedule::load_plan(&schedule_dir).ok();
-        let hosted = crate::distribute::load(&self.session.distribute_dir()).ok();
+        let hosting = crate::distribute::check(&self.session, crate::config::load().render);
         match &plan {
             Some(saved) => live.schedule_form.show(saved),
             None => live.schedule_form.show_empty(),
@@ -3271,12 +3402,29 @@ impl App {
             // story — and the gate already knows which of the three it is.
             None => match self.stages().plan.missing() {
                 Some(reason) => reason.to_string(),
-                None => "S3 links ready — press Build Plan".to_string(),
+                None => "Every video is on S3 — press Build Plan".to_string(),
             },
         };
         live.control_target.set_schedule_status(&status);
 
         let mut info = format!("# Schedule ({})\n\n", schedule_dir.display());
+        // Per video, because the line above only has room to name the ones
+        // that are behind — and the URL is what Buffer will be handed.
+        info.push_str(&format!("## S3 ({})\n", hosting.links.display()));
+        for row in &hosting.rows {
+            let state = match &row.state {
+                crate::distribute::Hosting::Hosted(url) => format!("on S3 → {url}"),
+                crate::distribute::Hosting::Changed(url) => {
+                    format!("RENDERED SINCE THE UPLOAD — the record points at the old cut, {url}")
+                }
+                crate::distribute::Hosting::Missing => "NOT UPLOADED".to_string(),
+            };
+            info.push_str(&format!("- {} · {state}\n", row.id));
+        }
+        if hosting.rows.is_empty() {
+            info.push_str("No videos rendered yet.\n");
+        }
+        info.push('\n');
         match plan {
             Some(plan) => {
                 let ready = plan.queueable().count();
@@ -3315,9 +3463,10 @@ impl App {
                 }
             }
             None => {
-                let count = hosted.map(|l| l.items.len()).unwrap_or(0);
                 info.push_str(&format!(
-                    "No plan yet. {count} public URL(s) from Distribute.\n"
+                    "No plan yet. {} of {} video(s) on S3.\n",
+                    hosting.hosted(),
+                    hosting.rows.len()
                 ));
                 info.push_str("Press Build Plan to see what would be queued.\n");
             }
@@ -3399,7 +3548,6 @@ impl App {
                     self.update_video_view();
                     self.update_substack_view();
                     self.update_blog_view();
-                    self.update_distribute_summary();
                     self.update_publish_summary();
                     self.update_schedule_summary();
                     self.sync_controls();
@@ -3459,40 +3607,41 @@ impl App {
 
     fn drain_distribute(&mut self) {
         // No early return on a missing window: the terminal event is what clears
-        // `distribute_busy`, and dropping it would wedge the Upload button.
+        // `distribute_busy`, and dropping it would wedge the button and the next
+        // render's upload.
         let events: Vec<_> = self.distribute_rx.try_iter().collect();
         for event in events {
             match event {
-                crate::distribute::DistributeEvent::Status(msg) => {
-                    self.set_distribute_status(&msg);
-                }
+                crate::distribute::DistributeEvent::Status(msg) => self.set_distribute_status(&msg),
                 crate::distribute::DistributeEvent::Progress(id, update) => {
-                    if let Some(live) = self.live.as_ref() {
-                        live.control_target.set_distribute_progress(update.pct);
-                    }
                     self.set_distribute_status(&format!(
-                        "Uploading {id} — {:.1}%  {:.1}/{:.1} MB",
+                        "Uploading {id} to S3 — {:.1}%  {:.1}/{:.1} MB",
                         update.pct, update.seen_mb, update.total_mb
                     ));
                 }
-                crate::distribute::DistributeEvent::Ready(path, _links) => {
+                crate::distribute::DistributeEvent::Ready(path, links) => {
                     self.distribute_busy = false;
-                    if let Some(live) = self.live.as_ref() {
-                        live.control_target.hide_distribute_progress();
-                    }
-                    // Summary first: it repaints the status line, and the path is
-                    // the more useful thing to leave on screen.
-                    self.update_distribute_summary();
+                    eprintln!(
+                        "stream-recorder: {} file(s) on S3 → {}",
+                        links.items.len(),
+                        path.display()
+                    );
+                    // The check gets the last word on the S3 line — "All 9
+                    // video(s) on S3." — the plan's gate reopens under it, and
+                    // the recording page lists where everything went.
                     self.update_schedule_summary();
-                    self.set_distribute_status(&format!("S3 upload ready → {}", path.display()));
+                    self.update_video_view();
                     self.sync_controls();
                 }
                 crate::distribute::DistributeEvent::Failed(msg) => {
                     self.distribute_busy = false;
-                    if let Some(live) = self.live.as_ref() {
-                        live.control_target.hide_distribute_progress();
-                    }
                     self.set_distribute_status(&msg);
+                    // An upload the render started fails where the render is
+                    // watched — unless the YouTube upload started beside it is
+                    // still narrating there, in which case its link wins.
+                    if !self.publish_busy {
+                        self.pipeline_status(&msg);
+                    }
                     self.sync_controls();
                 }
             }
@@ -3573,11 +3722,7 @@ impl ApplicationHandler for App {
                     None => "stream-recorder".into(),
                 };
                 live.window.set_title(&title);
-                self.next_chapter = crate::notes::closed_chapter_numbers(&self.session.dir)
-                    .into_iter()
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
+                self.next_chapter = self.resume_chapter_number();
                 // A key that arrived after the take — a login, a paste in
                 // Settings — transcribes the chapters that were skipped
                 // without it. Here, before the panes, so a Render pressed
@@ -3622,7 +3767,6 @@ impl ApplicationHandler for App {
                 self.update_video_view();
                 self.update_substack_view();
                 self.update_blog_view();
-                self.update_distribute_summary();
                 self.update_publish_summary();
                 self.update_schedule_summary();
                 // Painted only by whatever last wrote it, so a launch left it

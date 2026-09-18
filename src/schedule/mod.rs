@@ -166,7 +166,7 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
         distribute_dir.display()
     ));
     let links = crate::distribute::load(&distribute_dir)
-        .context("no public urls — run Distribute first")?;
+        .context("nothing on S3 yet — press Upload to S3 on the Buffer tab")?;
 
     if let Some(warning) = version_mismatch(session.version, posts.version, links.version) {
         eprintln!("stream-recorder: {warning}");

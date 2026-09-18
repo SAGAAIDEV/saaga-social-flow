@@ -11,7 +11,13 @@
 //! window and the region overlay are tools, not content. This used to pass an
 //! empty array on the reasoning that an operator might want the record window
 //! visible "as proof of what was captured"; the region border is that proof
-//! now, and a recorder that films its own UI is a bug.
+//! now, and a recorder that films its own UI *by accident* is a bug.
+//!
+//! On purpose is different. A take that is about this app — a demo of the
+//! recorder — needs the app in the shot, so the Show App switch on the Record
+//! tab asks for [`no_exclusions`] instead. That is the operator's call per
+//! take, remembered in `config.show_app_in_capture`, and it hides nothing at
+//! all: the overlay is theirs to switch off for that recording.
 
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -23,12 +29,14 @@ use objc2::AnyThread;
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{SCContentFilter, SCDisplay, SCShareableContent, SCWindow};
 
-/// A filter over one display that excludes every window this process owns.
+/// A filter over one display that leaves out `excluded` — every window this
+/// process owns, normally, or nothing when the app is meant to be in the shot.
 ///
 /// The record window and the region overlay are tools, not content. This used
 /// to pass an empty array on the reasoning that an operator might want the
 /// record window visible "as proof of what was captured"; the region border is
-/// that proof now, and a recorder that films its own UI is a bug.
+/// that proof now, and a recorder that films its own UI by accident is a bug.
+/// Filming it on purpose is [`no_exclusions`].
 ///
 /// Matched by pid rather than by window number, so it needs no bookkeeping and
 /// picks up windows this process has not created yet — though only as of the
@@ -36,15 +44,37 @@ use objc2_screen_capture_kit::{SCContentFilter, SCDisplay, SCShareableContent, S
 /// [`ScreenConnection::refresh_exclusions`] exists.
 pub(super) fn content_filter(
     display: &SCDisplay,
-    own_windows: &NSArray<SCWindow>,
+    excluded: &NSArray<SCWindow>,
 ) -> Retained<SCContentFilter> {
     unsafe {
         SCContentFilter::initWithDisplay_excludingWindows(
             SCContentFilter::alloc(),
             display,
-            own_windows,
+            excluded,
         )
     }
+}
+
+/// Nothing left out: the display as it is, this app's windows included.
+pub(super) fn no_exclusions() -> Retained<NSArray<SCWindow>> {
+    NSArray::from_retained_slice(&[])
+}
+
+/// The windows to keep out of a running stream, as of now.
+///
+/// This process's own, re-read from ScreenCaptureKit — or none, without asking
+/// it anything, when the app is meant to be in the shot: there is nothing to
+/// look up, and the content query is the ten-second round trip the module docs
+/// warn about.
+pub(super) fn current_exclusions(
+    display: u32,
+    show_self: bool,
+) -> Result<Retained<NSArray<SCWindow>>> {
+    if show_self {
+        return Ok(no_exclusions());
+    }
+    let (_, own_windows) = fetch_content(display)?;
+    Ok(own_windows)
 }
 
 /// The display to capture, the windows to leave out of it, and its native

@@ -16,7 +16,7 @@
 //! | file | responsibility |
 //! |---|---|
 //! | `mod.rs` | the state machine: chapter numbering, and the order writers are swapped in |
-//! | [`chapter`] | one chapter's outputs — writers, anchors, graphs, paths, finish and discard |
+//! | [`chapter`] | one chapter's outputs — writers, anchors, graphs, paths, finish, discard and retire |
 
 mod chapter;
 
@@ -145,7 +145,7 @@ impl Router {
     /// chapter-for-chapter aligned even if one of them errors.
     pub fn cut_chapter(&mut self) -> Result<()> {
         let old_chapter = self.current_chapter;
-        let next_chapter = old_chapter + 1;
+        let next_chapter = self.next_chapter_number();
 
         // Build first, swap second: see build_chapter.
         let (av, screen) = self.build_chapter(next_chapter)?;
@@ -196,7 +196,7 @@ impl Router {
         // reconfigure restarted the stream rather than updating it.
         self.screen = reconfigure()?;
 
-        let next_chapter = old_chapter + 1;
+        let next_chapter = self.next_chapter_number();
         let (av, screen) = self.build_chapter(next_chapter)?;
         self.install_chapter(av, screen);
         self.current_chapter = next_chapter;
@@ -275,9 +275,37 @@ impl Router {
         self.current_chapter
     }
 
+    /// The chapter a cut opens. See [`next_free_chapter`] for why this is not
+    /// simply `current + 1`.
+    fn next_chapter_number(&self) -> u32 {
+        next_free_chapter(&self.session_dir, self.current_chapter)
+    }
+
     pub fn set_pair(&mut self, pair: Pair) {
         self.pair = pair;
     }
+}
+
+/// The chapter to open after `current`: one past the highest number this take
+/// has on disk, or one past `current`, whichever is greater.
+///
+/// The two agree whenever chapters are recorded in order, which is every take
+/// until a closed chapter is reopened for a retake — see
+/// [`Router::retire_chapter`]. Then the open chapter sits *below* chapters
+/// already recorded, and `current + 1` would name a chapter whose files exist.
+/// AVAssetWriter refuses to start over an existing file, and had it not, a New
+/// Chapter press would have thrown a finished chapter away without asking.
+/// So a cut out of a retaken chapter goes to the first free number instead,
+/// and the status line says which.
+///
+/// `current` is `0` for "nothing is open": the number a fresh recording starts
+/// at, which is how the app resumes numbering when a project is reopened.
+pub fn next_free_chapter(session_dir: &Path, current: u32) -> u32 {
+    let highest = crate::notes::closed_chapter_numbers(session_dir)
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    highest.max(current) + 1
 }
 
 #[cfg(test)]

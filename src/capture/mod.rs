@@ -17,7 +17,7 @@
 //! | module | responsibility |
 //! |---|---|
 //! | [`screen`] | enumerating displays for the picker, and each one's geometry in both units |
-//! | [`screen_filter`] | resolving a display, and excluding this process's own windows from it |
+//! | [`screen_filter`] | resolving a display, and keeping this process's own windows out of it — unless the operator wants the app in the shot |
 //! | [`screen_stream`] | the running `SCStream`: its region, its lifecycle, its clock |
 //! | [`screen_writer`] | the hand-built H.264 settings and the `AVAssetWriter` they configure |
 

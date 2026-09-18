@@ -220,8 +220,8 @@ fn chapter_flow_with_screen_produces_aligned_pairs() {
         region: resolved.rect,
         output,
     };
-    let screen =
-        ScreenConnection::start_capture(&display_uid, Some(capture)).expect("screen capture");
+    let screen = ScreenConnection::start_capture(&display_uid, Some(capture), false)
+        .expect("screen capture");
     println!(
         "screen region {:?} on a {:?}pt / {:?}px display -> {}×{}",
         resolved.rect, geometry.points, geometry.pixels, screen.width, screen.height,
@@ -389,6 +389,7 @@ fn region_reaches_the_file_at_the_configured_origin() {
             region: half,
             output: expected,
         }),
+        false,
     )
     .expect("screen capture");
     let _ = screen.wait_for_warmup(std::time::Duration::from_secs(5));
@@ -442,6 +443,7 @@ fn region_reaches_the_file_at_the_configured_origin() {
             region: right,
             output: expected,
         }),
+        false,
     )
     .expect("right-half capture");
     assert_eq!(
@@ -486,4 +488,162 @@ fn test_chapter_filename_format() {
             _ => {}
         }
     }
+}
+
+/// An empty directory of our own for one test, so file-moving tests cannot see
+/// each other's chapters.
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "stream-recorder-router-{name}-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// A cut out of a retaken chapter goes to the first free number, never onto a
+/// chapter already recorded; everywhere else it is the number after the open
+/// one, exactly as before.
+#[test]
+fn the_next_free_chapter_skips_what_is_already_on_disk() {
+    let dir = scratch("numbering");
+    assert_eq!(next_free_chapter(&dir, 0), 1, "an empty take starts at one");
+    assert_eq!(
+        next_free_chapter(&dir, 3),
+        4,
+        "nothing on disk: the number after the open chapter"
+    );
+    for n in 1..=5 {
+        fs::write(dir.join(format!("chapter-{n:02}.mp4")), b"").unwrap();
+    }
+    assert_eq!(
+        next_free_chapter(&dir, 5),
+        6,
+        "recorded in order, the answer is current + 1"
+    );
+    assert_eq!(
+        next_free_chapter(&dir, 2),
+        6,
+        "retaking chapter 2 with 3–5 recorded: a cut must not land on chapter 3"
+    );
+    assert_eq!(
+        next_free_chapter(&dir, 0),
+        6,
+        "reopening the project resumes past everything recorded"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A chapter picked for a retake after the take is in the can: everything named
+/// for it moves to `.discarded/` under one stamp, and only what is named for
+/// it. Two of those files would otherwise outlive the take — a completed
+/// transcript, which the transcriber takes as done, and a hand keep-list of
+/// milliseconds into a file that no longer exists.
+#[test]
+fn retiring_a_closed_chapter_moves_every_file_named_for_it_and_nothing_else() {
+    let root = scratch("retire");
+    let session = root.join("drafts");
+    let edit = root.join("edit").join("chapter-03");
+    fs::create_dir_all(&session).unwrap();
+    fs::create_dir_all(&edit).unwrap();
+    let named = [
+        "chapter-03.mp4",
+        "chapter-03-screen.mp4",
+        "chapter-03-horizontal.mp4",
+        "chapter-03.mp3",
+        "chapter-03.m4a",
+        "chapter-03.transcript.json",
+        "chapter-03.stats.json",
+    ];
+    for name in named {
+        fs::write(session.join(name), name).unwrap();
+    }
+    let others = [
+        "chapter-02.mp4",
+        "chapter-04.mp4",
+        "chapter-030.mp4",
+        "figures.jsonl",
+    ];
+    for name in others {
+        fs::write(session.join(name), name).unwrap();
+    }
+    fs::write(edit.join("edits.json"), "{}").unwrap();
+
+    let moved = Router::retire_chapter(&session, &edit, 3).expect("retire chapter 3");
+
+    for name in named {
+        assert!(!session.join(name).exists(), "{name} stayed behind");
+    }
+    for name in others {
+        assert!(
+            session.join(name).is_file(),
+            "{name} was not chapter 3's to move"
+        );
+    }
+    assert!(!edit.exists(), "the edit directory stayed behind");
+
+    // One stamp for the whole set, in the shape the live retake writes.
+    let discarded = session.join(chapter::DISCARDED);
+    assert_eq!(moved.parent(), Some(discarded.as_path()));
+    let stem = moved.file_stem().unwrap().to_string_lossy().into_owned();
+    assert!(stem.starts_with("chapter-03-"), "{stem}");
+    for suffix in [
+        "-screen.mp4",
+        "-horizontal.mp4",
+        ".mp3",
+        ".m4a",
+        ".transcript.json",
+        ".stats.json",
+    ] {
+        assert!(
+            discarded.join(format!("{stem}{suffix}")).is_file(),
+            "{stem}{suffix} is missing from .discarded/"
+        );
+    }
+    assert!(
+        discarded
+            .join(format!("{stem}-edit"))
+            .join("edits.json")
+            .is_file(),
+        "the hand edit was not kept beside the take it was made against"
+    );
+
+    // And the marker log says the take went, the way a live retake's does.
+    let log = fs::read_to_string(session.join("chapters.jsonl")).unwrap();
+    let take = log.lines().last().unwrap();
+    assert!(take.contains(r#""class":"take""#), "{take}");
+    assert!(take.contains(r#""n":3"#), "{take}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// A chapter down to its derivatives — the take gone, the audio and transcript
+/// still there — is retired all the same: those leftovers are exactly what a
+/// fresh take must not inherit.
+#[test]
+fn a_chapter_left_with_only_its_derivatives_is_still_retired() {
+    let dir = scratch("retire-derivatives");
+    fs::write(dir.join("chapter-02.mp3"), b"a").unwrap();
+    fs::write(dir.join("chapter-02.transcript.json"), b"{}").unwrap();
+    let moved = Router::retire_chapter(&dir, &dir.join("edit").join("chapter-02"), 2)
+        .expect("retire chapter 2");
+    assert!(moved.starts_with(dir.join(chapter::DISCARDED)), "{moved:?}");
+    assert!(!dir.join("chapter-02.mp3").exists());
+    assert!(!dir.join("chapter-02.transcript.json").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Nothing to retire is an error, not a silent no-op: the caller is about to
+/// open the chapter as a retake, and should not say so about a chapter that
+/// was never recorded.
+#[test]
+fn retiring_a_chapter_with_no_take_is_refused() {
+    let dir = scratch("retire-missing");
+    let edit = dir.join("edit").join("chapter-07");
+    assert!(Router::retire_chapter(&dir, &edit, 7).is_err());
+    assert!(
+        !dir.join(chapter::DISCARDED).exists(),
+        "nothing should have been created"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }

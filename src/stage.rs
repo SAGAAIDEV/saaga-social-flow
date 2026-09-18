@@ -89,10 +89,15 @@ impl Stages {
         // Distribute takes any cut; YouTube takes the longform specifically, and
         // there is no substitute for it there.
         let longform = session.render_dir().join(LONGFORM).is_file();
-        let linked = session
-            .distribute_dir()
-            .join(crate::distribute::schema::LINKS_JSON)
-            .is_file();
+        // Reads the same config the pane does, so the button and the dropdown
+        // never disagree. A file read, like the checks around it.
+        let config = crate::config::load();
+        // Not "is there a links.json" but "is every video on S3 as it is now":
+        // the file survives a re-render, and a plan built from it would hand
+        // Buffer the old cut. The check's own line is the reason.
+        let hosting = crate::distribute::check(session, config.render);
+        let hosting_reason = hosting.summary();
+        let linked = hosting.complete();
         let posted = session
             .posts_dir()
             .join(crate::posts::schema::POSTS_JSON)
@@ -125,9 +130,6 @@ impl Stages {
             });
         let artwork_reason = artwork.as_ref().err().map(String::as_str).unwrap_or("");
         let has_thumbnail = (artwork.is_ok(), artwork_reason);
-        // Reads the same config the pane does, so the button and the dropdown
-        // never disagree. A file read, like the thumbnail check above it.
-        let config = crate::config::load();
         let has_author =
             crate::blog::chosen_author(&config, &crate::blog::library::load()).is_set();
         // "Not rendered" and "switched off" are different instructions.
@@ -158,7 +160,7 @@ impl Stages {
             plan: gate(
                 busy.schedule,
                 &[
-                    (linked, "No public URLs yet — use Socials → Upload media first"),
+                    (linked, hosting_reason.as_str()),
                     (posted, "No posts yet — generate them in Socials"),
                     buffer,
                 ],
@@ -288,6 +290,28 @@ mod tests {
     }
 
     const NO_RENDER: &str = "Nothing rendered yet — run Render first";
+
+    /// Build Plan used to wait for a `links.json` to exist. A re-render leaves
+    /// the old one in place, so the gate now asks the S3 check and repeats its
+    /// line — which names the video that is behind and the button to press.
+    #[test]
+    fn the_plan_waits_for_every_video_to_be_on_s3_as_it_is_now() {
+        let root = temp("plan-hosting");
+        write(root.join("render/horizontal/longform.mp4"));
+        write(root.join("render/vertical/chapter-01.mp4"));
+        let stages = Stages::read(&session(&root), Busy::default());
+        let reason = stages.plan.missing().expect("shut");
+        // Which videos are expected follows the Render boxes in this machine's
+        // config, like the check itself does — so the assertion follows them
+        // too rather than passing or failing by whose Mac this runs on.
+        let targets = crate::config::load().render;
+        if targets.horizontal || targets.shorts {
+            assert!(reason.contains("press Upload to S3"), "{reason}");
+        } else {
+            assert!(reason.contains("No videos rendered yet"), "{reason}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// The YouTube upload wants the longform itself, so a project with only
     /// vertical chapters must not offer it.

@@ -14,7 +14,7 @@ pub const STEPS: [(&str, &str, &[&str]); 4] = [
     (
         "socials",
         "Socials",
-        &["post", "distribute", "schedule", "analytics", "reflect"],
+        &["post", "schedule", "analytics", "reflect"],
     ),
 ];
 
@@ -69,8 +69,10 @@ mod tests {
             .iter()
             .flat_map(|(_, _, children)| children.iter().copied())
             .collect();
-        assert_eq!(children.len(), 8);
+        assert_eq!(children.len(), 7);
         assert!(!children.contains(&"render"));
+        // The S3 upload runs off the render now — see `App::host_after_render`.
+        assert!(!children.contains(&"distribute"));
         let unique: std::collections::HashSet<_> = children.iter().collect();
         assert_eq!(unique.len(), children.len());
         assert!(!children.contains(&"edit"));

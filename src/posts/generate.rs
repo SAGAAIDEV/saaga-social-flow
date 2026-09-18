@@ -207,8 +207,10 @@ fn build_user_prompt(
 /// here is what made generating posts before a render yield chapters and *no
 /// longform at all*, which left the Schedule tab with no longform row to show
 /// however far the render got afterwards. A video that has no public URL yet is
-/// already handled where it belongs, by the planner's "no distributed url — run
-/// Distribute" skip.
+/// already handled where it belongs, by the planner's "not on S3 yet — press
+/// Upload to S3" skip — and posts written for a chapter are what tell the S3
+/// upload to send it even with the shorts box off; see
+/// `distribute::expected_videos`.
 pub fn collect_video_contexts(session_dir: &Path, notes: Option<&NotesData>) -> Vec<VideoContext> {
     let chapters = chapter_contexts(session_dir, notes);
     if chapters.is_empty() {

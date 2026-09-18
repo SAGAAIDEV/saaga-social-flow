@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_core_media::{CMClock, CMTime};
@@ -27,11 +27,26 @@ use crate::capture::av_delegate::AvState;
 use crate::capture::composed::create_composed_writer;
 use crate::capture::screen_delegate::{ScreenDelegate, ScreenState};
 use crate::capture::screen_writer::create_screen_writer;
+use crate::markers::MarkerLog;
 use crate::ops::{graphs, Graph, StreamCtx, StreamId};
 use crate::region::PixelSize;
 use crate::router::Router;
 use crate::timesync;
 use crate::transcode;
+
+/// Where a thrown-away take goes, under the session directory. A move, never a
+/// delete: the folder is documented to the operator as recoverable.
+pub const DISCARDED: &str = ".discarded";
+
+/// One timestamp per discard, so every file of one discarded take — camera,
+/// screen, composed outputs, sidecars — carries the same number and stays
+/// recognisable as a set inside `.discarded/`.
+fn discard_stamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
 
 /// Everything the Router needs to write the screen half of each chapter.
 /// Absent when no display is selected — screen capture is opt-in.
@@ -267,16 +282,9 @@ impl Router {
             screen.finish().context("finishing discarded screen take")?;
         }
 
-        // Create .discarded/ directory.
-        let discarded_dir = self.session_dir.join(".discarded");
+        let discarded_dir = self.session_dir.join(DISCARDED);
         fs::create_dir_all(&discarded_dir).context("creating .discarded directory")?;
-
-        // One timestamp for both files, so a discarded take's camera and
-        // screen halves stay recognisable as a pair in .discarded/.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+        let now = discard_stamp();
 
         let discarded_path = discarded_dir.join(format!("chapter-{chapter_num:02}-{now}.mp4"));
         let chapter_path = self.chapter_path(chapter_num);
@@ -324,6 +332,106 @@ impl Router {
             .log_take_discarded(chapter_num, &discarded_path)?;
 
         Ok(())
+    }
+
+    /// Move a *closed* chapter's files into `.discarded/` so the same number
+    /// can be recorded again.
+    ///
+    /// [`Router::discard_chapter`] retakes the chapter that is rolling; this is
+    /// its counterpart for a chapter finished some time ago — picked from the
+    /// Record tab's chapter menu once the whole take was in the can and one
+    /// chapter of it turned out wrong. No Router is alive at that point, so
+    /// this works over the session directory alone, and the caller opens the
+    /// chapter afresh with [`Router::start_at`] once it returns.
+    ///
+    /// Everything named for the chapter goes: the camera and screen masters,
+    /// the composed outputs, the audio extracted from them, the transcript, the
+    /// op sidecars, and the chapter's edit directory when there is one. Not
+    /// because the recorder minds most of them — `finish_chapter` overwrites
+    /// the audio, and a cut is mtime-checked against its source — but because
+    /// two of them would quietly outlive the take they describe. The
+    /// transcriber skips a chapter whose `.transcript.json` reads as completed,
+    /// so the new take would never get words; and a hand keep-list is a list of
+    /// milliseconds into a file that no longer exists. Moving the lot under one
+    /// stamp is also what keeps the old take recoverable as a set, rather than
+    /// leaving pieces of it behind to be mistaken for the new one.
+    ///
+    /// Returns where the camera master went — or, for a chapter left with only
+    /// its derivatives, where the first of those went — for the status line
+    /// and the marker log.
+    pub fn retire_chapter(
+        session_dir: &Path,
+        edit_chapter_dir: &Path,
+        chapter: u32,
+    ) -> Result<PathBuf> {
+        let stem = format!("chapter-{chapter:02}");
+        let master = format!("{stem}.mp4");
+
+        // Collected before anything moves: renaming entries out from under a
+        // `read_dir` in progress is unspecified, and this is not the place to
+        // find out what the filesystem does about it.
+        let mut named_for_chapter = Vec::new();
+        for entry in fs::read_dir(session_dir)
+            .with_context(|| format!("listing {}", session_dir.display()))?
+        {
+            let entry = entry.context("reading a session directory entry")?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // `chapter-03.mp4`, `chapter-03-screen.mp4`, `chapter-03.stats.json`
+            // — and not `chapter-030.mp4`, which is somebody else's chapter.
+            let Some(rest) = name.strip_prefix(&stem) else {
+                continue;
+            };
+            if rest.starts_with('.') || rest.starts_with('-') {
+                let rest = rest.to_string();
+                named_for_chapter.push((entry.path(), name, rest));
+            }
+        }
+        // Nothing to retire is an error, not a no-op: the caller is about to
+        // announce a retake, and must not announce one of a chapter that was
+        // never recorded. A chapter down to its mp3 and transcript still
+        // counts — those are exactly the leftovers a fresh take must not
+        // inherit.
+        if named_for_chapter.is_empty() {
+            bail!(
+                "chapter {chapter:02} has no take to retire in {}",
+                session_dir.display()
+            );
+        }
+        // `read_dir` order is whatever the filesystem feels like; the marker
+        // log's landmark below should not depend on it.
+        named_for_chapter.sort_by(|a, b| a.1.cmp(&b.1));
+
+        let discarded_dir = session_dir.join(DISCARDED);
+        fs::create_dir_all(&discarded_dir).context("creating .discarded directory")?;
+        let now = discard_stamp();
+
+        let mut moved_master = None;
+        let mut first_moved = None;
+        for (from, name, rest) in named_for_chapter {
+            // The same shape `discard_chapter` writes: the stamp goes between the
+            // stem and whatever followed it, so `chapter-03-screen.mp4` becomes
+            // `chapter-03-{now}-screen.mp4` and `chapter-03.mp3` becomes
+            // `chapter-03-{now}.mp3`.
+            let to = discarded_dir.join(format!("{stem}-{now}{rest}"));
+            fs::rename(&from, &to)
+                .with_context(|| format!("moving {} to {}", from.display(), to.display()))?;
+            if name == master {
+                moved_master = Some(to.clone());
+            }
+            first_moved.get_or_insert(to);
+        }
+        if edit_chapter_dir.is_dir() {
+            let to = discarded_dir.join(format!("{stem}-{now}-edit"));
+            fs::rename(edit_chapter_dir, &to).with_context(|| {
+                format!("moving {} to {}", edit_chapter_dir.display(), to.display())
+            })?;
+        }
+
+        let landmark = moved_master
+            .or(first_moved)
+            .expect("at least one file was moved");
+        MarkerLog::new(session_dir)?.log_take_discarded(chapter, &landmark)?;
+        Ok(landmark)
     }
 }
 

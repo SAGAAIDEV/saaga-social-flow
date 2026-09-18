@@ -401,7 +401,7 @@ mod tests {
             },
         );
         assert!(!html.contains("template error"), "{html}");
-        let card = &html[html.find("On YouTube").expect("the upload card")..];
+        let card = &html[html.find("Published").expect("the upload card")..];
         let longform = card
             .find("https://www.youtube.com/watch?v=abc")
             .expect("the longform link");
@@ -409,8 +409,10 @@ mod tests {
             .find("https://www.youtube.com/shorts/def")
             .expect("the short link");
         assert!(longform < short, "{card}");
+        // The S3 upload has its row too, since the tab that listed it is gone.
+        assert!(card.contains("Not on S3 yet"), "{card}");
 
-        // Nothing up yet: no card, rather than two empty rows.
+        // Nothing up yet: no card, rather than three empty rows.
         let html = page(
             "video.html",
             context! {
@@ -420,7 +422,31 @@ mod tests {
                 youtube => None::<String>, short => None::<String>,
             },
         );
-        assert!(!html.contains("On YouTube"), "{html}");
+        assert!(!html.contains("Published"), "{html}");
+    }
+
+    /// The renders on S3 are what Buffer posts from, and the Upload media tab
+    /// that used to list them is gone — so the card carries the count and the
+    /// links file, with nothing on YouTube needed to show it.
+    #[test]
+    fn a_hosted_project_counts_its_s3_files_on_the_card() {
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief::default(),
+                root => "/tmp/project", busy => false, model => "m",
+                art => empty_art(), review => no_clips(), figures => no_figures(),
+                youtube => None::<String>, short => None::<String>,
+                hosted => context! { count => 9, path => "/tmp/project/distribute/v1/links.json" },
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        let card = &html[html.find("Published").expect("the card")..];
+        assert!(card.contains("9 public file(s) for Buffer"), "{card}");
+        assert!(
+            card.contains("/tmp/project/distribute/v1/links.json"),
+            "{card}"
+        );
     }
 
     #[test]
@@ -538,6 +564,56 @@ mod tests {
         assert!(!html.contains("Needs fixing"), "{html}");
     }
 
+    /// The slug is the one field on the page that becomes a permanent URL, so
+    /// it is typed in rather than only read — until the post is live, when the
+    /// draft's slug means nothing and the card above carries the real one.
+    #[test]
+    fn the_blog_pane_lets_the_slug_be_set_until_the_post_is_live() {
+        let ctx = |posted: minijinja::Value| {
+            context! {
+                blocked => None::<String>, can_publish => true,
+                author => "A", category => "C", library_hint => "",
+                authors => Vec::<()>::new(), categories => Vec::<()>::new(),
+                prompt => context! { label => "v0 (builtin)", path => "", builtin => true },
+                posted => posted,
+                figures => context! { can_write => false, hint => "", rows => Vec::<()>::new() },
+                fixes => Vec::<()>::new(),
+                article_path => "/tmp/blog/article.json",
+                article => context! {
+                    title => "T", h1 => "", slug => "go-to-market-update-2",
+                    description => "d", description_length => 1, caption => "c",
+                    keywords => Vec::<String>::new(), faq => Vec::<String>::new(),
+                    keyword_targets => Vec::<String>::new(), long_description => "",
+                    control_warning => "", summary => "", blocks => Vec::<()>::new(),
+                },
+            }
+        };
+        let draft = page("blog.html", ctx(minijinja::Value::from(())));
+        assert!(
+            draft.contains(r#"<input name="slug" value="go-to-market-update-2""#),
+            "{draft}"
+        );
+        assert!(draft.contains("Save slug"), "{draft}");
+        // Posted back under the key the limits module names the field by.
+        assert!(
+            draft.contains("send({type: 'saveBlogFields', fields: {slug:"),
+            "{draft}"
+        );
+
+        let live = page(
+            "blog.html",
+            ctx(context! {
+                url => "https://saagasolve.com/blog/go-to-market-update-2",
+                admin_url => "https://cms/admin/x", slug => "go-to-market-update-2",
+                published => true, created_at => "2026-09-16T12:00:00Z",
+                warning => None::<String>,
+            }),
+        );
+        assert!(!live.contains(r#"<input name="slug""#), "{live}");
+        assert!(live.contains("change it in Strapi"), "{live}");
+        assert!(live.contains("/blog/go-to-market-update-2"), "{live}");
+    }
+
     /// Everything a human should check before a permanent public URL exists:
     /// the description length, the headings that become the table of contents,
     /// and the byline it will carry.
@@ -606,7 +682,10 @@ mod tests {
             },
         );
         assert!(html.contains("Why watermarking fails"));
-        assert!(html.contains("/blog/why-watermarking-fails"));
+        assert!(
+            html.contains(r#"<input name="slug" value="why-watermarking-fails""#),
+            "the slug is typed in place: {html}"
+        );
         assert!(
             html.contains("140 to 160"),
             "the description target is stated"

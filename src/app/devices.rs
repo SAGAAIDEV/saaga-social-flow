@@ -40,9 +40,11 @@ impl App {
         // The aside's writer hangs off the session about to be torn down; it
         // has to be finished before that session goes.
         self.end_break(false);
-        if let Some(router) = &mut self.router {
-            self.next_chapter = router.current_chapter_number() + 1;
-            router
+        if let Some(current) = self.router.as_ref().map(|r| r.current_chapter_number()) {
+            self.next_chapter = self.chapter_after(current);
+            self.router
+                .as_mut()
+                .expect("checked above")
                 .stop()
                 .context("finishing chapter for device switch")?;
         }
@@ -146,7 +148,7 @@ impl App {
             );
             return;
         };
-        match screen_stream::ScreenConnection::start_capture(&uid, Some(capture)) {
+        match screen_stream::ScreenConnection::start_capture(&uid, Some(capture), self.show_app) {
             Ok(connection) => {
                 // Not fatal: an idle display legitimately sends nothing, and
                 // the stream is still live and will deliver once something on
@@ -163,6 +165,38 @@ impl App {
                 self.screen_uid = None;
                 eprintln!("stream-recorder: could not start screen capture: {e:#}");
             }
+        }
+    }
+
+    /// The Show App checkbox moved: put this app's windows into the screen
+    /// recording, or take them back out.
+    ///
+    /// Applied to the running stream on the spot — mid-chapter included, since
+    /// the output size does not change — and remembered, so the next launch and
+    /// the next `open_screen` start the way the switch was left. A stream that
+    /// will not take the new filter is reported, not fatal: the switch still
+    /// records the intent, and the next exclusion refresh carries it.
+    pub(super) fn set_show_app(&mut self, on: bool) {
+        if self.show_app == on {
+            return;
+        }
+        self.show_app = on;
+        if let Some(screen) = self.screen.as_mut() {
+            if let Err(e) = screen.set_show_self(on) {
+                eprintln!(
+                    "stream-recorder: could not {} the app in the screen capture: {e:#}",
+                    if on { "show" } else { "hide" }
+                );
+            }
+        }
+        println!(
+            "stream-recorder: this app is {} the screen recording",
+            if on { "in" } else { "out of" }
+        );
+        let mut cfg = crate::config::load();
+        cfg.show_app_in_capture = on;
+        if let Err(e) = crate::config::save(&cfg) {
+            eprintln!("stream-recorder: could not save the show-app setting: {e:#}");
         }
     }
 
@@ -196,9 +230,11 @@ impl App {
         }
 
         // Close out the current chapter before the file set changes under it.
-        if let Some(router) = &mut self.router {
-            self.next_chapter = router.current_chapter_number() + 1;
-            router
+        if let Some(current) = self.router.as_ref().map(|r| r.current_chapter_number()) {
+            self.next_chapter = self.chapter_after(current);
+            self.router
+                .as_mut()
+                .expect("checked above")
                 .stop()
                 .context("finishing chapter for screen switch")?;
         }
