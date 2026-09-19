@@ -106,6 +106,11 @@ pub struct Upload {
     /// succeed and the thumbnail fail, and that is worth being able to retry.
     #[serde(default)]
     pub thumbnail_set: bool,
+    /// When the thumbnail last went up, whether with the upload or replaced
+    /// later from the tab. `None` on rows from before this was recorded, and
+    /// on rows whose thumbnail never set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_at: Option<String>,
     /// What it went up as.
     ///
     /// Recorded rather than inferred from the current setting, because the
@@ -150,6 +155,9 @@ pub enum PublishEvent {
     /// the vertical cut when the project has one, and the button stays off
     /// until [`PublishEvent::Done`].
     Uploaded(Upload),
+    /// The poster on a video already up was replaced with the selected artwork.
+    /// Not terminal either: the Short's follows the longform's.
+    ThumbnailSet(Upload),
     /// The press is over, however many videos it put up.
     Done,
     /// The OAuth flow finished. Terminal like `Done` and `Failed` — the app has
@@ -179,6 +187,96 @@ pub fn spawn_upload(session: Session, tx: Sender<PublishEvent>) {
             "Could not start the YouTube job: {err}"
         )));
     }
+}
+
+/// Replaces the poster on what is already up, from the tab, without touching
+/// the video. See [`Action::YoutubeThumbnail`](crate::hotkeys::Action).
+pub fn spawn_thumbnail(session: Session, tx: Sender<PublishEvent>) {
+    let unstarted = tx.clone();
+    if let Err(err) = std::thread::Builder::new()
+        .name("youtube-thumbnail".into())
+        .spawn(move || match run_thumbnail(&session, &tx) {
+            Ok(()) => {
+                let _ = tx.send(PublishEvent::Done);
+            }
+            Err(err) => {
+                eprintln!("stream-recorder: youtube thumbnail failed: {err:#}");
+                let _ = tx.send(PublishEvent::Failed(format!(
+                    "Replacing the thumbnail failed: {err:#}"
+                )));
+            }
+        })
+    {
+        eprintln!("stream-recorder: could not start the youtube thumbnail job: {err}");
+        let _ = unstarted.send(PublishEvent::Failed(format!(
+            "Could not start the thumbnail job: {err}"
+        )));
+    }
+}
+
+/// The selected horizontal artwork onto the newest longform on YouTube, then
+/// the selected vertical artwork onto the Short if there is one.
+///
+/// The ledger row, not the render on disk, names the video: the point of this
+/// press is that the artwork changed after the upload, and the render may well
+/// have too. A re-rendered longform is a new upload's business; the thumbnail on
+/// the video people are already watching is this one's.
+///
+/// The longform's poster is the reason the button exists, so its failure is the
+/// press's failure. The Short's is best effort, as on upload: the Shorts feed
+/// shows a frame of the video whatever poster is set.
+fn run_thumbnail(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
+    let status = |msg: String| {
+        let _ = tx.send(PublishEvent::Status(msg));
+    };
+    let longform = longform(session)
+        .context("nothing on YouTube yet from this project — press Upload to YouTube first")?;
+    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal)
+        .context("no horizontal artwork selected — pick a thumbnail on the Thumbnails tab first")?;
+    status(format!("Replacing the thumbnail on {}…", longform.url));
+    let token = youtube::access_token()?;
+    youtube::set_thumbnail(&token, &longform.video_id, &jpeg).with_context(|| {
+        format!(
+            "the thumbnail on {} was not replaced — it still shows the previous one",
+            longform.url
+        )
+    })?;
+    let row = record_poster(session, longform)?;
+    eprintln!("stream-recorder: youtube thumbnail replaced on {}", row.url);
+    let _ = tx.send(PublishEvent::ThumbnailSet(row));
+
+    let Some(short) = short(session) else {
+        return Ok(());
+    };
+    let Some(poster) = chosen_thumbnail(session, crate::card::assets::Kind::Vertical) else {
+        status("The Short keeps its poster: no vertical artwork is selected.".into());
+        return Ok(());
+    };
+    status(format!(
+        "Replacing the poster on the Short at {}…",
+        short.url
+    ));
+    match youtube::access_token()
+        .and_then(|token| youtube::set_thumbnail(&token, &short.video_id, &poster))
+    {
+        Ok(()) => {
+            let row = record_poster(session, short)?;
+            let _ = tx.send(PublishEvent::ThumbnailSet(row));
+        }
+        Err(err) => {
+            eprintln!("stream-recorder: the Short's poster did not replace: {err:#}");
+            status(format!("The Short's poster did not replace: {err:#}"));
+        }
+    }
+    Ok(())
+}
+
+/// The row that says the poster is on, and since when.
+fn record_poster(session: &Session, mut row: Upload) -> Result<Upload> {
+    row.thumbnail_set = true;
+    row.thumbnail_at = Some(crate::schedule::ledger::now_rfc3339());
+    append(session, &row)?;
+    Ok(row)
 }
 
 /// The longform first, then the vertical cut as a Short when the project has
@@ -274,8 +372,7 @@ fn upload_one(
                 orientation.noun()
             ));
             if set_poster(orientation, &prior.video_id, &prior.url, jpeg)? {
-                prior.thumbnail_set = true;
-                append(session, &prior)?;
+                prior = record_poster(session, prior)?;
             }
         }
         return Ok(prior);
@@ -303,6 +400,7 @@ fn upload_one(
         source_hash,
         uploaded_at: crate::schedule::ledger::now_rfc3339(),
         thumbnail_set: false,
+        thumbnail_at: None,
         privacy: meta.privacy,
         orientation,
     };
@@ -311,8 +409,7 @@ fn upload_one(
     if let Some(jpeg) = poster {
         status("Setting the thumbnail…".into());
         if set_poster(orientation, &video_id, &url, jpeg)? {
-            upload.thumbnail_set = true;
-            append(session, &upload)?;
+            upload = record_poster(session, upload)?;
         }
     }
     Ok(upload)
@@ -477,6 +574,7 @@ mod tests {
             source_hash: hash.into(),
             uploaded_at: "2026-08-16T12:00:00Z".into(),
             thumbnail_set: false,
+            thumbnail_at: None,
             privacy: youtube::Privacy::Public,
             orientation: Orientation::Horizontal,
         }
@@ -575,6 +673,44 @@ mod tests {
         let found = uploaded(&session, "aaaa").unwrap();
         assert!(found.thumbnail_set);
         assert_eq!(load(&session).len(), 2, "the history is kept");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Replace thumbnail writes the same kind of row a retry does — newest wins,
+    /// the upload time is untouched, and the replacement time is its own field —
+    /// and it targets the newest longform whatever the render on disk hashes to.
+    #[test]
+    fn a_replaced_poster_is_recorded_against_the_live_longform() {
+        let root = temp("replace");
+        let session = session(&root);
+        append(&session, &upload("aaaa", "long-1")).unwrap();
+        append(&session, &short_row("bbbb", "short-1")).unwrap();
+        let live = longform(&session).unwrap();
+        let row = record_poster(&session, live).unwrap();
+        assert_eq!(
+            row.video_id, "long-1",
+            "the video on YouTube, not a hash lookup"
+        );
+        assert!(row.thumbnail_set);
+        assert!(row.thumbnail_at.as_deref().unwrap().ends_with('Z'));
+        assert_eq!(
+            row.uploaded_at, "2026-08-16T12:00:00Z",
+            "the upload time is history"
+        );
+        let back = longform(&session).unwrap();
+        assert_eq!(back, row);
+        assert_eq!(
+            short(&session).unwrap().video_id,
+            "short-1",
+            "the Short is untouched"
+        );
+        // Rows from before the field existed still load, with no replacement time.
+        let old: Upload = serde_json::from_str(
+            r#"{"video_id":"abc","url":"https://y/abc","title":"A video",
+                "source_hash":"h","uploaded_at":"2026-08-16T12:00:00Z","thumbnail_set":true}"#,
+        )
+        .unwrap();
+        assert_eq!(old.thumbnail_at, None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

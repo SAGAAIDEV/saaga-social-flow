@@ -73,6 +73,13 @@ pub enum Action {
     /// Upload the longform straight to YouTube. Not a Buffer action — the
     /// queue holds posts for a slot, and this publishes a video when it is ready.
     YoutubeUpload,
+    /// Push the currently selected artwork onto the video already on YouTube,
+    /// without re-uploading it. Upload only re-sets the poster when the render
+    /// is byte-identical to what went up; this does it whatever the render is
+    /// now, because the thumbnail is the one part of a live video that keeps
+    /// getting redesigned after the fact. No hotkey: it is pressed from the tab
+    /// that shows which video it targets.
+    YoutubeThumbnail,
     /// Run the YouTube OAuth flow, which opens a browser.
     ConnectYoutube,
     PullAnalytics,

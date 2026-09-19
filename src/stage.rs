@@ -74,6 +74,11 @@ pub struct Stages {
     pub queue: Gate,
     /// The YouTube upload, which is not a Buffer stage — see [`crate::publish`].
     pub publish: Gate,
+    /// Replace thumbnail on the YouTube tab: the selected artwork onto the video
+    /// already up. The mirror of `publish` — it wants an upload to exist where
+    /// Upload wants the inputs for one — and it shares Upload's busy flag,
+    /// because both talk to the same video.
+    pub thumbnail: Gate,
     /// The `/blog` video post. Gated on the YouTube upload rather than on the
     /// render, because the `video` component is sent with the YouTube id the
     /// upload ledger holds — and the landing renders no player without one.
@@ -173,6 +178,13 @@ impl Stages {
                     (longform, longform_reason),
                     has_thumbnail,
                     (crate::publish::metadata::load(session).validate().is_ok(), "Save a valid title and description on the YouTube tab"),
+                ],
+            ),
+            thumbnail: gate(
+                busy.publish,
+                &[
+                    (uploaded, "Nothing on YouTube yet — press Upload to YouTube first"),
+                    has_thumbnail,
                 ],
             ),
             blog: gate(
@@ -351,6 +363,49 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(reason.contains("Design changed"), "{reason}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Replace thumbnail is the mirror of Upload: it opens once a video is up
+    /// and the artwork is ready, and it does not care whether the render on disk
+    /// still matches — that is the whole point of it.
+    #[test]
+    fn replace_thumbnail_waits_for_an_upload_and_ready_artwork_only() {
+        let root = temp("thumbnail");
+        let stages = Stages::read(&session(&root), Busy::default());
+        assert!(stages
+            .thumbnail
+            .missing()
+            .unwrap()
+            .contains("Nothing on YouTube yet"));
+        // An upload row, but no artwork yet: the artwork is what is missing now.
+        std::fs::write(
+            root.join(crate::publish::UPLOADS_JSONL),
+            r#"{"video_id":"abc","url":"https://www.youtube.com/watch?v=abc","title":"A video","source_hash":"h","uploaded_at":"2026-08-16T12:00:00Z"}
+"#,
+        )
+        .unwrap();
+        let stages = Stages::read(&session(&root), Busy::default());
+        assert!(stages
+            .thumbnail
+            .missing()
+            .unwrap()
+            .contains("Artwork is not ready"));
+        // Artwork ready: open, with no render on disk at all.
+        crate::card::assets::fixture(&root);
+        assert!(!root.join("render/horizontal/longform.mp4").exists());
+        let stages = Stages::read(&session(&root), Busy::default());
+        assert!(stages.thumbnail.is_ready());
+        assert!(stages.publish.missing().unwrap().contains("No longform"));
+        // One video, one busy flag: an upload in flight closes both.
+        let busy = Busy {
+            publish: true,
+            ..Busy::default()
+        };
+        assert!(matches!(
+            Stages::read(&session(&root), busy).thumbnail,
+            Gate::Busy
+        ));
         let _ = std::fs::remove_dir_all(&root);
     }
 

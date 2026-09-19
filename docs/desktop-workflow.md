@@ -198,7 +198,12 @@ the saved design or changing the photo makes the set stale; the next render redr
 and **Redraw artwork** on Video details does so by hand. The blog and YouTube workflows
 require a current set and name the reason when it is not; image upload failures are
 surfaced.
-YouTube can retry/update the thumbnail on an existing upload without duplicating the video.
+YouTube can retry/update the thumbnail on an existing upload without duplicating the video:
+**Upload to YouTube** re-sets it while the render is byte-identical to what went up, and
+**Replace thumbnail** beside it pushes whatever artwork is selected on the Thumbnails tab onto
+the newest longform already on YouTube whatever the render is now, then the selected vertical
+artwork onto the Short if there is one. Each replacement is a new row in `youtube.jsonl` with
+`thumbnail_at`, so the tab can say when the poster last changed.
 
 The render's S3 upload exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
 A Buffer plan uses the OG asset as an image post for longform LinkedIn/Facebook copy;

@@ -361,6 +361,9 @@ pub struct ControlTargetIvars {
     approve_button: RefCell<Option<Retained<NSButton>>>,
     queue_button: RefCell<Option<Retained<NSButton>>>,
     publish_button: RefCell<Option<Retained<NSButton>>>,
+    /// Replace thumbnail, beside Upload on the YouTube tab. Its own gate: it
+    /// wants a video already up, where Upload wants one not yet up.
+    youtube_thumbnail_button: RefCell<Option<Retained<NSButton>>>,
 
     // Render tab
     render_status: RefCell<Option<Retained<NSTextField>>>,
@@ -740,6 +743,11 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::ConnectYoutube));
         }
 
+        #[unsafe(method(onYoutubeThumbnail:))]
+        fn on_youtube_thumbnail(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::YoutubeThumbnail));
+        }
+
         #[unsafe(method(onScheduleQueue:))]
         fn on_schedule_queue(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::ScheduleQueue));
@@ -811,6 +819,7 @@ impl ControlTarget {
             posts_button: RefCell::new(None),
             distribute_button: RefCell::new(None),
             publish_button: RefCell::new(None),
+            youtube_thumbnail_button: RefCell::new(None),
             publish_status: RefCell::new(None),
             plan_button: RefCell::new(None),
             approve_button: RefCell::new(None),
@@ -1031,6 +1040,7 @@ impl ControlTarget {
             (&ivars.approve_button, &stages.approve),
             (&ivars.queue_button, &stages.queue),
             (&ivars.publish_button, &stages.publish),
+            (&ivars.youtube_thumbnail_button, &stages.thumbnail),
         ] {
             if let Some(button) = button.borrow().clone() {
                 button.setEnabled(gate.is_ready());
@@ -2723,6 +2733,26 @@ pub fn attach_controls(
     pin_top_left(&connect_btn);
     publish_view.addSubview(&connect_btn);
 
+    // The thumbnail is the one part of a live video that keeps being redesigned
+    // after the upload, and Upload only re-sets it while the render is
+    // byte-identical to what went up. This pushes the selected artwork onto the
+    // video that is already on YouTube, whatever the render is now.
+    let thumbnail_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Replace thumbnail"),
+            Some(&target),
+            Some(sel!(onYoutubeThumbnail:)),
+            mtm,
+        )
+    };
+    thumbnail_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0 + 294.0, bounds.size.height - 84.0),
+        NSSize::new(150.0, 28.0),
+    ));
+    pin_top_left(&thumbnail_btn);
+    publish_view.addSubview(&thumbnail_btn);
+    *target.ivars().youtube_thumbnail_button.borrow_mut() = Some(thumbnail_btn.clone());
+
     // Beside Upload, not buried in the summary text below it, because it is the
     // one property of the upload that cannot be corrected from this app
     // afterwards: `publish` refuses a second press on the same render, so a
@@ -2731,7 +2761,7 @@ pub fn attach_controls(
     // that commits it.
     let privacy_label = NSTextField::labelWithString(&NSString::from_str("Visibility"), mtm);
     privacy_label.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 294.0, bounds.size.height - 82.0),
+        NSPoint::new(PAD * 2.0 + 456.0, bounds.size.height - 82.0),
         NSSize::new(62.0, 24.0),
     ));
     pin_top_left(&privacy_label);
@@ -2740,7 +2770,7 @@ pub fn attach_controls(
     let privacy_popup = make_popup(
         mtm,
         NSRect::new(
-            NSPoint::new(PAD * 2.0 + 360.0, bounds.size.height - 84.0),
+            NSPoint::new(PAD * 2.0 + 522.0, bounds.size.height - 84.0),
             NSSize::new(120.0, CONTROL_H),
         ),
         crate::publish::youtube::Privacy::ALL
@@ -2759,8 +2789,8 @@ pub fn attach_controls(
         mtm,
     );
     publish_status.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 492.0, bounds.size.height - 82.0),
-        NSSize::new((bounds.size.width - PAD * 4.0 - 492.0).max(120.0), 24.0),
+        NSPoint::new(PAD * 2.0 + 654.0, bounds.size.height - 82.0),
+        NSSize::new((bounds.size.width - PAD * 4.0 - 654.0).max(120.0), 24.0),
     ));
     pin_top(&publish_status);
     publish_view.addSubview(&publish_status);

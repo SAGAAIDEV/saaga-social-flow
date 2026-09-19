@@ -518,6 +518,7 @@ impl App {
             Action::ScheduleQueue => self.run_schedule_queue(),
             Action::ScheduleClear => self.run_schedule_clear(),
             Action::YoutubeUpload => self.run_youtube_upload(),
+            Action::YoutubeThumbnail => self.run_youtube_thumbnail(),
             Action::ConnectYoutube => self.run_youtube_connect(),
             Action::PullAnalytics => self.run_analytics_pull(),
             Action::Reflect => self.run_reflect(),
@@ -2921,6 +2922,24 @@ impl App {
         self.sync_controls();
     }
 
+    /// Pushes the selected artwork onto the video already on YouTube. Shares
+    /// the upload's busy flag: both talk to the same video, and a thumbnail
+    /// landing mid-upload would race the one the upload is about to set.
+    fn run_youtube_thumbnail(&mut self) {
+        if self.publish_busy {
+            self.set_publish_status("An upload is already running…");
+            return;
+        }
+        if let Some(reason) = self.stages().thumbnail.missing() {
+            self.set_publish_status(reason);
+            return;
+        }
+        self.publish_busy = true;
+        self.set_publish_status("Replacing the thumbnail on YouTube…");
+        crate::publish::spawn_thumbnail(self.session.clone(), self.publish_tx.clone());
+        self.sync_controls();
+    }
+
     fn set_publish_status(&self, text: &str) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_publish_status(text);
@@ -2985,6 +3004,16 @@ impl App {
                     // The Video pane lists both links under the clips, so it has
                     // to re-read the ledger after either row lands.
                     self.update_video_view();
+                }
+                crate::publish::PublishEvent::ThumbnailSet(upload) => {
+                    // The summary re-reads the ledger and repaints the status
+                    // line from the gate, so the confirmation goes on after it.
+                    self.update_publish_summary();
+                    let what = match upload.orientation {
+                        crate::publish::Orientation::Horizontal => "Thumbnail replaced",
+                        crate::publish::Orientation::Vertical => "Short's poster replaced",
+                    };
+                    self.set_publish_status(&format!("{what} on {}", upload.url));
                 }
                 crate::publish::PublishEvent::Done => {
                     self.publish_busy = false;
@@ -3307,7 +3336,13 @@ impl App {
                  there.\n\n",
             ),
         }
-        info.push_str("Upload sends the rendered video and your selected thumbnail. After upload, continue to Blog (Strapi), then generate social posts.\n\n");
+        info.push_str(
+            "Upload sends the rendered video and your selected thumbnail. After upload, continue \
+             to Blog (Strapi), then generate social posts.\n\n\
+             Replace thumbnail pushes whatever artwork is selected on the Thumbnails tab onto \
+             the video already on YouTube, without re-uploading it — pick a new one there first. \
+             The Short gets the selected vertical artwork at the same time.\n\n",
+        );
 
         info.push_str(&format!(
             "## Next upload\n- Visibility: {}\n\n",
@@ -3322,9 +3357,14 @@ impl App {
                 info.push_str(&format!("- Title: {}\n", latest.title));
                 info.push_str(&format!("- At: {}\n", latest.uploaded_at));
                 info.push_str(&format!("- Visibility: {}\n", latest.privacy.label()));
-                let thumb = match latest.thumbnail_set {
-                    true => "set",
-                    false => "not set — press Upload again to retry the thumbnail",
+                let thumb = match (latest.thumbnail_set, latest.thumbnail_at.as_deref()) {
+                    (true, Some(at)) => {
+                        format!("set at {at} — Replace thumbnail pushes the selected artwork")
+                    }
+                    (true, None) => {
+                        "set — Replace thumbnail pushes the selected artwork".to_string()
+                    }
+                    (false, _) => "not set — press Replace thumbnail".to_string(),
                 };
                 info.push_str(&format!("- Thumbnail: {thumb}\n"));
             }
