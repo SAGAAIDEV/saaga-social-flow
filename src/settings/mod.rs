@@ -177,7 +177,8 @@ pub const FIELDS: &[Field] = &[
         group: Group::Social,
         need: Need::Optional,
         secret: false,
-        help: "Used as context when writing posts, e.g. @yourhandle.",
+        help: "Which Twitter profile posts go to when more than one is connected to \
+               Buffer, e.g. @yourhandle. With or without the @.",
         url: None,
     },
     Field {

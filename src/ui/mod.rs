@@ -913,22 +913,42 @@ impl ControlTarget {
     /// A modal rather than a status line, and the destructive answers are not the
     /// default button: deleting a Buffer post cannot be undone from here, and the
     /// wider of the two scopes reaches posts this app never made.
-    pub fn confirm_clear(&self, project: usize, project_name: &str) -> Option<ClearChoice> {
+    ///
+    /// Every number is what Buffer says right now — `project_pending` is what this
+    /// project's clear deletes, `project_published` what it leaves alone, and
+    /// `everything` the whole queue — so each button names exactly what it does,
+    /// and a button that would delete nothing cannot be pressed.
+    pub fn confirm_clear(
+        &self,
+        project_pending: usize,
+        project_published: usize,
+        everything: usize,
+        project_name: &str,
+    ) -> Option<ClearChoice> {
         let mtm = MainThreadMarker::new()?;
         let alert = NSAlert::new(mtm);
         alert.setMessageText(&NSString::from_str("Delete queued posts from Buffer?"));
+        let published = if project_published > 0 {
+            format!(", and {project_published} already published, which stay as they are")
+        } else {
+            String::new()
+        };
         alert.setInformativeText(&NSString::from_str(&format!(
-            "“{project_name}” has {project} post(s) still queued at Buffer.\n\n\
+            "“{project_name}” has {project_pending} post(s) still queued at Buffer{published}.\n\n\
              Deleting is permanent — Buffer has no undo, and anything already \
              published stays published.\n\n\
-             Clearing the whole queue also deletes posts this app never made.",
+             The whole queue holds {everything} post(s), including ones this app never made.",
         )));
         // Order matters: the first button is the default and takes Return.
         alert.addButtonWithTitle(&NSString::from_str("Cancel"));
-        alert.addButtonWithTitle(&NSString::from_str(&format!(
-            "Delete this project's {project}"
+        let project_button = alert.addButtonWithTitle(&NSString::from_str(&format!(
+            "Delete this project's {project_pending}"
         )));
-        alert.addButtonWithTitle(&NSString::from_str("Delete the whole Buffer queue"));
+        project_button.setEnabled(project_pending > 0);
+        let everything_button = alert.addButtonWithTitle(&NSString::from_str(&format!(
+            "Delete all {everything} in the Buffer queue"
+        )));
+        everything_button.setEnabled(everything > 0);
         match alert.runModal() {
             // NSAlertFirstButtonReturn is 1000, and they count up from there.
             1001 => Some(ClearChoice::Project),

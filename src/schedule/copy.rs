@@ -35,6 +35,28 @@ fn fnv1a(seed: u64, bytes: &[u8]) -> u64 {
     hash
 }
 
+/// The hard caption limits a network enforces at publish time. Buffer accepts
+/// the post and fails it later, in a status this app only learned to read in
+/// September 2026 — so the plan says so up front instead.
+///
+/// Approximate on purpose: X counts a URL as 23 characters whatever its length
+/// and some accounts may post longer, so this is a warning in the reason, never
+/// a skip. Characters, not bytes, because that is what the networks count.
+pub fn length_note(platform: &str, text: &str) -> Option<String> {
+    let limit = match platform {
+        "twitter" => 280,
+        "bluesky" => 300,
+        _ => return None,
+    };
+    let chars = text.chars().count();
+    (chars > limit).then(|| {
+        format!(
+            "warning: {chars} characters, {} over the {platform} limit of {limit}",
+            chars - limit
+        )
+    })
+}
+
 /// Mirrors the markdown body written by `posts::schema::save_manifest`:
 /// content, blank line, then tags rendered as `#tag` unless already prefixed.
 pub fn render_text(content: &str, tags: &[String]) -> String {
@@ -93,6 +115,31 @@ mod tests {
     fn the_separator_keeps_the_text_and_title_apart() {
         // Without a separator byte these two would hash the same bytes in a row.
         assert_ne!(copy_hash("ab", Some("c")), copy_hash("a", Some("bc")));
+    }
+
+    #[test]
+    fn over_length_captions_are_flagged_for_the_networks_that_reject_them() {
+        let long = "x".repeat(281);
+        assert_eq!(
+            length_note("twitter", &long).as_deref(),
+            Some("warning: 281 characters, 1 over the twitter limit of 280")
+        );
+        assert_eq!(length_note("twitter", &"x".repeat(280)), None);
+        assert!(length_note("bluesky", &"y".repeat(301)).is_some());
+        assert_eq!(length_note("bluesky", &"y".repeat(300)), None);
+        // Counted in characters: an emoji is one, not four.
+        assert_eq!(length_note("twitter", &"🚀".repeat(280)), None);
+        // Networks with room to spare, or none we know, say nothing.
+        for platform in [
+            "linkedin",
+            "instagram",
+            "tiktok",
+            "youtube_shorts",
+            "facebook",
+            "",
+        ] {
+            assert_eq!(length_note(platform, &long), None, "{platform}");
+        }
     }
 
     #[test]

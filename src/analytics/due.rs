@@ -171,6 +171,7 @@ mod tests {
             status: "sent".into(),
             sent_at: Some(SENT.into()),
             metrics_updated_at: None,
+            error: None,
             metrics: Vec::new(),
         };
         AnalyticsRow::new(&ledger(post_id), Window::Sent, &observed, SENT.into())
@@ -182,6 +183,7 @@ mod tests {
             status: "sent".into(),
             sent_at: Some(SENT.into()),
             metrics_updated_at: None,
+            error: None,
             metrics: Vec::new(),
         };
         AnalyticsRow::new(&ledger(post_id), window, &observed, SENT.into())

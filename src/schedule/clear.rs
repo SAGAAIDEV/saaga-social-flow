@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 
 use crate::session::Session;
 
-use super::buffer::BufferClient;
+use super::buffer::{BufferClient, PendingPost, ALL_STATUSES, PENDING_STATUSES};
 use super::ledger;
 use super::schema::ScheduleRow;
 use super::ScheduleEvent;
@@ -81,15 +81,63 @@ impl ClearOutcome {
     }
 }
 
-/// How many posts a clear would delete, for the confirmation that precedes it.
+/// What a clear would do, for the confirmation that precedes it.
 ///
-/// Project scope answers from the ledger without asking Buffer anything; the
-/// whole-queue scope has to ask, because only Buffer knows what else is in there.
-pub fn count(session: &Session, scope: Scope) -> Result<usize> {
-    match scope {
-        Scope::Project => Ok(ledger::live_rows(&ledger::load_rows(&session.root)?).len()),
-        Scope::Everything => Ok(BufferClient::from_env()?.pending_posts()?.len()),
+/// Counted from the queue itself, not the ledger alone: the ledger says what
+/// this project once sent, and most of that is long since published. A dialog
+/// that read "18 posts still queued" over a project Buffer had fully sent was
+/// asking for a yes to a number that meant nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Preview {
+    /// This project's posts still deletable at Buffer — what its clear removes.
+    pub project_pending: usize,
+    /// This project's posts Buffer has already published. Left alone.
+    pub project_published: usize,
+    /// This project's rows for posts Buffer no longer knows — reconciled, never
+    /// sent a delete for.
+    pub project_gone: usize,
+    /// Everything deletable in the organization, whoever queued it — what the
+    /// whole-queue clear removes.
+    pub everything_pending: usize,
+}
+
+impl Preview {
+    /// The pure core: this project's live rows against one read of the queue.
+    pub fn from_parts(owned: &[&ScheduleRow], existing: &[PendingPost]) -> Preview {
+        let deletable: std::collections::BTreeSet<&str> = existing
+            .iter()
+            .filter(|post| PENDING_STATUSES.contains(&post.status.as_str()))
+            .map(|post| post.id.as_str())
+            .collect();
+        let known: std::collections::BTreeSet<&str> =
+            existing.iter().map(|post| post.id.as_str()).collect();
+        let mut preview = Preview {
+            everything_pending: deletable.len(),
+            ..Preview::default()
+        };
+        for row in owned {
+            let id = row.buffer_post_id.as_str();
+            if deletable.contains(id) {
+                preview.project_pending += 1;
+            } else if known.contains(id) {
+                preview.project_published += 1;
+            } else {
+                preview.project_gone += 1;
+            }
+        }
+        preview
     }
+}
+
+/// One read of the queue, the same one [`run`] makes, so the dialog and the
+/// delete that follows it agree. Blocking: call it off the main thread.
+pub fn preview(session: &Session) -> Result<Preview> {
+    let client = BufferClient::from_env()?;
+    let rows = ledger::load_rows(&session.root)?;
+    let existing = client
+        .posts_by_status(&ALL_STATUSES)
+        .context("listing buffer posts")?;
+    Ok(Preview::from_parts(&ledger::live_rows(&rows), &existing))
 }
 
 pub fn run(session: &Session, scope: Scope, tx: &Sender<ScheduleEvent>) -> Result<ClearOutcome> {
@@ -241,6 +289,48 @@ mod tests {
         assert!(ledger::queued_row(&cleared, "chapter-01", "tiktok", "hash").is_none());
         // The different-copy warning goes quiet too — nothing is live to warn about.
         assert!(ledger::prior_row(&cleared, "chapter-01", "tiktok").is_none());
+    }
+
+    fn post(id: &str, status: &str) -> PendingPost {
+        PendingPost {
+            id: id.into(),
+            status: status.into(),
+            service: "tiktok".into(),
+        }
+    }
+
+    /// The dialog's numbers: what this project can still delete, what it has
+    /// already published, what is gone, and how big the whole queue is.
+    #[test]
+    fn the_preview_sorts_this_projects_rows_against_the_live_queue() {
+        let rows = vec![
+            row("a", "post-a", false),
+            row("b", "post-b", false),
+            row("c", "post-c", false),
+            // Tombstoned already: not live, not counted anywhere.
+            row("d", "post-d", false),
+            row("d", "post-d", true),
+        ];
+        let existing = vec![
+            post("post-a", "scheduled"),
+            post("post-b", "sent"),
+            post("post-d", "scheduled"),
+            // Queued by hand, or by another project: only the whole-queue count sees it.
+            post("post-x", "needs_approval"),
+            post("post-y", "sent"),
+        ];
+        let preview = Preview::from_parts(&ledger::live_rows(&rows), &existing);
+        assert_eq!(
+            preview,
+            Preview {
+                project_pending: 1,
+                project_published: 1,
+                project_gone: 1,
+                everything_pending: 3,
+            }
+        );
+        // An empty queue and an empty ledger preview as nothing to do.
+        assert_eq!(Preview::from_parts(&[], &[]), Preview::default());
     }
 
     #[test]

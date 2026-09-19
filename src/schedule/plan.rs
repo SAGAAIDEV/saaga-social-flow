@@ -11,10 +11,10 @@ use crate::posts::schema::{PlatformPost, PostsManifest};
 
 use super::buffer::Channel;
 use super::channels::{
-    channel_block, channel_label, handle_note, preferred_handle, resolve_channel,
+    channel_block, channel_label, handle_note, passed_over_note, preferred_handle, resolve_channel,
     scheduling_type_for,
 };
-use super::copy::{copy_hash, render_text};
+use super::copy::{copy_hash, length_note, render_text};
 use super::ledger;
 use super::meta::metadata_for;
 use super::schema::{PlanItem, SchedulePlan, ScheduleRow};
@@ -146,6 +146,16 @@ pub fn build_plan(
                 if let Some(note) = handle_note(&post.platform, channel) {
                     item.reason = format!("{} — {note}", item.reason);
                 }
+                // The pick only won because another channel is down: the post is
+                // going somewhere other than it used to, and the row must say so.
+                if let Some(note) = passed_over_note(channel, channels) {
+                    item.reason = format!("{} — {note}", item.reason);
+                }
+            }
+            // Over the network's limit is a publish-time failure Buffer accepts
+            // now and reports later; the reviewer is the one who can shorten it.
+            if let Some(note) = length_note(&post.platform, &item.text) {
+                item.reason = format!("{} — {note}", item.reason);
             }
 
             items.push(item);
@@ -721,6 +731,61 @@ mod tests {
         assert!(plan.items.iter().all(|item| !item.needs_approval));
         assert_eq!(plan.sendable().count(), 0);
         assert_eq!(plan.queueable().count(), 2);
+    }
+
+    /// The live account on 2026-09-18: the Instagram business channel is
+    /// disconnected and a personal profile is connected. The plan must use the
+    /// live one and say, on the row, which channel it passed over and why.
+    #[test]
+    fn a_disconnected_instagram_gives_way_to_the_live_profile_with_a_note() {
+        let mut channels = all_channels();
+        channels
+            .iter_mut()
+            .find(|c| c.service == "instagram")
+            .unwrap()
+            .is_disconnected = true;
+        channels.push(channel(
+            "6a825edcccaf649a67bd8289",
+            "instagram",
+            "profile",
+            "amelnychukoseen",
+        ));
+        let plan = build_plan(
+            &manifest("chapter-01", &["instagram"]),
+            &links(&["chapter-01"]),
+            &channels,
+            &[],
+            "vd-42",
+            Some(3),
+            "28",
+        );
+        let item = find(&plan, "instagram");
+        assert_eq!(item.skip, None, "a live channel exists, so nothing blocks");
+        assert_eq!(item.channel_name, "amelnychukoseen");
+        assert_eq!(
+            item.reason,
+            "vertical chapter — fell back to @amelnychukoseen: \
+             channel \"saagasocials\" is disconnected in Buffer"
+        );
+    }
+
+    /// An over-length tweet is queueable — the network limit is approximate and
+    /// the reviewer can shorten it — but the row has to warn.
+    #[test]
+    fn an_over_length_caption_warns_on_the_row_without_blocking_it() {
+        let mut posts = manifest("chapter-01", &["twitter", "linkedin"]);
+        for post in &mut posts.items[0].posts {
+            post.content = "word ".repeat(70);
+        }
+        let plan = plan_for(&posts, &links(&["chapter-01"]), &[]);
+        let tweet = find(&plan, "twitter");
+        assert!(tweet.skip.is_none());
+        assert!(
+            tweet.reason.contains("over the twitter limit of 280"),
+            "{}",
+            tweet.reason
+        );
+        assert!(!find(&plan, "linkedin").reason.contains("limit"));
     }
 
     #[test]

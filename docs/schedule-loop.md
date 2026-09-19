@@ -19,7 +19,7 @@ Do not give a Rig agent Buffer tools until a few weeks of `analytics.jsonl` exis
 
 ## Buffer API
 
-- **Endpoint**: `https://api.buffer.com/graphql`
+- **Endpoint**: `https://api.buffer.com` (the `/graphql` path answers identically; the code uses the bare host)
 - **Auth**: `Authorization: Bearer <api_key>` (get key at https://publish.buffer.com/settings/api)
 - **Mutation**: `createPost(input: CreatePostInput!)` — pushes into Buffer's native queue per channel. No custom scheduling needed; Buffer drains at the channel's configured schedule slots.
 - **Key input fields** (required: `channelId`, `mode`, `schedulingType`):
@@ -127,7 +127,7 @@ Writes `SchedulePlan` — one item per (video, platform), carrying the exact pay
 
 `metadata` lives in the plan on purpose: `privacy: public` and `notifySubscribers: true` are irreversible, and a review step that hides them is not a review step. `skip` present ⇒ the item is **not** queueable, and the string says why (no url, no channel, channel disconnected or paused, already queued).
 
-Queue executes each ready item with `createPost`. `PostActionSuccess` implements no interface and there is no `MutationSuccess` — asking for one is a validation error. All six error members implement `MutationError`:
+Queue executes each ready item with `createPost`. `PostActionSuccess` implements no interface and there is no `MutationSuccess` — asking for one is a validation error. All six error members — `NotFoundError`, `UnauthorizedError`, `UnexpectedError`, `RestProxyError`, `LimitReachedError`, `InvalidInputError` — implement `MutationError`, and the client treats any `__typename` ending in `Error` as a refusal:
 
 ```graphql
 mutation CreatePost($input: CreatePostInput!) {
@@ -207,7 +207,9 @@ query Post($input: PostInput!) {
 ```
 
 `PostInput` is `{ id: PostId! }`. `PostMetric` is `{ name, type, unit, value, description }`
-with `unit: count | percentage`. There is no flat `engagement` metric — `engagementRate`
+with `unit: count | percentage`. `Post.error { message }` is why a post sits in `status: error`
+(a `PostPublishingError`); the pull reports those as failed at Buffer rather than still queued,
+because they never send themselves. There is no flat `engagement` metric — `engagementRate`
 is a percentage. Pull 48h and 7d after `queued_at`, keyed by `buffer_post_id`.
 
 YouTube CTR / retention later via existing YT OAuth.

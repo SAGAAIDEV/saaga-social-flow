@@ -48,17 +48,26 @@ pub fn youtube_flavour<'a>(platform: &'a str, orientation: Option<&str>) -> &'a 
 }
 
 /// The handle that wins when a service has more than one channel connected.
+///
+/// A leading `@` is dropped: the setting is documented as `@yourhandle`, Buffer
+/// names channels without one, and an exact comparison would silently fall back
+/// to the other profile.
 pub fn preferred_handle(platform: &str) -> Option<String> {
     match service_for(platform) {
         "twitter" => Some(
             std::env::var("BUFFER_TWITTER_HANDLE")
                 .ok()
-                .map(|v| v.trim().to_string())
+                .map(|v| bare_handle(&v).to_string())
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| DEFAULT_TWITTER_HANDLE.to_string()),
         ),
         _ => None,
     }
+}
+
+/// `@handle` and `handle` are the same handle.
+fn bare_handle(handle: &str) -> &str {
+    handle.trim().trim_start_matches('@')
 }
 
 /// Picks the channel for a platform, or the reason there is none.
@@ -91,7 +100,9 @@ pub fn resolve_preferring<'a>(
 
 /// True when this channel answers to the wanted handle, by either name.
 pub fn handle_matches(channel: &Channel, handle: &str) -> bool {
-    channel.name.eq_ignore_ascii_case(handle) || channel.display_name.eq_ignore_ascii_case(handle)
+    let wanted = bare_handle(handle);
+    bare_handle(&channel.name).eq_ignore_ascii_case(wanted)
+        || bare_handle(&channel.display_name).eq_ignore_ascii_case(wanted)
 }
 
 /// `Some(note)` when a handle was named but the pick is a fallback. A renamed or
@@ -103,16 +114,39 @@ pub fn handle_note(platform: &str, picked: &Channel) -> Option<String> {
         .then(|| format!("wanted @{wanted}, fell back to @{}", channel_label(picked)))
 }
 
-/// Lower sorts first: the named handle, then the LinkedIn brand page.
-fn candidate_rank(channel: &Channel, preferred: Option<&str>) -> u8 {
+/// `Some(note)` when the pick only won because another channel of the same
+/// service is disconnected or paused. The live one is used — a dead channel
+/// blocking every post while a working one sits idle helps nobody — but the
+/// plan has to say so, because the post is now going somewhere else.
+pub fn passed_over_note(picked: &Channel, channels: &[Channel]) -> Option<String> {
+    let blocked: Vec<String> = channels
+        .iter()
+        .filter(|other| other.service == picked.service && other.id != picked.id)
+        .filter_map(channel_block)
+        .collect();
+    (!blocked.is_empty() && channel_block(picked).is_none()).then(|| {
+        format!(
+            "fell back to @{}: {}",
+            channel_label(picked),
+            blocked.join("; ")
+        )
+    })
+}
+
+/// Lower sorts first. A channel that cannot take a post sorts after every one
+/// that can, whatever its name — see [`passed_over_note`]. Among the live ones:
+/// the named handle, then the LinkedIn brand page.
+fn candidate_rank(channel: &Channel, preferred: Option<&str>) -> (u8, u8) {
+    let blocked = u8::from(channel_block(channel).is_some());
     if let Some(handle) = preferred {
-        return u8::from(!handle_matches(channel, handle));
+        return (blocked, u8::from(!handle_matches(channel, handle)));
     }
-    match (channel.service.as_str(), channel.kind.as_str()) {
+    let preference = match (channel.service.as_str(), channel.kind.as_str()) {
         ("linkedin", "page") => 0,
         ("linkedin", _) => 1,
         _ => 0,
-    }
+    };
+    (blocked, preference)
 }
 
 pub fn channel_label(channel: &Channel) -> &str {
@@ -223,6 +257,102 @@ mod tests {
         let picked = resolve_preferring("twitter", Some("andrewosee59559"), &channels)
             .expect("a twitter channel");
         assert_eq!(picked.id, "6a4a9bbf40483446287252ef");
+    }
+
+    /// The setting is documented as `@yourhandle`; the `@` must not turn the
+    /// named profile into a silent fallback to the other one.
+    #[test]
+    fn the_handle_match_tolerates_a_leading_at() {
+        let channels = both_twitter();
+        let picked = resolve_preferring("twitter", Some("@AndrewOsee59559"), &channels)
+            .expect("a twitter channel");
+        assert_eq!(picked.id, "6a4a9bbf40483446287252ef");
+        assert!(handle_matches(&channels[0], "@andrewosee59559"));
+        assert_eq!(bare_handle("  @Name "), "Name");
+        assert_eq!(bare_handle("Name"), "Name");
+    }
+
+    /// The live account: a disconnected Instagram business profile with the
+    /// lower id, and a connected personal profile. Id order picked the dead one
+    /// and every Instagram post was skipped while a working channel sat idle.
+    #[test]
+    fn a_disconnected_channel_loses_to_a_live_one_and_the_plan_says_so() {
+        let mut channels = vec![
+            channel(
+                "6a3dbb795ab6d2f10671b945",
+                "instagram",
+                "business",
+                "saagasocials",
+            ),
+            channel(
+                "6a825edcccaf649a67bd8289",
+                "instagram",
+                "profile",
+                "amelnychukoseen",
+            ),
+        ];
+        assert_eq!(
+            resolve_preferring("instagram", None, &channels).unwrap().id,
+            "6a3dbb795ab6d2f10671b945",
+            "both live: lowest id wins as before"
+        );
+        channels[0].is_disconnected = true;
+        let picked = resolve_preferring("instagram", None, &channels).expect("the live one");
+        assert_eq!(picked.id, "6a825edcccaf649a67bd8289");
+        assert_eq!(
+            passed_over_note(picked, &channels).as_deref(),
+            Some(
+                "fell back to @amelnychukoseen: channel \"saagasocials\" is disconnected in Buffer"
+            )
+        );
+        // A paused queue is a block too, and the note names it.
+        channels[0].is_disconnected = false;
+        channels[0].is_queue_paused = true;
+        let picked = resolve_preferring("instagram", None, &channels).expect("the live one");
+        assert_eq!(picked.id, "6a825edcccaf649a67bd8289");
+        assert!(passed_over_note(picked, &channels)
+            .unwrap()
+            .contains("has a paused queue"));
+        // With nothing blocked there is nothing to note.
+        channels[0].is_queue_paused = false;
+        let picked = resolve_preferring("instagram", None, &channels).unwrap();
+        assert_eq!(passed_over_note(picked, &channels), None);
+    }
+
+    /// When every channel of a service is blocked the best of them is still
+    /// returned, so the plan reports the block rather than "no channel".
+    #[test]
+    fn an_all_blocked_service_still_resolves_so_the_block_is_reported() {
+        let mut channels = both_twitter();
+        for channel in &mut channels {
+            channel.is_disconnected = true;
+        }
+        let picked = resolve_preferring("twitter", Some(DEFAULT_TWITTER_HANDLE), &channels)
+            .expect("still a channel");
+        assert_eq!(
+            picked.id, "6a4a9bbf40483446287252ef",
+            "the named one, still"
+        );
+        assert!(channel_block(picked).is_some());
+        assert_eq!(
+            passed_over_note(picked, &channels),
+            None,
+            "nothing fell back"
+        );
+    }
+
+    /// A named handle that is disconnected gives way to the live profile, and
+    /// both notes say what happened: which was wanted, and why it lost.
+    #[test]
+    fn a_disconnected_named_handle_gives_way_to_the_live_profile() {
+        let mut channels = both_twitter();
+        channels[0].is_disconnected = true;
+        let picked = resolve_preferring("twitter", Some(DEFAULT_TWITTER_HANDLE), &channels)
+            .expect("the live profile");
+        assert_eq!(picked.id, "69266cd829ea336fd631d03a");
+        assert!(passed_over_note(picked, &channels)
+            .unwrap()
+            .contains("\"AndrewOsee59559\" is disconnected"));
     }
 
     /// A renamed handle must not silently retarget the other profile.

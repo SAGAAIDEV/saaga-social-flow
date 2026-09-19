@@ -76,9 +76,37 @@ pub enum ScheduleEvent {
     /// The saved `schedule.json` and the plan it holds.
     Planned(PathBuf, SchedulePlan),
     Queued(QueueOutcome),
+    /// What a clear would do — the numbers the confirmation dialog shows.
+    ClearPreview(clear::Preview),
     Cleared(clear::ClearOutcome),
     /// Terminal failure of a plan, queue or clear job.
     Failed(String),
+}
+
+/// Reads the queue so the clear dialog can say what it is about to delete.
+/// Off the main thread, because the honest numbers need Buffer.
+#[tracing::instrument(skip_all)]
+pub fn spawn_clear_preview(session: Session, tx: Sender<ScheduleEvent>) {
+    let unstarted = tx.clone();
+    if let Err(err) = thread::Builder::new()
+        .name("schedule-clear-preview".into())
+        .spawn(move || match clear::preview(&session) {
+            Ok(preview) => {
+                let _ = tx.send(ScheduleEvent::ClearPreview(preview));
+            }
+            Err(err) => {
+                eprintln!("stream-recorder: could not read the Buffer queue: {err:#}");
+                let _ = tx.send(ScheduleEvent::Failed(format!(
+                    "Could not read the Buffer queue: {err:#}"
+                )));
+            }
+        })
+    {
+        eprintln!("stream-recorder: could not start schedule clear preview: {err}");
+        let _ = unstarted.send(ScheduleEvent::Failed(format!(
+            "Could not start the clear preview: {err}"
+        )));
+    }
 }
 
 #[tracing::instrument(skip_all, fields(scope = ?scope))]

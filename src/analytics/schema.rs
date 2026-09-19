@@ -200,6 +200,7 @@ mod tests {
             status: "sent".into(),
             sent_at: Some("2026-08-09T20:44:00Z".into()),
             metrics_updated_at: Some("2026-08-16T06:00:00Z".into()),
+            error: None,
             metrics: vec![MetricValue {
                 name: "impressions".into(),
                 kind: "impressions".into(),

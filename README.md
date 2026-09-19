@@ -151,7 +151,7 @@ signs in as themselves on the YouTube tab.
 | `ASSEMBLYAI_API_KEY` | chapters still record; transcripts are skipped |
 | `BUFFER_ORG_ID` | resolved on first use — set it only if you belong to several Buffer workspaces |
 | `YOUTUBE_CHANNEL_ID` | uploads go to whichever account is signed in, instead of aborting on the wrong channel |
-| `BUFFER_TWITTER_HANDLE` | no handle in the context used to write posts |
+| `BUFFER_TWITTER_HANDLE` | with two Twitter profiles connected, posts go to the build's default handle |
 | `BLOG_PUBLIC_BASE` | figure links in blog content have no site to point at |
 | `RUST_LOG` | `info`. Set `debug` for device-switching logs |
 
@@ -183,11 +183,15 @@ Procedural cards are generated automatically:
 
 ### Scheduling
 
-Generated content is queued in Buffer for posting to:
-- LinkedIn
+Generated content is queued in Buffer for posting to whichever of these has a
+channel connected:
+- LinkedIn (the longform, as an OG-image post with the copy)
 - Twitter/X
 - Instagram
 - Bluesky
+- TikTok
+- YouTube Shorts (the longform itself uploads straight to YouTube)
+- Facebook
 
 ## Architecture
 

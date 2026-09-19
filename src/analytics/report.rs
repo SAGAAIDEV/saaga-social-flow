@@ -23,8 +23,18 @@ const PREFERRED: [&str; 9] = [
     "engagementRate",
 ];
 
-pub fn render(rows: &[AnalyticsRow], project: &str, generated_at: &str) -> String {
+/// `failed` is what the pull just saw in Buffer's `error` status, one line per
+/// post. It is not in `rows` — an errored post has no sample — so it rides in
+/// beside them, and leads the report: it is the only thing here a reader has to
+/// act on rather than read.
+pub fn render(
+    rows: &[AnalyticsRow],
+    failed: &[String],
+    project: &str,
+    generated_at: &str,
+) -> String {
     let mut out = format!("# Analytics — {project}\n\n");
+    push_failed(&mut out, failed);
     let posts: BTreeSet<&str> = rows.iter().map(|r| r.buffer_post_id.as_str()).collect();
     let measured = rows
         .iter()
@@ -117,6 +127,22 @@ fn push_table(out: &mut String, window: Window, rows: &[&AnalyticsRow]) {
             best.copy_hash.as_deref().unwrap_or("—")
         ));
     }
+}
+
+/// Posts Buffer gave up on. First, because nothing else in the report needs a
+/// hand: these have to be retried or deleted in Buffer before they do anything.
+fn push_failed(out: &mut String, failed: &[String]) {
+    if failed.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "## Failed at Buffer — {} post(s) need a retry or a delete in Buffer\n\n",
+        failed.len()
+    ));
+    for line in failed {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push('\n');
 }
 
 /// Posts that have sent but whose windows have not come due yet — so an empty
@@ -238,9 +264,23 @@ mod tests {
         }
     }
 
+    /// The one section a reader must act on leads, and survives an otherwise
+    /// empty history — a project whose only post failed has nothing else to say.
+    #[test]
+    fn posts_buffer_failed_lead_the_report_even_with_nothing_measured() {
+        let failed = vec!["chapter-02 → bluesky: stuck processing".to_string()];
+        let out = render(&[], &failed, "vd-42", "now");
+        let section = out.find("## Failed at Buffer").expect("the failed section");
+        let nothing = out.find("Nothing measured yet").expect("the empty note");
+        assert!(section < nothing, "failures come first");
+        assert!(out.contains("1 post(s) need a retry or a delete in Buffer"));
+        assert!(out.contains("- chapter-02 → bluesky: stuck processing"));
+        assert!(!render(&[], &[], "vd-42", "now").contains("Failed at Buffer"));
+    }
+
     #[test]
     fn an_empty_history_says_why_rather_than_showing_nothing() {
-        let out = render(&[], "vd-42", "2026-08-16T09:00:00Z");
+        let out = render(&[], &[], "vd-42", "2026-08-16T09:00:00Z");
         assert!(out.contains("# Analytics — vd-42"));
         assert!(out.contains("Nothing measured yet"));
         assert!(out.contains("7 and 30 days"));
@@ -262,7 +302,7 @@ mod tests {
                 vec![metric("impressions", 8120.0)],
             ),
         ];
-        let out = render(&rows, "vd-42", "2026-08-16T09:00:00Z");
+        let out = render(&rows, &[], "vd-42", "2026-08-16T09:00:00Z");
         let first = out.find("chapter-03").unwrap();
         let second = out.find("chapter-01").unwrap();
         assert!(first < second, "the better post leads");
@@ -289,7 +329,7 @@ mod tests {
                 vec![metric("impressions", 1032.0)],
             ),
         ];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(out.contains("| impressions |"));
         assert!(out.contains(" views |"));
         assert!(out.contains(" saves |"));
@@ -311,7 +351,7 @@ mod tests {
                 metric("engagementRate", 6.83),
             ],
         )];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(out.contains("| 8120 |"));
         assert!(out.contains("6.8%"));
     }
@@ -332,7 +372,7 @@ mod tests {
                 vec![metric("views", 19400.0)],
             ),
         ];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(out.contains("## 7 days after posting"));
         assert!(out.contains("## 30 days after posting"));
         assert!(out.contains("19400"));
@@ -352,7 +392,7 @@ mod tests {
             ),
             sent,
         ];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(out.contains("## Still maturing"));
         assert!(out.contains("chapter-05 · instagram — sent 2026-08-14"));
     }
@@ -374,7 +414,7 @@ mod tests {
                 vec![metric("views", 20.0)],
             ),
         ];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(!out.contains("Still maturing"));
     }
 
@@ -398,7 +438,7 @@ mod tests {
             ),
             old,
         ];
-        let out = render(&rows, "vd-42", "now");
+        let out = render(&rows, &[], "vd-42", "now");
         assert!(out.contains("_Metrics as of 2026-08-12T06:00:00Z._"));
     }
 }

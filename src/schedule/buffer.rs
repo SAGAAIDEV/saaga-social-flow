@@ -174,11 +174,6 @@ impl BufferClient {
         Ok(())
     }
 
-    /// Every post still waiting to go out, across every channel in the org.
-    pub fn pending_posts(&self) -> Result<Vec<PendingPost>> {
-        self.posts_by_status(&PENDING_STATUSES)
-    }
-
     /// Posts in any of `statuses`, across every channel in the org.
     ///
     /// Paged to exhaustion rather than capped: a clear that silently stopped at
@@ -361,7 +356,14 @@ pub(super) fn graphql(api_key: &str, query: &str, variables: Value) -> Result<Va
     Ok(data)
 }
 
-/// Like SAAGA's buffer-graphql client, HTTP 200 can still contain an error union.
+/// HTTP 200 can still carry an error union: every mutation here returns
+/// `…Success | …Error`, and each error member implements `MutationError`.
+///
+/// Matched on the `Error` suffix rather than a list of names. The live
+/// `createPost` union is `NotFoundError | UnauthorizedError | UnexpectedError |
+/// RestProxyError | LimitReachedError | InvalidInputError` and `deletePost` adds
+/// `VoidMutationError`; an earlier list here named types that do not exist and
+/// missed four of those, so the error kind never reached the message.
 fn inspect_data_errors(data: &Value) -> Result<()> {
     let Some(fields) = data.as_object() else {
         return Ok(());
@@ -371,15 +373,7 @@ fn inspect_data_errors(data: &Value) -> Result<()> {
             .get("__typename")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if matches!(
-            kind,
-            "MutationError"
-                | "NotFoundError"
-                | "LimitReachedError"
-                | "AuthorizationError"
-                | "ValidationError"
-                | "PostPublishingError"
-        ) {
+        if kind.ends_with("Error") {
             let message = node
                 .get("message")
                 .and_then(Value::as_str)
@@ -589,27 +583,40 @@ mod tests {
         assert!(organizations(&json!({ "account": { "organizations": [] } })).is_empty());
         assert!(organizations(&json!({})).is_empty());
     }
+    /// The members are the live schema's, introspected 2026-09-18: six on
+    /// `createPost`, plus `VoidMutationError` on `deletePost`.
     #[test]
     fn http_success_does_not_hide_buffer_error_unions() {
         for kind in [
-            "MutationError",
             "NotFoundError",
+            "UnauthorizedError",
+            "UnexpectedError",
+            "RestProxyError",
             "LimitReachedError",
-            "AuthorizationError",
-            "ValidationError",
-            "PostPublishingError",
+            "InvalidInputError",
+            "VoidMutationError",
         ] {
             let error = inspect_data_errors(
                 &json!({"createPost": {"__typename": kind, "message": "Refused"}}),
             )
             .unwrap_err();
-            assert!(error.to_string().contains(kind));
-            assert!(error.to_string().contains("Refused"));
+            assert!(error.to_string().contains(kind), "{error}");
+            assert!(error.to_string().contains("Refused"), "{error}");
         }
-        assert!(inspect_data_errors(
-            &json!({"createPost": {"__typename": "PostActionSuccess", "post": {"id": "1"}}})
-        )
-        .is_ok());
+        // A member without a message still names its kind.
+        let bare = inspect_data_errors(&json!({"deletePost": {"__typename": "VoidMutationError"}}))
+            .unwrap_err();
+        assert!(bare
+            .to_string()
+            .contains("VoidMutationError: request refused"));
+        for success in ["PostActionSuccess", "DeletePostSuccess"] {
+            assert!(inspect_data_errors(
+                &json!({"createPost": {"__typename": success, "post": {"id": "1"}}})
+            )
+            .is_ok());
+        }
+        // Queries return plain objects with no typename; nothing to inspect.
+        assert!(inspect_data_errors(&json!({"posts": {"edges": []}, "post": {"id": "x"}})).is_ok());
         assert!(parse_created_post(&json!({"post": {"status": "scheduled"}})).is_err());
     }
 }

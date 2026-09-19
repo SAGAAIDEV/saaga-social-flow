@@ -39,6 +39,10 @@ pub struct PullOutcome {
     pub failed: usize,
     /// Ledger rows Buffer has not sent yet.
     pub waiting: usize,
+    /// Posts Buffer tried to publish and gave up on, each with its message.
+    /// They will never become "sent" on their own, so they are named rather
+    /// than folded into `waiting` — where one sat unseen for weeks.
+    pub errored: Vec<String>,
 }
 
 impl PullOutcome {
@@ -49,6 +53,9 @@ impl PullOutcome {
         }
         if self.waiting > 0 {
             parts.push(format!("{} still queued", self.waiting));
+        }
+        if !self.errored.is_empty() {
+            parts.push(format!("{} failed at Buffer", self.errored.len()));
         }
         if self.failed > 0 {
             parts.push(format!("{} failed", self.failed));
@@ -123,6 +130,7 @@ pub fn spawn_collect_all(tx: Sender<AnalyticsEvent>) {
                         total.newly_sent += outcome.newly_sent;
                         total.waiting += outcome.waiting;
                         total.failed += outcome.failed;
+                        total.errored.extend(outcome.errored);
                     }
                     Err(err) => {
                         total.failed += 1;
@@ -147,7 +155,7 @@ fn run_pull(session: &Session, tx: &Sender<AnalyticsEvent>) -> Result<(PullOutco
 
     let queued = ledger::load_rows(&session.root)?;
     if queued.is_empty() {
-        let markdown = write_report(session, &[])?;
+        let markdown = write_report(session, &[], &[])?;
         return Ok((
             PullOutcome {
                 report: session.root.join(REPORT_MD),
@@ -179,11 +187,22 @@ fn run_pull(session: &Session, tx: &Sender<AnalyticsEvent>) -> Result<(PullOutco
             };
             match metrics::fetch(&client, &item.buffer_post_id) {
                 Ok(observed) => {
-                    // Only record a send once Buffer really sent it: the absence of
-                    // a "sent" row is what keeps the post being re-checked.
-                    if item.window == Window::Sent && !observed.is_sent() {
-                        outcome.waiting += 1;
-                        continue;
+                    if item.window == Window::Sent {
+                        // Buffer gave up on it. Not recorded, so a retry in Buffer's
+                        // UI is picked up by the next pull — but named, because a
+                        // post in this state is waiting on a human, not on time.
+                        if let Some(why) = observed.failure() {
+                            eprintln!("stream-recorder: {label} failed at Buffer: {why}");
+                            status(format!("{label} failed at Buffer: {why}"));
+                            outcome.errored.push(format!("{label}: {why}"));
+                            continue;
+                        }
+                        // Only record a send once Buffer really sent it: the absence
+                        // of a "sent" row is what keeps the post being re-checked.
+                        if !observed.is_sent() {
+                            outcome.waiting += 1;
+                            continue;
+                        }
                     }
                     let sample = AnalyticsRow::new(row, item.window, &observed, iso_now());
                     append_row(&session.root, &sample)?;
@@ -202,12 +221,12 @@ fn run_pull(session: &Session, tx: &Sender<AnalyticsEvent>) -> Result<(PullOutco
         }
     }
 
-    let markdown = write_report(session, &samples)?;
+    let markdown = write_report(session, &samples, &outcome.errored)?;
     Ok((outcome, markdown))
 }
 
-fn write_report(session: &Session, samples: &[AnalyticsRow]) -> Result<String> {
-    let markdown = report::render(samples, &session.title(), &iso_now());
+fn write_report(session: &Session, samples: &[AnalyticsRow], failed: &[String]) -> Result<String> {
+    let markdown = report::render(samples, failed, &session.title(), &iso_now());
     let path = session.root.join(REPORT_MD);
     std::fs::write(&path, &markdown).with_context(|| format!("writing {}", path.display()))?;
     Ok(markdown)
@@ -220,6 +239,21 @@ fn iso_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A post Buffer failed is not "still queued": the two need opposite
+    /// actions, and the summary is where the difference is first seen.
+    #[test]
+    fn a_post_buffer_failed_is_named_apart_from_the_queued_ones() {
+        let outcome = PullOutcome {
+            waiting: 3,
+            errored: vec!["chapter-02 → bluesky: stuck processing".into()],
+            ..PullOutcome::default()
+        };
+        assert_eq!(
+            outcome.summary(),
+            "0 sample(s), 3 still queued, 1 failed at Buffer"
+        );
+    }
 
     #[test]
     fn the_summary_names_every_non_zero_count() {

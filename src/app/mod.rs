@@ -2766,11 +2766,13 @@ impl App {
                 }
                 crate::analytics::AnalyticsEvent::Ready(outcome, markdown) => {
                     self.analytics_busy = false;
-                    self.set_analytics_status(&format!(
-                        "{} → {}",
-                        outcome.summary(),
-                        outcome.report.display()
-                    ));
+                    let mut msg = format!("{} → {}", outcome.summary(), outcome.report.display());
+                    // A post Buffer gave up on needs a hand in Buffer; it stays on
+                    // screen rather than hiding behind a count.
+                    if !outcome.errored.is_empty() {
+                        msg = format!("{msg} — FAILED AT BUFFER: {}", outcome.errored.join("; "));
+                    }
+                    self.set_analytics_status(&msg);
                     self.last_report = Some(markdown);
                     repaint = true;
                 }
@@ -2840,29 +2842,35 @@ impl App {
     }
 
     /// Empties the Buffer queue, after asking which one and getting a straight answer.
+    ///
+    /// Two steps: the queue is read on a worker first, and the dialog opens when
+    /// the numbers arrive — see `ScheduleEvent::ClearPreview`. Counting from the
+    /// ledger alone said "still queued" over posts Buffer had long since sent.
     fn run_schedule_clear(&mut self) {
         if self.schedule_busy {
             self.set_schedule_status("A schedule job is already running…");
             return;
         }
-        let Some(live) = self.live.as_ref() else {
+        if self.live.is_none() {
             return;
-        };
-        // Counted from the ledger before the prompt, so the dialog can say how
-        // many posts are about to go rather than asking for a blind yes.
-        let queued = match crate::schedule::clear::count(
-            &self.session,
-            crate::schedule::clear::Scope::Project,
-        ) {
-            Ok(count) => count,
-            Err(err) => {
-                self.set_schedule_status(&format!("Could not read the ledger: {err:#}"));
-                return;
-            }
-        };
-        let choice = live
-            .control_target
-            .confirm_clear(queued, &self.session.title());
+        }
+        self.schedule_busy = true;
+        self.set_schedule_status("Asking Buffer what is still queued…");
+        crate::schedule::spawn_clear_preview(self.session.clone(), self.schedule_tx.clone());
+        self.sync_controls();
+    }
+
+    /// The second half of Clear Queue: the queue has been read, so the dialog
+    /// can name what each button deletes. `None` from it is a cancel.
+    fn confirm_and_spawn_clear(&mut self, preview: crate::schedule::clear::Preview) {
+        let choice = self.live.as_ref().and_then(|live| {
+            live.control_target.confirm_clear(
+                preview.project_pending,
+                preview.project_published,
+                preview.everything_pending,
+                &self.session.title(),
+            )
+        });
         let scope = match choice {
             Some(ui::ClearChoice::Project) => crate::schedule::clear::Scope::Project,
             Some(ui::ClearChoice::Everything) => crate::schedule::clear::Scope::Everything,
@@ -2874,7 +2882,6 @@ impl App {
         self.schedule_busy = true;
         self.set_schedule_status(&format!("Clearing {}…", scope.label()));
         crate::schedule::spawn_clear(self.session.clone(), scope, self.schedule_tx.clone());
-        self.sync_controls();
     }
 
     /// Publishes the longform straight to YouTube.
@@ -3679,6 +3686,13 @@ impl App {
                         msg = format!("{msg} — UNRECORDED: {}", outcome.unrecorded.join(", "));
                     }
                     self.set_schedule_status(&msg);
+                    self.sync_controls();
+                }
+                crate::schedule::ScheduleEvent::ClearPreview(preview) => {
+                    // The preview job is done; the clear it may lead to sets
+                    // busy again itself.
+                    self.schedule_busy = false;
+                    self.confirm_and_spawn_clear(preview);
                     self.sync_controls();
                 }
                 crate::schedule::ScheduleEvent::Cleared(outcome) => {

@@ -18,6 +18,7 @@ use super::buffer::{graphql, BufferClient};
 const POST_QUERY: &str = r#"query Post($input: PostInput!) {
   post(input: $input) {
     id status sentAt metricsUpdatedAt
+    error { message }
     metrics { name type unit value }
   }
 }"#;
@@ -44,6 +45,11 @@ pub struct PostMetrics {
     pub sent_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics_updated_at: Option<String>,
+    /// Buffer's own account of why a post is in `error` status — "stuck
+    /// processing", a network rejection — so the failure can be shown rather
+    /// than waited on. `None` unless the status is `error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     #[serde(default)]
     pub metrics: Vec<MetricValue>,
 }
@@ -51,6 +57,23 @@ pub struct PostMetrics {
 impl PostMetrics {
     pub fn is_sent(&self) -> bool {
         self.status == "sent"
+    }
+
+    /// Buffer tried to publish this and gave up. It will not send itself; a
+    /// human has to retry or delete it in Buffer, so it must never be counted as
+    /// merely "still queued".
+    pub fn is_errored(&self) -> bool {
+        self.status == "error"
+    }
+
+    /// The failure as a human should read it: Buffer's message where there is
+    /// one, the bare status where there is not.
+    pub fn failure(&self) -> Option<String> {
+        self.is_errored().then(|| {
+            self.error
+                .clone()
+                .unwrap_or_else(|| "Buffer reports status error with no message".to_string())
+        })
     }
 }
 
@@ -78,6 +101,10 @@ pub fn parse(raw: &Value) -> PostMetrics {
             .to_string(),
         sent_at: opt_str(raw, "sentAt"),
         metrics_updated_at: opt_str(raw, "metricsUpdatedAt"),
+        error: raw
+            .get("error")
+            .filter(|value| !value.is_null())
+            .and_then(|error| opt_str(error, "message")),
         metrics: raw
             .get("metrics")
             .and_then(Value::as_array)
@@ -189,6 +216,30 @@ mod tests {
         // An empty sentAt string is treated as absent, not as a timestamp.
         let blank = parse(&json!({ "id": "x", "status": "sent", "sentAt": "" }));
         assert_eq!(blank.sent_at, None);
+    }
+
+    /// The state the queue can hide for weeks: Buffer tried, failed, and is
+    /// waiting for a human. Seen live on a Bluesky post, 2026-09-18.
+    #[test]
+    fn an_errored_post_carries_buffers_message_and_is_not_sent() {
+        let got = parse(&json!({
+            "id": "post-3", "status": "error", "sentAt": null,
+            "error": { "message": "Uh-oh. It looks like this post is stuck processing." },
+            "metrics": []
+        }));
+        assert!(got.is_errored());
+        assert!(!got.is_sent());
+        assert_eq!(
+            got.failure().as_deref(),
+            Some("Uh-oh. It looks like this post is stuck processing.")
+        );
+        // Status error with no message still reads as a failure.
+        let bare = parse(&json!({ "id": "post-4", "status": "error", "error": null }));
+        assert_eq!(bare.error, None);
+        assert!(bare.failure().unwrap().contains("no message"));
+        // A healthy post has no failure to report.
+        assert_eq!(parse(&sent_payload()).failure(), None);
+        assert_eq!(parse(&sent_payload()).error, None);
     }
 
     #[test]
