@@ -70,6 +70,38 @@ fn bare_handle(handle: &str) -> &str {
     handle.trim().trim_start_matches('@')
 }
 
+/// Services where every connected channel gets the post, rather than one being
+/// picked. LinkedIn: the account has the SAAGA Solve page and a personal
+/// profile, and the longform is wanted on both. Twitter has two profiles too
+/// and deliberately does not fan out — the second is not this project's.
+pub fn fans_out(platform: &str) -> bool {
+    service_for(platform) == "linkedin"
+}
+
+/// Every channel a platform posts to, best first, or the one reason there is
+/// none. One entry for a service that picks a channel; one per connected
+/// channel for a service that [`fans_out`], blocked ones last so their rows sit
+/// under the live ones with the reason showing.
+pub fn channels_for<'a>(
+    platform: &str,
+    channels: &'a [Channel],
+) -> Vec<Result<&'a Channel, String>> {
+    if !fans_out(platform) {
+        return vec![resolve_channel(platform, channels)];
+    }
+    let service = service_for(platform);
+    let mut all: Vec<&Channel> = channels.iter().filter(|c| c.service == service).collect();
+    if all.is_empty() {
+        return vec![Err(format!("no {service} channel connected to Buffer"))];
+    }
+    all.sort_by(|a, b| {
+        candidate_rank(a, None)
+            .cmp(&candidate_rank(b, None))
+            .then(a.id.cmp(&b.id))
+    });
+    all.into_iter().map(Ok).collect()
+}
+
 /// Picks the channel for a platform, or the reason there is none.
 pub fn resolve_channel<'a>(platform: &str, channels: &'a [Channel]) -> Result<&'a Channel, String> {
     resolve_preferring(
@@ -380,6 +412,35 @@ mod tests {
         );
         assert_eq!(preferred_handle("linkedin"), None);
         assert_eq!(preferred_handle("youtube_shorts"), None);
+    }
+
+    /// The longform goes to every LinkedIn channel: the page leads, the profile
+    /// follows, and a disconnected one still gets a row — last, with its reason.
+    #[test]
+    fn linkedin_fans_out_to_every_channel_page_first() {
+        assert!(fans_out("linkedin"));
+        assert!(!fans_out("twitter"), "two profiles, one of them not ours");
+        assert!(!fans_out("instagram"));
+        let mut channels = both_linkedin();
+        let kinds: Vec<String> = channels_for("linkedin", &channels)
+            .into_iter()
+            .map(|c| c.unwrap().kind.clone())
+            .collect();
+        assert_eq!(kinds, ["page", "profile"]);
+        // Disconnect the page: it still gets a row, after the live profile.
+        channels[1].is_disconnected = true;
+        let order: Vec<String> = channels_for("linkedin", &channels)
+            .into_iter()
+            .map(|c| c.unwrap().name.clone())
+            .collect();
+        assert_eq!(order, ["amovfx", "saagasolve"]);
+        // A service that picks a channel yields exactly one entry.
+        assert_eq!(channels_for("tiktok", &channels).len(), 1);
+        assert!(channels_for("tiktok", &channels)[0].is_err());
+        assert_eq!(
+            channels_for("linkedin", &[]),
+            vec![Err("no linkedin channel connected to Buffer".to_string())]
+        );
     }
 
     #[test]

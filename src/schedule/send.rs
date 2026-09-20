@@ -30,7 +30,12 @@ pub fn post_input(item: &PlanItem) -> CreatePostInput {
 /// recognise the same copy on the same channel.
 pub fn row_for(item: &PlanItem, post_id: &str, project: &str, version: Option<u32>) -> ScheduleRow {
     ScheduleRow {
-        id: schema::row_id(&item.video_id, &item.platform, &item.copy_hash),
+        id: schema::row_id(
+            &item.video_id,
+            &item.platform,
+            &item.channel_id,
+            &item.copy_hash,
+        ),
         buffer_post_id: post_id.to_string(),
         project: project.to_string(),
         version,
@@ -148,10 +153,13 @@ mod tests {
     }
 
     #[test]
-    fn row_for_keys_on_video_platform_and_copy() {
+    fn row_for_keys_on_video_platform_channel_and_copy() {
         let planned = item("tiktok", None);
         let row = row_for(&planned, "post-9", "vd-42-demo", Some(3));
-        assert_eq!(row.id, "chapter-01:tiktok:0badc0de0badc0de");
+        assert_eq!(
+            row.id,
+            "chapter-01:tiktok:6a3dbb795ab6d2f10671b945:0badc0de0badc0de"
+        );
         assert_eq!(row.buffer_post_id, "post-9");
         assert_eq!(row.project, "vd-42-demo");
         assert_eq!(row.version, Some(3));

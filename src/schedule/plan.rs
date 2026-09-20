@@ -11,8 +11,8 @@ use crate::posts::schema::{PlatformPost, PostsManifest};
 
 use super::buffer::Channel;
 use super::channels::{
-    channel_block, channel_label, handle_note, passed_over_note, preferred_handle, resolve_channel,
-    scheduling_type_for,
+    channel_block, channel_label, channels_for, fans_out, handle_note, passed_over_note,
+    preferred_handle, resolve_channel, scheduling_type_for,
 };
 use super::copy::{copy_hash, length_note, render_text};
 use super::ledger;
@@ -66,8 +66,12 @@ pub fn build_plan(
 
             let text = render_text(&post.content, &post.tags);
             let title = post.title.clone();
+            // The longform's Facebook post is the OG card with the copy under it.
+            // LinkedIn had the same card for a while and now gets the video
+            // again: a longform on LinkedIn is wanted as the longform, on every
+            // LinkedIn channel the account has — the page and the profile.
             let image = video.video_id == "longform"
-                && matches!(post.platform.as_str(), "linkedin" | "facebook")
+                && post.platform == "facebook"
                 && links.url_for("og-image").is_some();
             let url = if image {
                 links.url_for("og-image").unwrap().to_string()
@@ -80,85 +84,104 @@ pub fn build_plan(
             } else {
                 copy_hash(&text, title.as_deref())
             };
-            let resolved = resolve_channel(&post.platform, channels);
-            let already = ledger::queued_row(queued, &video.video_id, &post.platform, &hash);
-            // The channel is asked about first because the flavour above is only
-            // trustworthy once it resolves: an unresolved YouTube channel leaves
-            // the label as posts.json wrote it, and a Short mislabelled "youtube"
-            // must report the channel problem rather than claim it was uploaded.
-            let skip = match &resolved {
-                Err(why) => Some(why.clone()),
-                // Not Buffer's any more. A direct upload sets the title,
-                // description, category, privacy *and* thumbnail in one call,
-                // where Buffer cannot carry a thumbnail at all and publishes on
-                // the channel's schedule rather than when the video is ready.
-                // Kept in the plan as a skip rather than omitted, so the longform
-                // still has a visible fate here. Shorts are unaffected — they are
-                // `youtube_shorts` by now, and Buffer suits them.
-                Ok(_) if post.platform == "youtube" => {
-                    Some("uploaded straight to YouTube — see the YouTube tab".to_string())
-                }
-                Ok(_) if url.is_empty() => {
-                    Some("not on S3 yet — press Upload to S3 on the Buffer tab".to_string())
-                }
-                Ok(channel) => channel_block(channel)
-                    .or_else(|| already.map(|row| format!("already queued {}", row.queued_at))),
-            };
 
-            let mut item = PlanItem {
-                video_id: video.video_id.clone(),
-                platform: post.platform.clone(),
-                channel_id: String::new(),
-                channel_name: String::new(),
-                url: url.clone(),
-                text,
-                title: title.clone(),
-                mode: MODE.to_string(),
-                scheduling_type: "automatic".to_string(),
-                // The gate lives in the Schedule tab, not in Buffer — one gate, and
-                // it is the one showing the copy. See `PlanItem::approved`.
-                needs_approval: false,
-                image,
-                metadata: if image {
-                    (post.platform == "facebook")
-                        .then(|| serde_json::json!({"facebook": {"type": "post"}}))
-                } else {
-                    metadata_for(&post.platform, title.as_deref(), youtube_category)
-                },
-                reason: reason_for(queued, &video.video_id, &post.platform, already),
-                prompt_id: PROMPT_ID.to_string(),
-                prompt_version: posts.prompt_version,
-                copy_hash: hash,
-                skip,
-                approved: false,
-            };
+            // One row per destination: a single channel for most services, every
+            // connected channel for one that fans out — see `channels_for`. The
+            // channel is part of each row's identity, so the page and the profile
+            // are approved, queued and deduped apart.
+            for resolved in channels_for(&post.platform, channels) {
+                let channel_id = resolved.as_ref().map(|c| c.id.as_str()).unwrap_or("");
+                let already =
+                    ledger::queued_row(queued, &video.video_id, &post.platform, channel_id, &hash);
+                // The channel is asked about first because the flavour above is only
+                // trustworthy once it resolves: an unresolved YouTube channel leaves
+                // the label as posts.json wrote it, and a Short mislabelled "youtube"
+                // must report the channel problem rather than claim it was uploaded.
+                let skip = match &resolved {
+                    Err(why) => Some(why.clone()),
+                    // Not Buffer's any more. A direct upload sets the title,
+                    // description, category, privacy *and* thumbnail in one call,
+                    // where Buffer cannot carry a thumbnail at all and publishes on
+                    // the channel's schedule rather than when the video is ready.
+                    // Kept in the plan as a skip rather than omitted, so the longform
+                    // still has a visible fate here. Shorts are unaffected — they are
+                    // `youtube_shorts` by now, and Buffer suits them.
+                    Ok(_) if post.platform == "youtube" => {
+                        Some("uploaded straight to YouTube — see the YouTube tab".to_string())
+                    }
+                    Ok(_) if url.is_empty() => {
+                        Some("not on S3 yet — press Upload to S3 on the Buffer tab".to_string())
+                    }
+                    Ok(channel) => channel_block(channel)
+                        .or_else(|| already.map(|row| format!("already queued {}", row.queued_at))),
+                };
 
-            if image {
-                item.reason = "Designed OG image with social copy".into();
-            }
-            if let Ok(channel) = &resolved {
-                item.channel_id = channel.id.clone();
-                item.channel_name = channel_label(channel).to_string();
-                item.scheduling_type = scheduling_type_for(channel).to_string();
-                if preferred_handle(&post.platform).is_some() {
-                    item.reason = format!("{} — @{}", item.reason, channel_label(channel));
+                let mut item = PlanItem {
+                    video_id: video.video_id.clone(),
+                    platform: post.platform.clone(),
+                    channel_id: String::new(),
+                    channel_name: String::new(),
+                    url: url.clone(),
+                    text: text.clone(),
+                    title: title.clone(),
+                    mode: MODE.to_string(),
+                    scheduling_type: "automatic".to_string(),
+                    // The gate lives in the Schedule tab, not in Buffer — one gate, and
+                    // it is the one showing the copy. See `PlanItem::approved`.
+                    needs_approval: false,
+                    image,
+                    metadata: if image {
+                        (post.platform == "facebook")
+                            .then(|| serde_json::json!({"facebook": {"type": "post"}}))
+                    } else {
+                        metadata_for(&post.platform, title.as_deref(), youtube_category)
+                    },
+                    reason: reason_for(
+                        queued,
+                        &video.video_id,
+                        &post.platform,
+                        channel_id,
+                        already,
+                    ),
+                    prompt_id: PROMPT_ID.to_string(),
+                    prompt_version: posts.prompt_version,
+                    copy_hash: hash.clone(),
+                    skip,
+                    approved: false,
+                };
+
+                if image {
+                    item.reason = "Designed OG image with social copy".into();
                 }
-                if let Some(note) = handle_note(&post.platform, channel) {
+                if let Ok(channel) = &resolved {
+                    item.channel_id = channel.id.clone();
+                    item.channel_name = channel_label(channel).to_string();
+                    item.scheduling_type = scheduling_type_for(channel).to_string();
+                    // Named when the service has more than one channel in play,
+                    // whether one was picked or all of them are being posted to.
+                    if preferred_handle(&post.platform).is_some() || fans_out(&post.platform) {
+                        item.reason = format!("{} — @{}", item.reason, channel_label(channel));
+                    }
+                    if let Some(note) = handle_note(&post.platform, channel) {
+                        item.reason = format!("{} — {note}", item.reason);
+                    }
+                    // The pick only won because another channel is down: the post is
+                    // going somewhere other than it used to, and the row must say so.
+                    // A service that fans out gives the down channel its own row.
+                    if !fans_out(&post.platform) {
+                        if let Some(note) = passed_over_note(channel, channels) {
+                            item.reason = format!("{} — {note}", item.reason);
+                        }
+                    }
+                }
+                // Over the network's limit is a publish-time failure Buffer accepts
+                // now and reports later; the reviewer is the one who can shorten it.
+                if let Some(note) = length_note(&post.platform, &item.text) {
                     item.reason = format!("{} — {note}", item.reason);
                 }
-                // The pick only won because another channel is down: the post is
-                // going somewhere other than it used to, and the row must say so.
-                if let Some(note) = passed_over_note(channel, channels) {
-                    item.reason = format!("{} — {note}", item.reason);
-                }
-            }
-            // Over the network's limit is a publish-time failure Buffer accepts
-            // now and reports later; the reviewer is the one who can shorten it.
-            if let Some(note) = length_note(&post.platform, &item.text) {
-                item.reason = format!("{} — {note}", item.reason);
-            }
 
-            items.push(item);
+                items.push(item);
+            }
         }
     }
 
@@ -187,6 +210,7 @@ fn reason_for(
     rows: &[ScheduleRow],
     video_id: &str,
     platform: &str,
+    channel_id: &str,
     already: Option<&ScheduleRow>,
 ) -> String {
     let base = if video_id == "longform" {
@@ -197,7 +221,7 @@ fn reason_for(
     if already.is_some() {
         return base.to_string();
     }
-    match ledger::prior_row(rows, video_id, platform) {
+    match ledger::prior_row(rows, video_id, platform, channel_id) {
         Some(prior) => format!(
             "{base} — warning: already queued as {} on {} with different copy",
             prior.buffer_post_id, prior.queued_at
@@ -357,7 +381,12 @@ mod tests {
 
     fn row_from(item: &PlanItem, post_id: &str, at: &str) -> ScheduleRow {
         ScheduleRow {
-            id: super::super::schema::row_id(&item.video_id, &item.platform, &item.copy_hash),
+            id: super::super::schema::row_id(
+                &item.video_id,
+                &item.platform,
+                &item.channel_id,
+                &item.copy_hash,
+            ),
             buffer_post_id: post_id.into(),
             project: "vd-42".into(),
             version: Some(3),
@@ -549,17 +578,98 @@ mod tests {
         assert_eq!(item.channel_id, "");
     }
 
+    /// The account has a LinkedIn page and a LinkedIn profile, and the longform
+    /// goes to both: one row each, the page first, approved and deduped apart.
     #[test]
-    fn linkedin_prefers_the_page_over_the_profile() {
+    fn linkedin_gets_a_row_per_channel_page_first() {
         let plan = plan_for(
             &manifest("longform", &["linkedin"]),
             &links(&["longform"]),
             &[],
         );
-        let item = find(&plan, "linkedin");
-        assert_eq!(item.channel_id, "69267c5429ea336fd631f865");
-        assert_eq!(item.channel_name, "saagasolve");
-        assert!(item.skip.is_none());
+        let rows: Vec<&PlanItem> = plan
+            .items
+            .iter()
+            .filter(|i| i.platform == "linkedin")
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].channel_id, "69267c5429ea336fd631f865");
+        assert_eq!(rows[0].channel_name, "saagasolve");
+        assert_eq!(rows[0].reason, "hub video — @saagasolve");
+        assert_eq!(rows[1].channel_id, "69267c5429ea336fd631f864");
+        assert_eq!(rows[1].channel_name, "amovfx");
+        assert!(rows.iter().all(|row| row.skip.is_none()));
+        assert_eq!(
+            rows[0].copy_hash, rows[1].copy_hash,
+            "same copy, two destinations"
+        );
+
+        // Queue the page: only the page reads as already queued next time.
+        let row = row_from(rows[0], "post-page", "2026-09-20T12:00:00Z");
+        let again = plan_for(
+            &manifest("longform", &["linkedin"]),
+            &links(&["longform"]),
+            std::slice::from_ref(&row),
+        );
+        let rows: Vec<&PlanItem> = again
+            .items
+            .iter()
+            .filter(|i| i.platform == "linkedin")
+            .collect();
+        assert_eq!(
+            rows[0].skip.as_deref(),
+            Some("already queued 2026-09-20T12:00:00Z")
+        );
+        assert_eq!(rows[1].skip, None, "the profile has not had it yet");
+        assert_eq!(
+            rows[1].reason, "hub video — @amovfx",
+            "and no different-copy warning either"
+        );
+    }
+
+    /// The longform reaches LinkedIn as the video, not as the OG card; the card
+    /// stays on Facebook. Same OG image on disk in both cases.
+    #[test]
+    fn the_longform_goes_to_linkedin_as_the_video_and_to_facebook_as_the_og_card() {
+        let mut links = links_with_thumbnail();
+        links.items.push(DistributedAsset {
+            id: "og-image".into(),
+            kind: "image".into(),
+            orientation: Some("landscape".into()),
+            chapter: None,
+            url: "https://cdn.example.com/og-1.jpg".into(),
+            file: None,
+        });
+        let plan = plan_for(
+            &manifest("longform", &["linkedin", "facebook"]),
+            &links,
+            &[],
+        );
+        let linkedin: Vec<&PlanItem> = plan
+            .items
+            .iter()
+            .filter(|i| i.platform == "linkedin")
+            .collect();
+        assert_eq!(linkedin.len(), 2);
+        for item in linkedin {
+            assert!(!item.image, "{}", item.channel_name);
+            assert_eq!(item.url, "https://cdn.example.com/longform.mp4");
+            assert_eq!(item.metadata, None, "linkedin takes no metadata");
+            assert_eq!(item.copy_hash, copy_hash(&item.text, item.title.as_deref()));
+            let body =
+                super::super::buffer::create_post_variables(&super::super::send::post_input(item));
+            assert_eq!(
+                body["input"]["assets"][0]["video"]["url"],
+                "https://cdn.example.com/longform.mp4"
+            );
+            assert_eq!(
+                body["input"]["assets"][0]["video"]["metadata"]["title"],
+                "A Title"
+            );
+        }
+        let facebook = find(&plan, "facebook");
+        assert!(facebook.image);
+        assert_eq!(facebook.url, "https://cdn.example.com/og-1.jpg");
     }
 
     #[test]
@@ -730,7 +840,8 @@ mod tests {
         assert!(plan.items.iter().all(|item| !item.approved));
         assert!(plan.items.iter().all(|item| !item.needs_approval));
         assert_eq!(plan.sendable().count(), 0);
-        assert_eq!(plan.queueable().count(), 2);
+        // Twitter, plus one row per LinkedIn channel.
+        assert_eq!(plan.queueable().count(), 3);
     }
 
     /// The live account on 2026-09-18: the Instagram business channel is

@@ -283,12 +283,12 @@ mod tests {
     #[test]
     fn clearing_makes_an_item_queueable_again() {
         let rows = vec![row("a", "post-a", false)];
-        assert!(ledger::queued_row(&rows, "chapter-01", "tiktok", "hash").is_some());
+        assert!(ledger::queued_row(&rows, "chapter-01", "tiktok", "chan", "hash").is_some());
         let mut cleared = rows.clone();
         cleared.push(rows[0].tombstone("2026-08-15T21:00:00Z".into()));
-        assert!(ledger::queued_row(&cleared, "chapter-01", "tiktok", "hash").is_none());
+        assert!(ledger::queued_row(&cleared, "chapter-01", "tiktok", "chan", "hash").is_none());
         // The different-copy warning goes quiet too — nothing is live to warn about.
-        assert!(ledger::prior_row(&cleared, "chapter-01", "tiktok").is_none());
+        assert!(ledger::prior_row(&cleared, "chapter-01", "tiktok", "chan").is_none());
     }
 
     fn post(id: &str, status: &str) -> PendingPost {
@@ -367,6 +367,6 @@ mod tests {
         let mut rows = vec![queued.clone()];
         rows.push(queued.tombstone("2026-08-15T21:00:00Z".into()));
         assert!(ledger::live_rows(&rows).is_empty());
-        assert!(ledger::queued_row(&rows, "chapter-01", "tiktok", "hash").is_none());
+        assert!(ledger::queued_row(&rows, "chapter-01", "tiktok", "chan", "hash").is_none());
     }
 }

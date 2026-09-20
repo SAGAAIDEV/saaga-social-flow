@@ -9,16 +9,20 @@ use super::schema::SchedulePlan;
 
 /// Carries approval ticks from the previous plan onto a freshly built one.
 ///
-/// Matched on (video_id, platform, copy_hash), so a tick survives a re-plan only
-/// while the copy is byte-identical. Regenerate the posts or edit a caption and the
-/// hash moves, the tick does not come with it, and the item goes back for review —
-/// which is the property that makes the preview trustworthy.
+/// Matched on (video_id, platform, channel_id, copy_hash), so a tick survives a
+/// re-plan only while the copy is byte-identical and the destination is the same.
+/// Regenerate the posts or edit a caption and the hash moves, the tick does not
+/// come with it, and the item goes back for review — which is the property that
+/// makes the preview trustworthy. The channel is in the match because LinkedIn
+/// plans one row per channel with the same copy, and a tick on the page must not
+/// arm the profile.
 pub fn carry_approvals(plan: &mut SchedulePlan, prior: &SchedulePlan) {
     for item in &mut plan.items {
         item.approved = prior.items.iter().any(|old| {
             old.approved
                 && old.video_id == item.video_id
                 && old.platform == item.platform
+                && old.channel_id == item.channel_id
                 && old.copy_hash == item.copy_hash
         });
     }
@@ -122,6 +126,22 @@ mod tests {
             "same copy, different platform"
         );
         assert!(!replanned.items[2].approved, "same copy, different video");
+    }
+
+    /// Two LinkedIn rows carry the same copy for the same video. A tick on the
+    /// page is a tick on the page.
+    #[test]
+    fn approval_does_not_leak_between_channels_of_one_platform() {
+        let mut page = item("longform", "linkedin", "aaaa");
+        page.channel_id = "page".into();
+        let mut profile = item("longform", "linkedin", "aaaa");
+        profile.channel_id = "profile".into();
+        let mut prior = plan(vec![page.clone(), profile.clone()]);
+        prior.items[0].approved = true;
+        let mut replanned = plan(vec![page, profile]);
+        carry_approvals(&mut replanned, &prior);
+        assert!(replanned.items[0].approved, "the page keeps its tick");
+        assert!(!replanned.items[1].approved, "the profile was never ticked");
     }
 
     #[test]
