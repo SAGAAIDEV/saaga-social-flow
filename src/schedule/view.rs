@@ -26,6 +26,9 @@ const GAP: f64 = 4.0;
 struct Row {
     video_id: String,
     platform: String,
+    /// Part of the identity: LinkedIn has one row per channel with the same
+    /// copy, and a tick must stay on the channel it was given to.
+    channel_id: String,
     copy_hash: String,
     /// This item cannot be sent at all, so it can never be approved.
     blocked: bool,
@@ -84,7 +87,7 @@ impl ScheduleForm {
     /// blindly from disk would silently clear review work mid-session, so on-screen
     /// state wins for a row that is still the same video, platform and copy.
     pub fn show(&self, plan: &SchedulePlan) {
-        let carried: Vec<(String, String, String, bool)> = self
+        let carried: Vec<(String, String, String, String, bool)> = self
             .rows
             .borrow()
             .iter()
@@ -92,6 +95,7 @@ impl ScheduleForm {
                 (
                     row.video_id.clone(),
                     row.platform.clone(),
+                    row.channel_id.clone(),
                     row.copy_hash.clone(),
                     row.approve.state() != 0,
                 )
@@ -102,10 +106,13 @@ impl ScheduleForm {
         for item in &plan.items {
             let on_screen = carried
                 .iter()
-                .find(|(video, platform, hash, _)| {
-                    *video == item.video_id && *platform == item.platform && *hash == item.copy_hash
+                .find(|(video, platform, channel, hash, _)| {
+                    *video == item.video_id
+                        && *platform == item.platform
+                        && *channel == item.channel_id
+                        && *hash == item.copy_hash
                 })
-                .map(|(_, _, _, ticked)| *ticked);
+                .map(|(_, _, _, _, ticked)| *ticked);
             rows.push(self.add_row(item, on_screen.unwrap_or(item.approved)));
         }
         *self.rows.borrow_mut() = rows;
@@ -125,6 +132,7 @@ impl ScheduleForm {
             let Some(row) = rows.iter().find(|row| {
                 row.video_id == item.video_id
                     && row.platform == item.platform
+                    && row.channel_id == item.channel_id
                     && row.copy_hash == item.copy_hash
             }) else {
                 continue;
@@ -166,6 +174,7 @@ impl ScheduleForm {
         Row {
             video_id: item.video_id.clone(),
             platform: item.platform.clone(),
+            channel_id: item.channel_id.clone(),
             copy_hash: item.copy_hash.clone(),
             blocked: item.skip.is_some(),
             approve,

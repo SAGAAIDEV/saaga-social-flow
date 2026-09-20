@@ -94,7 +94,9 @@ impl SchedulePlan {
 /// One line of the append-only ledger: proof that a plan item reached Buffer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScheduleRow {
-    /// Dedupe key, "{video_id}:{platform}:{copy_hash}" — see [`row_id`].
+    /// Dedupe key, "{video_id}:{platform}:{channel_id}:{copy_hash}" — see [`row_id`].
+    /// Rows written before the channel joined the key carry the three-part form;
+    /// nothing matches on this string, only on the fields, so both forms live together.
     pub id: String,
     pub buffer_post_id: String,
     pub project: String,
@@ -132,9 +134,12 @@ impl ScheduleRow {
     }
 }
 
-/// The dedupe key shared by plan building and the ledger: "{video_id}:{platform}:{copy_hash}".
-pub fn row_id(video_id: &str, platform: &str, copy_hash: &str) -> String {
-    format!("{video_id}:{platform}:{copy_hash}")
+/// The dedupe key shared by plan building and the ledger:
+/// "{video_id}:{platform}:{channel_id}:{copy_hash}". The channel is in it because
+/// one platform can mean two channels — LinkedIn posts to the page and the
+/// profile — and a key without it would let a clear see only one of the pair.
+pub fn row_id(video_id: &str, platform: &str, channel_id: &str, copy_hash: &str) -> String {
+    format!("{video_id}:{platform}:{channel_id}:{copy_hash}")
 }
 
 pub fn save_plan(dir: &Path, plan: &SchedulePlan) -> Result<PathBuf> {
@@ -294,8 +299,13 @@ mod tests {
     #[test]
     fn row_id_joins_with_colons() {
         assert_eq!(
-            row_id("chapter-01", "tiktok", "0badc0de0badc0de"),
-            "chapter-01:tiktok:0badc0de0badc0de"
+            row_id(
+                "chapter-01",
+                "tiktok",
+                "6a3dbb555ab6d2f10671b8cf",
+                "0badc0de0badc0de"
+            ),
+            "chapter-01:tiktok:6a3dbb555ab6d2f10671b8cf:0badc0de0badc0de"
         );
     }
 
@@ -319,7 +329,12 @@ mod tests {
     #[test]
     fn row_round_trips() {
         let row = ScheduleRow {
-            id: row_id("longform", "youtube", "deadbeef"),
+            id: row_id(
+                "longform",
+                "youtube",
+                "6a3dbba45ab6d2f10671b9db",
+                "deadbeef",
+            ),
             buffer_post_id: "abc123".into(),
             project: "vd-42-my-video".into(),
             version: Some(3),
@@ -337,6 +352,9 @@ mod tests {
         assert!(!line.contains('\n'), "a ledger row must fit on one line");
         let back: ScheduleRow = serde_json::from_str(&line).expect("parse");
         assert_eq!(back, row);
-        assert_eq!(back.id, "longform:youtube:deadbeef");
+        assert_eq!(
+            back.id,
+            "longform:youtube:6a3dbba45ab6d2f10671b9db:deadbeef"
+        );
     }
 }

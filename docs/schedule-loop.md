@@ -77,7 +77,7 @@ query Channels($input: ChannelsInput!) {
 
 `ChannelsInput.organizationId` is required. With `BUFFER_ORG_ID` unset, resolve it from `query { account { organizations { id name } } }` and take the first — the code names every organization on stderr when there is more than one, because picking the wrong workspace looks exactly like "no channel connected".
 
-Channel ids are resolved at runtime, never hardcoded: the account has two Twitter profiles and both a LinkedIn page and profile, so a 1:1 platform→channel map loses one. `youtube_shorts` is not a channel; it rides the youtube channel.
+Channel ids are resolved at runtime, never hardcoded: the account has two Twitter profiles and both a LinkedIn page and profile, so a 1:1 platform→channel map loses one. Twitter picks the profile `BUFFER_TWITTER_HANDLE` names; LinkedIn fans out, one plan row per connected channel, each carrying the longform video. `youtube_shorts` is not a channel; it rides the youtube channel.
 
 Writes `SchedulePlan` — one item per (video, platform), carrying the exact payload Queue will send:
 
@@ -172,7 +172,7 @@ After each `createPost`, append `{root}/schedule.jsonl` — at the project root,
 
 ### Dedupe
 
-The key is `{video_id}:{platform}:{copy_hash}`. `copy_hash` is an explicit FNV-1a/64
+The key is `{video_id}:{platform}:{channel_id}:{copy_hash}` — the channel because one platform can be two channels (LinkedIn's page and profile) and the page being live says nothing about the profile. `copy_hash` is an explicit FNV-1a/64
 over the text + title (`copy.rs`, pinned by known-answer tests) — **not** `DefaultHasher`,
 whose algorithm std is free to change between releases. A digest that drifts would
 re-queue every project's back catalogue.

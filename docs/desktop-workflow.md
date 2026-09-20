@@ -206,8 +206,11 @@ artwork onto the Short if there is one. Each replacement is a new row in `youtub
 `thumbnail_at`, so the tab can say when the poster last changed.
 
 The render's S3 upload exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
-A Buffer plan uses the OG asset as an image post for longform LinkedIn/Facebook copy;
-vertical clips remain video posts. Changing the exported image changes the approval
+A Buffer plan uses the OG asset as an image post for the longform's Facebook copy. The
+longform goes to LinkedIn as the video itself, one plan row per connected LinkedIn channel
+(the SAAGA Solve page and the personal profile), each approved, queued and deduped on its
+own. Buffer caps a LinkedIn video upload at 1 GB and transcodes it to 720p. Vertical clips
+remain video posts. Changing the exported image changes the approval
 identity. Upload jobs freeze their images outside the render cache, so regenerating
 artwork during an upload cannot replace or delete that job's inputs.
 

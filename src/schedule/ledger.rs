@@ -73,35 +73,40 @@ fn parse_rows(text: &str, label: &str) -> Vec<ScheduleRow> {
     rows
 }
 
-/// The most recent row carrying this exact copy for this video + platform, i.e. proof
-/// that this item is already live at Buffer. The copy hash is part of the key so an
-/// edited caption is a new, queueable item. Both the planner (to mark the item
-/// skipped) and the queue itself (so a second press cannot double-post) ask this.
-/// A deleted post is not live, so the newest row winning is what makes clearing
-/// the queue restore the item rather than bury it — see [`ScheduleRow::deleted_at`].
+/// The most recent row carrying this exact copy for this video + platform + channel,
+/// i.e. proof that this item is already live at Buffer. The copy hash is part of the
+/// key so an edited caption is a new, queueable item; the channel is part of it
+/// because LinkedIn posts to two, and the page being live says nothing about the
+/// profile. Both the planner (to mark the item skipped) and the queue itself (so a
+/// second press cannot double-post) ask this. A deleted post is not live, so the
+/// newest row winning is what makes clearing the queue restore the item rather than
+/// bury it — see [`ScheduleRow::deleted_at`].
 pub fn queued_row<'a>(
     rows: &'a [ScheduleRow],
     video_id: &str,
     platform: &str,
+    channel_id: &str,
     copy_hash: &str,
 ) -> Option<&'a ScheduleRow> {
     rows.iter()
         .rev()
-        .find(|row| matches(row, video_id, platform) && row.copy_hash == copy_hash)
+        .find(|row| matches(row, video_id, platform, channel_id) && row.copy_hash == copy_hash)
         .filter(|row| row.deleted_at.is_none())
 }
 
-/// The most recent row for this video + platform whatever the copy. Regenerating the
-/// posts changes the hash, which makes the item queueable again *by design* — this is
-/// how the plan can still warn that the same video is already live under other words.
+/// The most recent row for this video + platform + channel whatever the copy.
+/// Regenerating the posts changes the hash, which makes the item queueable again
+/// *by design* — this is how the plan can still warn that the same video is already
+/// live under other words.
 pub fn prior_row<'a>(
     rows: &'a [ScheduleRow],
     video_id: &str,
     platform: &str,
+    channel_id: &str,
 ) -> Option<&'a ScheduleRow> {
     rows.iter()
         .rev()
-        .find(|row| matches(row, video_id, platform))
+        .find(|row| matches(row, video_id, platform, channel_id))
         .filter(|row| row.deleted_at.is_none())
 }
 
@@ -122,8 +127,8 @@ pub fn live_rows(rows: &[ScheduleRow]) -> Vec<&ScheduleRow> {
     live
 }
 
-fn matches(row: &ScheduleRow, video_id: &str, platform: &str) -> bool {
-    row.video_id == video_id && row.platform == platform
+fn matches(row: &ScheduleRow, video_id: &str, platform: &str, channel_id: &str) -> bool {
+    row.video_id == video_id && row.platform == platform && row.channel_id == channel_id
 }
 
 /// Current UTC time as RFC3339. A clock set before the epoch degrades to the epoch
@@ -286,20 +291,25 @@ mod tests {
         assert_eq!(parse_rows(&text, "test.jsonl"), vec![good]);
     }
 
+    const CHANNEL: &str = "6a3dbb795ab6d2f10671b945";
+
     #[test]
-    fn queued_row_matches_the_triple() {
+    fn queued_row_matches_video_platform_channel_and_copy() {
         let rows = vec![
             row("longform", "youtube", "abc123"),
             row("chapter-01", "tiktok", "def456"),
         ];
-        assert!(queued_row(&rows, "longform", "youtube", "abc123").is_some());
-        assert!(queued_row(&rows, "chapter-01", "tiktok", "def456").is_some());
+        assert!(queued_row(&rows, "longform", "youtube", CHANNEL, "abc123").is_some());
+        assert!(queued_row(&rows, "chapter-01", "tiktok", CHANNEL, "def456").is_some());
         // A rewritten caption changes the hash, so it is queueable again.
-        assert!(queued_row(&rows, "longform", "youtube", "zzz999").is_none());
+        assert!(queued_row(&rows, "longform", "youtube", CHANNEL, "zzz999").is_none());
         // Same copy, different platform or video is a different item.
-        assert!(queued_row(&rows, "longform", "tiktok", "abc123").is_none());
-        assert!(queued_row(&rows, "chapter-02", "youtube", "abc123").is_none());
-        assert!(queued_row(&[], "longform", "youtube", "abc123").is_none());
+        assert!(queued_row(&rows, "longform", "tiktok", CHANNEL, "abc123").is_none());
+        assert!(queued_row(&rows, "chapter-02", "youtube", CHANNEL, "abc123").is_none());
+        // Same copy on another channel of the same service is a different item
+        // too: the LinkedIn page being live says nothing about the profile.
+        assert!(queued_row(&rows, "longform", "youtube", "another-channel", "abc123").is_none());
+        assert!(queued_row(&[], "longform", "youtube", CHANNEL, "abc123").is_none());
     }
 
     #[test]
@@ -308,7 +318,7 @@ mod tests {
         newer.buffer_post_id = "post-2".into();
         newer.queued_at = "2026-09-01T08:00:00Z".into();
         let rows = vec![row("longform", "youtube", "abc123"), newer];
-        let found = queued_row(&rows, "longform", "youtube", "abc123").expect("a match");
+        let found = queued_row(&rows, "longform", "youtube", CHANNEL, "abc123").expect("a match");
         assert_eq!(found.buffer_post_id, "post-2");
     }
 
@@ -317,11 +327,12 @@ mod tests {
     #[test]
     fn prior_row_finds_the_same_video_under_different_copy() {
         let rows = vec![row("longform", "youtube", "abc123")];
-        assert!(queued_row(&rows, "longform", "youtube", "rewritten").is_none());
-        let prior = prior_row(&rows, "longform", "youtube").expect("the earlier post");
+        assert!(queued_row(&rows, "longform", "youtube", CHANNEL, "rewritten").is_none());
+        let prior = prior_row(&rows, "longform", "youtube", CHANNEL).expect("the earlier post");
         assert_eq!(prior.copy_hash, "abc123");
         assert_eq!(prior.buffer_post_id, "post-1");
-        assert!(prior_row(&rows, "longform", "tiktok").is_none());
-        assert!(prior_row(&rows, "chapter-01", "youtube").is_none());
+        assert!(prior_row(&rows, "longform", "tiktok", CHANNEL).is_none());
+        assert!(prior_row(&rows, "chapter-01", "youtube", CHANNEL).is_none());
+        assert!(prior_row(&rows, "longform", "youtube", "another-channel").is_none());
     }
 }

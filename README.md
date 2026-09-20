@@ -185,7 +185,7 @@ Procedural cards are generated automatically:
 
 Generated content is queued in Buffer for posting to whichever of these has a
 channel connected:
-- LinkedIn (the longform, as an OG-image post with the copy)
+- LinkedIn (the longform video, to both the page and the profile)
 - Twitter/X
 - Instagram
 - Bluesky

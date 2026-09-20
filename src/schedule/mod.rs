@@ -293,9 +293,13 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
         let label = format!("{} → {}", item.video_id, item.platform);
         status(format!("[{}/{}] {label}…", step + 1, targets.len()));
 
-        if let Some(row) =
-            ledger::queued_row(&rows, &item.video_id, &item.platform, &item.copy_hash)
-        {
+        if let Some(row) = ledger::queued_row(
+            &rows,
+            &item.video_id,
+            &item.platform,
+            &item.channel_id,
+            &item.copy_hash,
+        ) {
             outcome.already += 1;
             let mark = format!("already queued {} on {}", row.buffer_post_id, row.queued_at);
             status(format!("{label} {mark} — skipped."));
