@@ -266,6 +266,20 @@ pub fn run_record_session(
     let notes_prompt = cfg.notes_prompt.clone().unwrap_or_default();
     let (notes_tx, notes_rx) = std::sync::mpsc::channel();
     let (render_tx, render_rx) = std::sync::mpsc::channel();
+    // ffmpeg is checked here, not in `preflight::warn_once`, because this is
+    // the one dependency the app installs itself: said in the window, and
+    // `brew install ffmpeg` started now so it is done by the first chapter.
+    let (deps_tx, deps_rx) = std::sync::mpsc::channel();
+    let ffmpeg_notice = if crate::deps::missing().is_empty() {
+        None
+    } else {
+        let brew = crate::deps::homebrew();
+        let notice = crate::deps::missing_notice(brew.is_some());
+        if let Some(brew) = brew {
+            crate::deps::spawn_install(brew, deps_tx);
+        }
+        Some(notice)
+    };
     let (posts_tx, posts_rx) = std::sync::mpsc::channel();
     let (titles_tx, titles_rx) = std::sync::mpsc::channel();
     let (distribute_tx, distribute_rx) = std::sync::mpsc::channel();
@@ -292,6 +306,8 @@ pub fn run_record_session(
         notes_rx,
         render_tx,
         render_rx,
+        deps_rx,
+        ffmpeg_notice,
         render_busy: false,
         pipeline: false,
         posts_tx,

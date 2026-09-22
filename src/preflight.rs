@@ -169,9 +169,36 @@ fn renderer() -> Finding {
     }
 }
 
+/// ffmpeg and ffprobe, which every closed chapter goes through before it can
+/// be transcribed, cut or rendered.
+fn ffmpeg() -> Finding {
+    let missing = crate::deps::missing();
+    if missing.is_empty() {
+        return Finding::ok("ffmpeg", "ffmpeg and ffprobe on PATH");
+    }
+    let fix = match crate::deps::homebrew() {
+        Some(_) => format!(
+            "the app installs it at launch; or run `{}` now",
+            crate::deps::INSTALL_COMMAND
+        ),
+        None => format!(
+            "install Homebrew (https://brew.sh), then run `{}`",
+            crate::deps::INSTALL_COMMAND
+        ),
+    };
+    Finding::bad(
+        "ffmpeg",
+        Impact::Breaks,
+        format!(
+            "{} missing — chapters will not transcribe or render; {fix}",
+            missing.join(" and ")
+        ),
+    )
+}
+
 /// Everything worth knowing before a render, cheapest first.
 pub fn check() -> Vec<Finding> {
-    vec![library(), renderer()]
+    vec![ffmpeg(), library(), renderer()]
 }
 
 /// The startup line, or nothing at all when the machine is ready.

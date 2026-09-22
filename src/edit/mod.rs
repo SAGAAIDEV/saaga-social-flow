@@ -229,6 +229,9 @@ pub fn run_render(session: &Session, tx: &Sender<RenderEvent>) -> Result<PathBuf
         let _ = tx.send(RenderEvent::Progress(fraction));
     };
     progress(0.0);
+    // Every step below shells out to ffmpeg; without it the cut fails
+    // part-way with an OS error that does not say what to install.
+    crate::deps::require()?;
     run_cut(session, &status, &progress)?;
     compose_and_render(session, &session.edit_dir(), &status, &progress)
 }

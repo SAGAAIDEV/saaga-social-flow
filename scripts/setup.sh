@@ -8,6 +8,11 @@
 # toolchain choices with real opinions attached (rustup vs brew, nvm vs system
 # node), and a setup script that silently picks for you is one you cannot trust
 # with anything larger. It tells you what is missing and how to get it.
+#
+# ffmpeg is the exception: it is not a toolchain choice, there is one way to
+# get it on a Mac, and without it no chapter is ever transcribed or rendered.
+# So with Homebrew present it is installed here (the app does the same at
+# launch).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,6 +28,19 @@ need() {
   if command -v "$1" >/dev/null 2>&1; then ok "$1"; else bad "$1 — $2"; missing=1; fi
 }
 
+echo "ffmpeg"
+if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+  ok "ffmpeg and ffprobe"
+elif command -v brew >/dev/null 2>&1; then
+  echo "  installing ffmpeg with Homebrew (a few minutes, one time)…"
+  NONINTERACTIVE=1 brew install ffmpeg
+  if command -v ffmpeg >/dev/null 2>&1; then ok "ffmpeg installed"; else bad "brew install ffmpeg did not put ffmpeg on PATH"; missing=1; fi
+else
+  bad "ffmpeg — install Homebrew (https://brew.sh), then: brew install ffmpeg"
+  missing=1
+fi
+
+echo
 echo "Toolchain"
 need cargo "install Rust: https://rustup.rs"
 need node  "brew install node"

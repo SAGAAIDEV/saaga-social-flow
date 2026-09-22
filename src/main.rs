@@ -38,6 +38,7 @@ mod capture;
 mod card;
 mod cli;
 mod config;
+mod deps;
 mod distribute;
 mod edit;
 mod face;
@@ -124,6 +125,9 @@ pub(crate) fn load_dotenv() {
 }
 
 fn main() -> Result<()> {
+    // First, before any thread: a Finder or Dock launch has no Homebrew on
+    // PATH, and ffmpeg, sops and npx all live there.
+    deps::extend_path();
     let args = Args::parse();
     // The recorder only, and first, so the team-credentials line below lands
     // in the file too. A subcommand prints for the terminal it was run from.

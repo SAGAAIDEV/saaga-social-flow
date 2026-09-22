@@ -20,6 +20,9 @@ A native macOS screen, camera, and microphone recorder built for social content 
 - **macOS 12+** (uses ScreenCaptureKit, AVFoundation)
 - **Xcode Command Line Tools** (for building)
 - **Rust 1.70+** (install via [rustup](https://rustup.rs/))
+- **ffmpeg** (`brew install ffmpeg`). Every chapter goes through it before it can be
+  transcribed or rendered. `scripts/setup.sh` installs it, and the app installs it
+  through Homebrew at launch if it is missing, with a banner while it runs.
 
 ## Installation
 

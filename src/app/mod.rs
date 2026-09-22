@@ -97,6 +97,11 @@ pub struct App {
     notes_rx: Receiver<crate::notes::NotesEvent>,
     render_tx: mpsc::Sender<crate::edit::RenderEvent>,
     render_rx: Receiver<crate::edit::RenderEvent>,
+    /// How the launch-time ffmpeg install went — see [`crate::deps`].
+    deps_rx: Receiver<crate::deps::InstallEvent>,
+    /// What the banner says about ffmpeg: missing, installing, or failed.
+    /// `None` once it is on PATH.
+    ffmpeg_notice: Option<String>,
     /// True while the cut-and-render job is in flight. It rewrites `edit/vN` and
     /// `render/vN` in place, so a second press would have two threads composing
     /// into the same folders.
@@ -3637,6 +3642,38 @@ impl App {
         }
     }
 
+    fn refresh_banner(&self) {
+        if let Some(live) = self.live.as_ref() {
+            live.layout
+                .set_warning(&ui::banner_text(self.ffmpeg_notice.as_deref()));
+        }
+    }
+
+    /// The ffmpeg install started at launch: clear the banner once it lands,
+    /// or say what to run by hand when it did not.
+    fn drain_deps(&mut self) {
+        let events: Vec<_> = self.deps_rx.try_iter().collect();
+        for event in events {
+            match event {
+                crate::deps::InstallEvent::Installed => {
+                    self.ffmpeg_notice = None;
+                    self.set_render_status(
+                        "ffmpeg installed — chapters transcribe and render now. Press Render \
+                         to pick up any chapter recorded while it was missing.",
+                    );
+                }
+                crate::deps::InstallEvent::Failed(why) => {
+                    self.ffmpeg_notice = Some(format!(
+                        "ffmpeg could not be installed ({why}). Run `{}` in Terminal, then \
+                         relaunch — until then chapters are never transcribed or rendered.",
+                        crate::deps::INSTALL_COMMAND
+                    ));
+                }
+            }
+            self.refresh_banner();
+        }
+    }
+
     fn drain_render(&mut self) {
         // No early return on a missing window, for the same reason as
         // `drain_schedule`: the terminal event is what clears `render_busy`, and
@@ -3862,6 +3899,7 @@ impl ApplicationHandler for App {
                     self.posts_manifest = Some(manifest);
                 }
                 self.live = Some(live);
+                self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
                 match crate::sessions::sweep_empty(&self.session.root) {
@@ -3932,6 +3970,7 @@ impl ApplicationHandler for App {
         self.tick_timer();
         self.drain_notes();
         self.drain_render();
+        self.drain_deps();
         self.drain_posts();
         self.drain_substack();
         self.drain_blog();

@@ -1550,8 +1550,9 @@ fn device_titles(devices: &[CaptureDevice]) -> impl IntoIterator<Item = String> 
 pub struct Layout {
     left: Retained<NSView>,
     right: Retained<NSView>,
-    /// The team-credentials banner above everything else in the column, only
-    /// when the launch-time decrypt failed. Measured at layout time: it wraps.
+    /// The banner above everything else in the column: team credentials that
+    /// did not decrypt, ffmpeg missing or being installed. Hidden when there
+    /// is nothing to say; measured at layout time, since it wraps.
     warning: Option<Retained<NSTextField>>,
     status: Retained<NSTextField>,
     timer: (Retained<NSTextField>, Retained<NSTextField>),
@@ -1568,6 +1569,17 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// Replace the banner's text; empty hides it. The next [`Layout::sync`]
+    /// lays the column out again, since the banner's height moves everything
+    /// under it.
+    pub fn set_warning(&self, text: &str) {
+        if let Some(warning) = &self.warning {
+            warning.setStringValue(&NSString::from_str(text));
+            warning.setHidden(text.is_empty());
+            self.last.set((0, 0, 0, 0));
+        }
+    }
+
     pub fn sync(&self, preview: &PreviewHost, notes: &crate::notes::NotesPane) {
         let left = self.left.bounds();
         let right = self.right.bounds();
@@ -1661,7 +1673,7 @@ fn layout_left(
     let content_w = (width - PAD * 2.0).max(80.0);
     let row = |y: f64, h: f64| NSRect::new(NSPoint::new(PAD, y), NSSize::new(content_w, h));
     let mut y = height - PAD;
-    if let Some(warning) = warning {
+    if let Some(warning) = warning.filter(|w| !w.isHidden()) {
         let h = warning
             .sizeThatFits(NSSize::new(content_w, height))
             .height
@@ -1913,6 +1925,28 @@ pub fn settings_page(note: Option<&str>) -> String {
 }
 
 /// Build the record window's controls and tabs.
+/// The banner's text: the team-credentials failure, if the launch-time decrypt
+/// failed, then `ffmpeg`'s notice, if there is one. Empty when neither.
+///
+/// The credentials half is read at launch and not again. A later `sops::retry`
+/// (the render and notes jobs make one) can clear the failure; the banner then
+/// outlives it, which errs on the side of a stale warning rather than a
+/// missing one.
+pub fn banner_text(ffmpeg: Option<&str>) -> String {
+    let credentials = crate::settings::sops::failure().map(|failed| {
+        format!(
+            "Team credentials did not load: {}. Fix that, then press Render again (or \
+             relaunch) — the keys in dev.sops.env stay unset until you do.",
+            failed.reason
+        )
+    });
+    [credentials.as_deref(), ffmpeg]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn attach_controls(
     window: &Window,
@@ -2038,26 +2072,19 @@ pub fn attach_controls(
     video_brief_pane.fill_below();
     let right = speaking_host;
 
-    // Whether the team file decrypted is settled before this window exists, so
-    // the banner is built once or never. A later `sops::retry` (the render and
-    // notes jobs make one) can clear the failure; the banner then outlives it,
-    // which errs on the side of a stale warning rather than a missing one.
-    // Top of the column rather than the render status line: that line is the
-    // first thing a render overwrites, and this has to stay up until acted on.
-    let warning = crate::settings::sops::failure().map(|failed| {
-        let label = NSTextField::wrappingLabelWithString(
-            &NSString::from_str(&format!(
-                "Team credentials did not load: {}. Fix that, then press Render \
-                 again (or relaunch) — the keys in dev.sops.env stay unset until you do.",
-                failed.reason
-            )),
-            mtm,
-        );
+    // Always built, hidden when empty: the app fills it after attaching —
+    // see [`banner_text`] and [`Layout::set_warning`] — and changes it as an
+    // ffmpeg install runs. Top of the column rather than the render status
+    // line: that line is the first thing a render overwrites, and this has to
+    // stay up until acted on.
+    let warning = {
+        let label = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
         label.setFont(Some(&NSFont::boldSystemFontOfSize(12.0)));
         label.setTextColor(Some(&NSColor::systemRedColor()));
+        label.setHidden(true);
         left.addSubview(&label);
-        label
-    });
+        Some(label)
+    };
 
     let status = NSTextField::labelWithString(&NSString::from_str(""), mtm);
     left.addSubview(&status);
