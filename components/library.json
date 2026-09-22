@@ -1,17 +1,19 @@
 {
   "schema": 1,
   "id": "saaga-video-components",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "profiles": {
     "edit-horizontal": [
       "screen-camera-split",
       "chapter-title-card",
       "screen-camera-circle",
-      "talking-head-horizontal"
+      "talking-head-horizontal",
+      "outline-horizontal"
     ],
     "edit-vertical": [
       "screen-camera-vertical",
-      "talking-head-vertical"
+      "talking-head-vertical",
+      "outline-vertical"
     ]
   },
   "blocks": [
@@ -235,6 +237,82 @@
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Medium.woff2",
         "assets/badge.svg"
+      ]
+    },
+    {
+      "id": "outline-horizontal",
+      "title": "Outline Horizontal",
+      "source": "compositions/outline-horizontal.html",
+      "role": "chapter-layout",
+      "orientation": "landscape",
+      "width": 1920,
+      "height": 1080,
+      "media": [
+        "camera"
+      ],
+      "variables": [
+        "cameraSrc",
+        "chapterLabel",
+        "chapterNumber",
+        "chapterTopic",
+        "outlinePoints",
+        "focusX",
+        "audioSrc",
+        "durationSeconds"
+      ],
+      "tags": [
+        "camera",
+        "talking-head",
+        "outline",
+        "talking-points",
+        "kinetic-type",
+        "longform"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-audio.mp3",
+        "assets/badge.svg",
+        "assets/fonts/Booton-Medium.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
+      ]
+    },
+    {
+      "id": "outline-vertical",
+      "title": "Outline Vertical",
+      "source": "compositions/outline-vertical.html",
+      "role": "chapter-layout",
+      "orientation": "portrait",
+      "width": 1080,
+      "height": 1920,
+      "media": [
+        "camera"
+      ],
+      "variables": [
+        "cameraSrc",
+        "chapterLabel",
+        "chapterNumber",
+        "chapterTopic",
+        "outlinePoints",
+        "focusY",
+        "audioSrc",
+        "durationSeconds"
+      ],
+      "tags": [
+        "camera",
+        "talking-head",
+        "outline",
+        "talking-points",
+        "kinetic-type",
+        "short"
+      ],
+      "assets": [
+        "assets/placeholder-camera.mp4",
+        "assets/placeholder-audio.mp3",
+        "assets/badge.svg",
+        "assets/fonts/Booton-Medium.woff2",
+        "assets/fonts/Booton-Regular.woff2",
+        "assets/fonts/Booton-Semibold.woff2"
       ]
     }
   ]

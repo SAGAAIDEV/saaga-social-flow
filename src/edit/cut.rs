@@ -200,6 +200,15 @@ pub fn probe_frame_rate(path: &Path) -> Result<f64> {
     probe_fps(path)
 }
 
+/// The audio a HyperFrames composition plays over a chapter's footage.
+///
+/// 192 kbps stereo, matching the cut's own AAC rate. This was 64 kbps: fine for
+/// the transcriber, which is what `transcode::to_mp3` still makes, but it is
+/// the *only* sound a rendered chapter carries — every vertical short, and now
+/// every outline chapter in the longform — and a second generation quieter
+/// than the first is exactly the downgrade `compose::Segment` documents. The
+/// file is re-extracted only when the cut moves, so a project rendered before
+/// this keeps its old track until it is re-cut.
 pub fn extract_mp3(source: &Path, dest: &Path) -> Result<()> {
     dest.parent()
         .map(std::fs::create_dir_all)
@@ -209,7 +218,15 @@ pub fn extract_mp3(source: &Path, dest: &Path) -> Result<()> {
         Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-i"])
             .arg(source)
-            .args(["-vn", "-codec:a", "libmp3lame", "-b:a", "64k"])
+            .args([
+                "-vn",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "192k",
+                "-ar",
+                "48000",
+            ])
             .arg(dest),
         "extract mp3",
     )

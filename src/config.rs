@@ -149,6 +149,20 @@ pub struct Config {
     /// choice, so an existing config keeps behaving exactly as it did.
     #[serde(default)]
     pub youtube_privacy: crate::publish::youtube::Privacy,
+    /// Seconds the Retake photo button counts down before it takes the still.
+    /// `None` is the default of three; zero takes it immediately.
+    #[serde(default)]
+    pub photo_countdown_secs: Option<u32>,
+}
+
+pub const MAX_PHOTO_COUNTDOWN_SECS: u32 = 30;
+
+impl Config {
+    pub fn photo_countdown_secs(&self) -> u32 {
+        self.photo_countdown_secs
+            .unwrap_or(3)
+            .min(MAX_PHOTO_COUNTDOWN_SECS)
+    }
 }
 
 fn default_youtube_category() -> String {
@@ -455,6 +469,10 @@ fn default_zoom() -> BTreeMap<String, f64> {
         ("talking-head-vertical".to_string(), 1.0),
         ("screen-camera-split".to_string(), 1.0),
         ("screen-camera-vertical".to_string(), 1.0),
+        // The outline pair records the talking head's frame and needs the
+        // same travel to track; its vertical crops like the talking head's.
+        ("outline-horizontal".to_string(), 1.14),
+        ("outline-vertical".to_string(), 1.0),
     ])
 }
 
@@ -1082,5 +1100,27 @@ mod render_target_tests {
         assert!(!targets.any());
         assert!(!targets.set("audio", true));
         assert_eq!(RenderTargets::label("shorts"), "the shorts");
+    }
+}
+
+#[cfg(test)]
+mod photo_countdown_tests {
+    use super::*;
+
+    #[test]
+    fn countdown_defaults_to_three_and_is_capped() {
+        assert_eq!(Config::default().photo_countdown_secs(), 3);
+        let old: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.photo_countdown_secs(), 3);
+        let zero = Config {
+            photo_countdown_secs: Some(0),
+            ..Config::default()
+        };
+        assert_eq!(zero.photo_countdown_secs(), 0);
+        let huge = Config {
+            photo_countdown_secs: Some(999),
+            ..Config::default()
+        };
+        assert_eq!(huge.photo_countdown_secs(), MAX_PHOTO_COUNTDOWN_SECS);
     }
 }

@@ -2,6 +2,7 @@
 
 pub mod extract;
 pub mod notes;
+pub mod outline;
 pub mod prompt;
 pub mod reflect;
 pub mod titles;

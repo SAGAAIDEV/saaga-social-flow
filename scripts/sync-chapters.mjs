@@ -11,6 +11,8 @@ const templates = [
   'talking-head-horizontal',
   'talking-head-vertical',
   'screen-camera-vertical',
+  'outline-horizontal',
+  'outline-vertical',
 ];
 const sources = [
   { name: 'style', file: 'chapter.css', indent: '          ' },
@@ -43,4 +45,4 @@ for (const id of templates) {
   }
 }
 if (check && stale) process.exitCode = 1;
-else console.log(check ? 'All four chapter templates are in sync.' : 'Chapter templates synchronized.');
+else console.log(check ? 'All ' + templates.length + ' chapter templates are in sync.' : 'Chapter templates synchronized.');

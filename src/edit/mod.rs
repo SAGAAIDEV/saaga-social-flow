@@ -24,12 +24,14 @@ pub mod pane;
 pub mod render;
 pub mod waveform;
 
-use crate::notes::{closed_chapter_numbers, load_transcript, ChapterTranscript, TranscriptStatus};
+use crate::notes::{
+    closed_chapter_numbers, load_transcript, still_running, waiting_message, ChapterTranscript,
+    TranscriptStatus, WAIT_FOR,
+};
 use crate::session::Session;
 use compute::{compute_edits, DEFAULT_PADDING_MS};
 
 const WAIT_EVERY: Duration = Duration::from_secs(1);
-const WAIT_FOR: Duration = Duration::from_secs(600);
 
 const CHAPTER_FILES: &[&str] = &["-horizontal", "-vertical"];
 
@@ -108,6 +110,10 @@ pub fn run_cut(
     if by_hand.is_empty() {
         status("Waiting for chapter transcripts…");
     }
+    // Before any wait: an expired AWS login, a missing mp3 or a job lost to a
+    // crash each used to mean ten minutes on "Waiting for chapter 02…". This
+    // either restarts what can be restarted or fails now, with the fix.
+    crate::notes::prepare_transcripts(&session.dir, &by_hand)?;
     let transcribed = wait_for_words(&session.dir, &by_hand, status)?;
     progress(CUT.0);
 
@@ -253,20 +259,27 @@ fn compose_and_render(
              longform or the shorts above the Render button"
         );
     }
+    // Outline chapters draw their talking points, which have to be written
+    // and placed before the compositions can be. Nothing to do for a take
+    // with none — the common case, and the one every older project is.
+    let outline_numbers = crate::outline::recorded_as_outline(&session.dir, &numbers);
+    let outlines = crate::outline::prepare(session, edit_root, &outline_numbers, &titles, status)?;
     status("Preparing HyperFrames compositions…");
     let plan = compose::prepare_targets(
         edit_root,
         &session.compose_dir(),
         &compose::components_root(),
         &titles,
+        &outlines,
         targets,
     )?;
     if plan.is_empty() {
         bail!("no horizontal or vertical cuts to compose for the outputs that are switched on");
     }
     progress(COMPOSED);
-    // Only the chapter cards and the verticals are drawn; the chapter bodies go into the
-    // longform as they were cut. Saying so keeps the count honest against the log.
+    // The chapter cards, the verticals and any outline bodies are drawn; every other
+    // chapter body goes into the longform as it was cut. Saying so keeps the count
+    // honest against the log.
     let total = plan.render_count();
     status(&format!("Rendering {total} HyperFrames composition(s)…"));
     let render_out = render::render_plan(&plan, &session.render_dir(), status, &|done, of| {
@@ -431,25 +444,25 @@ fn wait_for_words(
     }
     let deadline = Instant::now() + WAIT_FOR;
     loop {
-        let mut pending = Vec::new();
-        let mut ready = Vec::new();
-        for n in &closed {
-            match load_transcript(session_dir, *n) {
-                Some(t) if is_ready(&t) => ready.push((*n, t)),
-                Some(t) if is_terminal(&t) => {
-                    eprintln!(
-                        "stream-recorder: chapter {n:02} transcript is {:?} — skipping{}",
-                        t.status,
-                        t.error
-                            .as_deref()
-                            .map(|reason| format!(" ({reason})"))
-                            .unwrap_or_default()
-                    );
+        let running = still_running(session_dir, &closed);
+        if running.is_empty() {
+            let mut ready = Vec::new();
+            for n in &closed {
+                match load_transcript(session_dir, *n) {
+                    Some(t) if is_ready(&t) => ready.push((*n, t)),
+                    Some(t) => {
+                        eprintln!(
+                            "stream-recorder: chapter {n:02} transcript is {:?} — skipping{}",
+                            t.status,
+                            t.error
+                                .as_deref()
+                                .map(|reason| format!(" ({reason})"))
+                                .unwrap_or_default()
+                        );
+                    }
+                    None => {}
                 }
-                _ => pending.push(*n),
             }
-        }
-        if pending.is_empty() {
             // Nothing transcribed is only fatal when nothing was edited by hand
             // either — otherwise there is still real work to cut.
             if ready.is_empty() && by_hand.is_empty() {
@@ -458,26 +471,15 @@ fn wait_for_words(
             return Ok(ready);
         }
         if Instant::now() > deadline {
-            if ready.is_empty() && by_hand.is_empty() {
-                bail!(
-                    "timed out waiting for chapter {pending:?} transcripts in {}",
-                    session_dir.display()
-                );
-            }
-            eprintln!(
-                "stream-recorder: timed out waiting for chapter {pending:?}; editing {} ready",
-                ready.len()
+            // Not "edit what is ready": that rendered a video missing a
+            // chapter and said so only on stderr.
+            bail!(
+                "gave up after {} minutes — {}",
+                WAIT_FOR.as_secs() / 60,
+                waiting_message(&running)
             );
-            return Ok(ready);
         }
-        let msg = format!(
-            "Waiting for chapter {} transcript…",
-            pending
-                .iter()
-                .map(|n| format!("{n:02}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        let msg = waiting_message(&running);
         eprintln!("stream-recorder: {msg}");
         status(&msg);
         thread::sleep(WAIT_EVERY);
@@ -500,13 +502,6 @@ fn no_words(session_dir: &Path) -> anyhow::Error {
 
 fn is_ready(t: &ChapterTranscript) -> bool {
     t.status == TranscriptStatus::Completed && !t.words.is_empty()
-}
-
-fn is_terminal(t: &ChapterTranscript) -> bool {
-    matches!(
-        t.status,
-        TranscriptStatus::Completed | TranscriptStatus::Error | TranscriptStatus::Skipped
-    )
 }
 
 #[cfg(test)]

@@ -136,6 +136,12 @@ impl Session {
         self.staged("titles")
     }
 
+    /// Where an outline chapter's talking points land — see [`crate::outline`].
+    /// Version-scoped like titles: a re-recorded take says different things.
+    pub fn outline_dir(&self) -> PathBuf {
+        self.staged("outline")
+    }
+
     pub fn reflect_dir(&self) -> PathBuf {
         self.staged("reflect")
     }

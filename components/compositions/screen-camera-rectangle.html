@@ -86,7 +86,7 @@
             width: 466.492px;
             height: 285.419px;
             box-sizing: border-box;
-            background: var(--saaga-peach);
+            background: var(--saaga-paper);
             border: 2px solid var(--saaga-line);
             border-radius: var(--saaga-radius);
             box-shadow: 0 16px 44px rgba(29, 29, 29, 0.2);
@@ -100,13 +100,13 @@
             width: 581.813px;
             height: 290.907px;
           }
-          /* Camera and name strip share the same inner width; the 60px strip is reserved. */
+          /* Camera and name strip share the same inner width; the 88px strip is reserved. */
           .rect-demo-camera {
             position: absolute;
             left: 0;
             top: 0;
             width: 100%;
-            height: calc(100% - 60px);
+            height: calc(100% - 88px);
             object-fit: cover;
             object-position: var(--cameraPosition, center top);
           }
@@ -115,7 +115,7 @@
             left: 0;
             bottom: 0;
             width: 100%;
-            height: 60px;
+            height: 88px;
             box-sizing: border-box;
             background: var(--saaga-paper);
             border-top: 3px solid var(--saaga-orange);
@@ -128,11 +128,12 @@
             display: block;
             width: 100%;
             font-weight: 500;
-            font-size: 28px;
+            font-size: 40px;
             line-height: 1.2;
             letter-spacing: -0.02em;
             color: var(--saaga-ink);
-            white-space: nowrap;
+            white-space: normal;
+            overflow-wrap: anywhere;
             overflow: hidden;
             text-overflow: ellipsis;
           }

@@ -32,6 +32,7 @@
 mod agent;
 mod analytics;
 mod app;
+mod applog;
 mod blog;
 mod capture;
 mod card;
@@ -47,6 +48,7 @@ mod longform;
 mod markers;
 mod notes;
 mod ops;
+mod outline;
 mod overlay;
 mod permissions;
 mod pointer;
@@ -122,12 +124,17 @@ pub(crate) fn load_dotenv() {
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+    // The recorder only, and first, so the team-credentials line below lands
+    // in the file too. A subcommand prints for the terminal it was run from.
+    if args.command.is_none() {
+        applog::start();
+    }
     load_dotenv();
     agent::init_tracing();
     // Anything a render will hard-fail on, surfaced now rather than at the
     // end of a recording. Silent when the machine is ready.
     preflight::warn_once();
-    let args = Args::parse();
 
     // Resolved before anything is opened: a typo in --layout should be a
     // one-line message, not a camera and a screen stream coming up first.

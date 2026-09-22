@@ -190,6 +190,8 @@ pub enum UiEvent {
     SaveSettings(std::collections::BTreeMap<String, String>),
     /// Test one group of credentials, by `settings::Group::slug`.
     TestSettings(String),
+    /// The photo countdown box on the Settings tab, unparsed.
+    PhotoCountdown(String),
     /// A finished credential test, posted from the worker thread that ran it.
     /// Like [`UiEvent::FaceTrackReady`] this does not come from a control.
     SettingsTested(crate::settings::check::Outcome),
@@ -1903,6 +1905,8 @@ pub fn settings_page(note: Option<&str>) -> String {
             team_file => crate::settings::sops::failure().map(|f| f.path.display().to_string()),
             team_failure => crate::settings::sops::failure().map(|f| f.reason.clone()),
             models => crate::settings::models(),
+            photo_countdown => crate::config::load().photo_countdown_secs(),
+            max_photo_countdown => crate::config::MAX_PHOTO_COUNTDOWN_SECS,
             saved => note.unwrap_or(""),
         },
     )
@@ -2034,15 +2038,17 @@ pub fn attach_controls(
     video_brief_pane.fill_below();
     let right = speaking_host;
 
-    // Whether the team file decrypted is settled before this window exists and
-    // cannot change until a relaunch, so the banner is built once or never.
+    // Whether the team file decrypted is settled before this window exists, so
+    // the banner is built once or never. A later `sops::retry` (the render and
+    // notes jobs make one) can clear the failure; the banner then outlives it,
+    // which errs on the side of a stale warning rather than a missing one.
     // Top of the column rather than the render status line: that line is the
     // first thing a render overwrites, and this has to stay up until acted on.
     let warning = crate::settings::sops::failure().map(|failed| {
         let label = NSTextField::wrappingLabelWithString(
             &NSString::from_str(&format!(
-                "Team credentials did not load: {}. Fix that, then relaunch — the \
-                 keys in dev.sops.env stay unset until you do.",
+                "Team credentials did not load: {}. Fix that, then press Render \
+                 again (or relaunch) — the keys in dev.sops.env stay unset until you do.",
                 failed.reason
             )),
             mtm,

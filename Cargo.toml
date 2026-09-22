@@ -75,6 +75,8 @@ mediapipe = "0.1"
 block2 = "0.6"
 dispatch2 = "0.3"
 ureq = { version = "2.12", features = ["json"] }
+# dup2/pipe for `applog`, which copies stdout and stderr into a log file.
+libc = "0.2"
 rig = "0.41.0"
 schemars = "1"
 tokio = { version = "1", features = ["rt", "macros", "time", "net"] }

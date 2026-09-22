@@ -23,6 +23,18 @@ use super::token_store;
 
 const SET_THUMBNAIL: &str = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
 const UPLOAD_VIDEO: &str = "https://www.googleapis.com/upload/youtube/v3/videos";
+/// `videos.list` and `videos.update`: the metadata endpoint, not the upload one.
+const VIDEOS: &str = "https://www.googleapis.com/youtube/v3/videos";
+
+/// The scopes under which `videos.update` is allowed. `youtube.upload` is not
+/// one of them — it uploads and sets thumbnails and nothing else — so a grant
+/// from before this app asked for `youtube.force-ssl` can put a video up but
+/// cannot change who sees it afterwards.
+const UPDATE_SCOPES: [&str; 3] = [
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtubepartner",
+];
 
 /// Who can see a video once it is up.
 ///
@@ -294,6 +306,136 @@ pub fn upload_video(token: &str, path: &Path, meta: &VideoMeta) -> Result<String
         .context("youtube accepted the video but named no id")
 }
 
+/// Whether the stored grant can change a video after upload, going by the
+/// scopes Google said it granted.
+///
+/// `None` when the store does not say — a token first written by the Python
+/// side records no scope — in which case the call is worth attempting and a
+/// 403 is the answer. `Some(false)` is known ahead of time and saves the round
+/// trip; more to the point it lets the message name the fix before anything
+/// is tried.
+pub fn grant_allows_update() -> Option<bool> {
+    let token = token_store::load().ok().flatten()?;
+    let granted = token.extra.get("scope")?.as_str()?;
+    Some(scope_allows_update(granted))
+}
+
+/// The pure half of [`grant_allows_update`]: a space-separated scope string.
+fn scope_allows_update(granted: &str) -> bool {
+    granted
+        .split_whitespace()
+        .any(|scope| UPDATE_SCOPES.contains(&scope))
+}
+
+/// What to tell someone whose grant cannot change a video: the fix is one
+/// press, and the message should say which.
+const RECONNECT_FOR_UPDATE: &str = "the YouTube connection was granted before this app could \
+change a video's visibility — press Connect… once more and allow \"Manage your YouTube \
+account\" to give it that permission";
+
+/// Sets who can see `video_id`, leaving the rest of its status as it is.
+///
+/// Read-then-write, because `videos.update` replaces the whole `status` part:
+/// a property left out of the request is reset, not kept. Embeddability, the
+/// licence and the public stats flag are read back first so a setting changed
+/// on youtube.com survives a visibility change made here. When the read fails
+/// the update goes ahead with the same status the upload set, which is what
+/// every video this app put up has unless someone changed it by hand.
+///
+/// A scheduled `publishAt` is dropped unless the video stays private, since
+/// YouTube only accepts it alongside `private` and would reject the whole
+/// request otherwise.
+pub fn update_privacy(token: &str, video_id: &str, privacy: Privacy) -> Result<()> {
+    if grant_allows_update() == Some(false) {
+        bail!("{RECONNECT_FOR_UPDATE}");
+    }
+    let current = read_status(token, video_id).unwrap_or_else(|err| {
+        eprintln!(
+            "stream-recorder: could not read {video_id}'s status before changing its visibility \
+             ({err:#}); sending the upload's defaults"
+        );
+        serde_json::json!({ "selfDeclaredMadeForKids": false })
+    });
+    let body = status_update_body(video_id, &current, privacy);
+    let response = ureq::put(VIDEOS)
+        .query("part", "status")
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .send_json(body);
+    match response {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::Status(403, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to change the visibility (403): {} — {RECONNECT_FOR_UPDATE}",
+                detail.trim()
+            );
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to change the visibility ({code}): {}",
+                detail.trim()
+            );
+        }
+        Err(err) => Err(err).context("calling youtube videos.update"),
+    }
+}
+
+/// The video's current `status` part, as YouTube reports it.
+fn read_status(token: &str, video_id: &str) -> Result<serde_json::Value> {
+    let body: serde_json::Value = ureq::get(VIDEOS)
+        .query("part", "status")
+        .query("id", video_id)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .call()
+        .context("calling youtube videos.list")?
+        .into_json()
+        .context("parsing the videos.list response")?;
+    body.get("items")
+        .and_then(|items| items.as_array())
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("status"))
+        .cloned()
+        .with_context(|| format!("youtube returned no status for {video_id}"))
+}
+
+/// The `videos.update` request: the id, and the status with only its
+/// visibility changed. Only the properties the API lets an update carry are
+/// copied across — `uploadStatus` and the like are read-only and would be
+/// rejected — and `publishAt` only when the video is staying private.
+fn status_update_body(
+    video_id: &str,
+    current: &serde_json::Value,
+    privacy: Privacy,
+) -> serde_json::Value {
+    let mut status = serde_json::Map::new();
+    for key in [
+        "embeddable",
+        "license",
+        "publicStatsViewable",
+        "selfDeclaredMadeForKids",
+    ] {
+        if let Some(value) = current.get(key) {
+            status.insert(key.to_string(), value.clone());
+        }
+    }
+    status
+        .entry("selfDeclaredMadeForKids")
+        .or_insert(serde_json::Value::Bool(false));
+    if privacy == Privacy::Private {
+        if let Some(publish_at) = current.get("publishAt") {
+            status.insert("publishAt".to_string(), publish_at.clone());
+        }
+    }
+    status.insert(
+        "privacyStatus".to_string(),
+        serde_json::Value::String(privacy.as_str().to_string()),
+    );
+    serde_json::json!({ "id": video_id, "status": status })
+}
+
 /// Uploads `jpeg` as the thumbnail of `video_id`.
 ///
 /// Idempotent at YouTube's end — setting the same image twice replaces it with
@@ -427,6 +569,78 @@ mod tests {
                 "{privacy:?} did not survive into the upload body"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    /// `youtube.upload` uploads and nothing more. The two grants this app asked
+    /// for before visibility could be changed do not qualify, and the message
+    /// has to know that before the round trip rather than after a 403.
+    #[test]
+    fn only_a_managing_scope_allows_a_video_to_be_changed() {
+        assert!(!scope_allows_update(
+            "https://www.googleapis.com/auth/youtube.upload \
+             https://www.googleapis.com/auth/youtube.readonly"
+        ));
+        assert!(scope_allows_update(
+            "https://www.googleapis.com/auth/youtube.upload \
+             https://www.googleapis.com/auth/youtube.force-ssl"
+        ));
+        assert!(scope_allows_update(
+            "https://www.googleapis.com/auth/youtube"
+        ));
+        assert!(!scope_allows_update(""));
+        // A prefix is not a scope: `youtube.upload` must not read as `youtube`.
+        assert!(!scope_allows_update(
+            "https://www.googleapis.com/auth/youtube.upload"
+        ));
+    }
+
+    /// The whole `status` part goes back, so what came down has to go back up
+    /// — except the read-only fields the API would reject, and a schedule that
+    /// only makes sense on a private video.
+    #[test]
+    fn the_update_keeps_the_status_it_read_and_changes_only_the_visibility() {
+        let current = serde_json::json!({
+            "uploadStatus": "processed",
+            "privacyStatus": "private",
+            "license": "creativeCommon",
+            "embeddable": false,
+            "publicStatsViewable": false,
+            "madeForKids": false,
+            "selfDeclaredMadeForKids": false,
+            "publishAt": "2026-10-01T09:00:00Z"
+        });
+        let body = status_update_body("vid-1", &current, Privacy::Public);
+        assert_eq!(body["id"], "vid-1");
+        let status = body["status"].as_object().unwrap();
+        assert_eq!(status["privacyStatus"], "public");
+        assert_eq!(status["license"], "creativeCommon");
+        assert_eq!(status["embeddable"], false);
+        assert_eq!(status["publicStatsViewable"], false);
+        assert_eq!(status["selfDeclaredMadeForKids"], false);
+        assert!(status.get("uploadStatus").is_none(), "read-only, not sent");
+        assert!(status.get("madeForKids").is_none(), "read-only, not sent");
+        assert!(
+            status.get("publishAt").is_none(),
+            "a schedule is only valid on a private video"
+        );
+        // Staying private keeps the schedule.
+        let body = status_update_body("vid-1", &current, Privacy::Private);
+        assert_eq!(body["status"]["publishAt"], "2026-10-01T09:00:00Z");
+    }
+
+    /// With nothing read back, the update carries what the upload set, so a
+    /// video this app put up ends exactly as it began apart from who sees it.
+    #[test]
+    fn with_no_status_to_read_the_update_sends_the_uploads_defaults() {
+        let body = status_update_body("vid-1", &serde_json::json!({}), Privacy::Unlisted);
+        assert_eq!(body["status"]["privacyStatus"], "unlisted");
+        assert_eq!(body["status"]["selfDeclaredMadeForKids"], false);
+        assert_eq!(body["status"].as_object().unwrap().len(), 2);
     }
 }
 

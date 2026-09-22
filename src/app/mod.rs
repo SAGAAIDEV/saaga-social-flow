@@ -826,6 +826,7 @@ impl App {
             UiEvent::SaveBrief(fields) => self.save_brief(fields),
             UiEvent::SaveSettings(fields) => self.save_settings(fields),
             UiEvent::TestSettings(service) => self.test_settings(&service),
+            UiEvent::PhotoCountdown(value) => self.save_photo_countdown(&value),
             UiEvent::SettingsTested(outcome) => self.settings_tested(&outcome),
             UiEvent::SaveCard(fields) => {
                 self.save_card(&fields);
@@ -2316,6 +2317,36 @@ impl App {
         live.settings_pane.eval(&outcome.script());
     }
 
+    /// Answers in place rather than redrawing, which would throw away any keys
+    /// typed but not yet saved further down the pane. The Video tab is redrawn
+    /// because its Retake photo button carries the number.
+    fn save_photo_countdown(&mut self, value: &str) {
+        let note = match value.trim().parse::<u32>() {
+            Ok(secs) if secs <= crate::config::MAX_PHOTO_COUNTDOWN_SECS => {
+                let mut config = crate::config::load();
+                config.photo_countdown_secs = Some(secs);
+                match crate::config::save(&config) {
+                    Ok(()) if secs == 0 => {
+                        "Saved — Retake photo now takes it straight away.".into()
+                    }
+                    Ok(()) => format!("Saved — Retake photo counts down from {secs}."),
+                    Err(err) => format!("Could not save: {err:#}"),
+                }
+            }
+            _ => format!(
+                "Enter a whole number of seconds from 0 to {}.",
+                crate::config::MAX_PHOTO_COUNTDOWN_SECS
+            ),
+        };
+        if let Some(live) = self.live.as_ref() {
+            let text = serde_json::to_string(&note).unwrap_or_default();
+            live.settings_pane.eval(&format!(
+                "document.getElementById('countdown-saved').textContent = {text};"
+            ));
+        }
+        self.update_video_view();
+    }
+
     fn redraw_settings(&self, note: Option<&str>) {
         if let Some(live) = self.live.as_ref() {
             live.settings_pane.show(&ui::settings_page(note));
@@ -2413,6 +2444,7 @@ impl App {
                     root => self.session.root.to_string_lossy(),
                     busy => busy,
                     model => self.notes_pick.model(),
+                    photo_countdown => crate::config::load().photo_countdown_secs(),
                     art => art,
                     review => review,
                     // The last stage of the render chain, so the pane's pipeline
@@ -2909,6 +2941,26 @@ impl App {
         // The summary names the visibility the next upload will carry, so it has
         // to repaint with the picker rather than at the next natural refresh.
         self.update_publish_summary();
+
+        // A video already up follows the picker too. The picker used to be a
+        // setting for the *next* upload only, and a video that went up public
+        // stayed public until someone changed it on youtube.com — so this is
+        // the one control on the tab that acts on YouTube without a button
+        // press, and the status line says so as it happens.
+        if crate::publish::longform(&self.session).is_none() {
+            return;
+        }
+        if self.publish_busy {
+            self.set_publish_status(&format!(
+                "A YouTube job is running — {} applies with the next Upload.",
+                privacy.label()
+            ));
+            return;
+        }
+        self.publish_busy = true;
+        self.set_publish_status(&format!("Making the video {} on YouTube…", privacy.label()));
+        crate::publish::spawn_visibility(self.session.clone(), privacy, self.publish_tx.clone());
+        self.sync_controls();
     }
 
     fn run_youtube_upload(&mut self) {
@@ -3014,6 +3066,21 @@ impl App {
                         crate::publish::Orientation::Vertical => "Short's poster replaced",
                     };
                     self.set_publish_status(&format!("{what} on {}", upload.url));
+                }
+                crate::publish::PublishEvent::VisibilitySet(upload) => {
+                    self.update_publish_summary();
+                    let what = match upload.orientation {
+                        crate::publish::Orientation::Horizontal => "The longform",
+                        crate::publish::Orientation::Vertical => "The Short",
+                    };
+                    self.set_publish_status(&format!(
+                        "{what} is now {} on YouTube: {}",
+                        upload.privacy.label(),
+                        upload.url
+                    ));
+                    // The blog and the social copy both read whether the video
+                    // is public before offering its link.
+                    self.update_blog_view();
                 }
                 crate::publish::PublishEvent::Done => {
                     self.publish_busy = false;
@@ -3345,7 +3412,8 @@ impl App {
         );
 
         info.push_str(&format!(
-            "## Next upload\n- Visibility: {}\n\n",
+            "## Visibility\n- {}: what the next upload goes up as — and what the video already up \
+             is changed to the moment the picker moves.\n\n",
             self.youtube_privacy.label()
         ));
 
@@ -3356,7 +3424,7 @@ impl App {
                 info.push_str(&format!("- {}\n", latest.url));
                 info.push_str(&format!("- Title: {}\n", latest.title));
                 info.push_str(&format!("- At: {}\n", latest.uploaded_at));
-                info.push_str(&format!("- Visibility: {}\n", latest.privacy.label()));
+                info.push_str(&format!("- Visibility: {}\n", visibility_line(&latest)));
                 let thumb = match (latest.thumbnail_set, latest.thumbnail_at.as_deref()) {
                     (true, Some(at)) => {
                         format!("set at {at} — Replace thumbnail pushes the selected artwork")
@@ -3379,7 +3447,7 @@ impl App {
                 info.push_str("\n## Short\n");
                 info.push_str(&format!("- {}\n", short.url));
                 info.push_str(&format!("- At: {}\n", short.uploaded_at));
-                info.push_str(&format!("- Visibility: {}\n", short.privacy.label()));
+                info.push_str(&format!("- Visibility: {}\n", visibility_line(&short)));
                 info.push_str("- The blog embeds it as the page's mobile player.\n");
             }
             None if has_vertical && !targets.vertical => info.push_str(
@@ -3921,4 +3989,13 @@ fn file_name(path: &std::path::Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
+}
+
+/// `Unlisted (changed at 2026-09-20T18:02:11Z)`, or just the label when the
+/// video is still at the visibility it went up with.
+fn visibility_line(row: &crate::publish::Upload) -> String {
+    match row.privacy_at.as_deref() {
+        Some(at) => format!("{} (changed at {at})", row.privacy.label()),
+        None => row.privacy.label().to_string(),
+    }
 }

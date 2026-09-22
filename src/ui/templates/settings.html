@@ -78,6 +78,18 @@
   {% endfor %}
 </div>
 
+<div class="card">
+  <div class="sec-head"><h2>Camera</h2></div>
+  <div class="field">
+    <div class="name"><label for="f-photo-countdown">Photo countdown (seconds)</label></div>
+    <input id="f-photo-countdown" type="number" min="0" max="{{ max_photo_countdown }}" step="1"
+      value="{{ photo_countdown }}" data-send-change='{"type":"photoCountdown"}'>
+    <p class="help">How long Retake photo counts down before it takes the still, so you can look
+      at the camera first. 0 takes it straight away. Saved as soon as you change it.</p>
+    <p class="result ok" id="countdown-saved"></p>
+  </div>
+</div>
+
 <form id="settings">
 {% for section in sections %}
   <div class="card">

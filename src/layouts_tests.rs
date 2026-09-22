@@ -1,4 +1,4 @@
-//! Tests for the 2x2 layout table.
+//! Tests for the 3x2 layout table.
 //!
 //! Most of these re-read the real composition CSS under `screencast/` and fail
 //! when a re-export moves a slot or flips a paint order — the table is a
@@ -27,8 +27,69 @@ fn only_the_split_pair_carries_a_screen() {
             !Layout::get(Pair::TalkingHead, orientation).needs_screen(),
             "a talking head chapter must not open a screen stream",
         );
+        assert!(
+            !Layout::get(Pair::Outline, orientation).needs_screen(),
+            "an outline chapter's screen space is drawn at render, not captured",
+        );
         assert!(Layout::get(Pair::Split, orientation).needs_screen());
     }
+}
+
+/// The outline pair records exactly what the talking head records: the chapter
+/// opens and closes full frame, and the card that pushes the camera into the
+/// split's column exists only at render. A camera slot here that was anything
+/// but the whole canvas would be a master the composition could not open on.
+#[test]
+fn the_outline_pair_records_exactly_like_the_talking_head() {
+    for orientation in Orientation::ALL {
+        let talking = Layout::get(Pair::TalkingHead, orientation);
+        let outline = Layout::get(Pair::Outline, orientation);
+        assert_eq!(outline.camera_slot, talking.camera_slot, "{orientation:?}");
+        assert_eq!(outline.canvas, talking.canvas, "{orientation:?}");
+        assert_eq!(outline.screen_slot, None);
+        assert_eq!(outline.topmost, Topmost::Camera);
+        assert!(outline.parent().is_none(), "no screen region to inherit");
+        assert!(!outline.composites(), "covered, like the talking head");
+    }
+}
+
+/// What the graph builder keys on: only a layout with a screen has to place
+/// the camera today; a camera-only layout covers its canvas.
+#[test]
+fn only_layouts_that_place_the_camera_composite() {
+    for layout in &LAYOUTS {
+        let expected = layout.pair == Pair::Split;
+        assert_eq!(
+            layout.composites(),
+            expected,
+            "{} composites={} expected {expected}",
+            layout.block,
+            layout.composites()
+        );
+    }
+}
+
+/// The record the render reads to tell an outline chapter from a passthrough
+/// one. Absent for an older take, and absent reads as "not outline".
+#[test]
+fn a_chapters_layout_round_trips_beside_its_media() {
+    let dir = std::env::temp_dir().join(format!("layouts-record-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(chapter_pair(&dir, 3), None, "nothing recorded yet");
+    record_chapter_layout(&dir, 3, Pair::Outline).unwrap();
+    assert_eq!(chapter_pair(&dir, 3), Some(Pair::Outline));
+    assert_eq!(chapter_pair(&dir, 4), None, "another chapter is unaffected");
+    let text = std::fs::read_to_string(layout_path(&dir, 3)).unwrap();
+    assert!(text.contains(r#""pair": "outline""#), "{text}");
+    assert!(text.contains("outline-horizontal"), "{text}");
+    assert!(text.contains("outline-vertical"), "{text}");
+    // A pair with a hyphenated name is spelled the way `--layout` spells it.
+    record_chapter_layout(&dir, 5, Pair::TalkingHead).unwrap();
+    assert!(std::fs::read_to_string(layout_path(&dir, 5))
+        .unwrap()
+        .contains(r#""pair": "talking-head""#));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -162,6 +223,15 @@ fn the_camera_slots_have_the_aspects_cover_is_tested_against() {
         (aspect(talk_v) - 9.0 / 16.0).abs() < 1e-9,
         "talking-head-vertical"
     );
+    // The outline pair frames its camera exactly as the talking head does.
+    assert_eq!(
+        Layout::get(Pair::Outline, Orientation::Horizontal).camera_slot_size(),
+        talk_h.camera_slot_size()
+    );
+    assert_eq!(
+        Layout::get(Pair::Outline, Orientation::Vertical).camera_slot_size(),
+        talk_v.camera_slot_size()
+    );
 }
 
 /// Where the compositions live — the vendored `components/` in this repo, via
@@ -259,6 +329,8 @@ fn camera_rect_class(block: &str) -> &'static str {
         "talking-head-vertical" => "th-camera",
         "screen-camera-split" => "screen-camera-split-camera-wrap",
         "screen-camera-vertical" => "vert-demo-panel",
+        "outline-horizontal" => "olh-camera-wrap",
+        "outline-vertical" => "olv-camera-wrap",
         other => panic!("no camera class recorded for {other}"),
     }
 }

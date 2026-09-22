@@ -36,12 +36,17 @@ const CHANNELS_URL: &str = "https://www.googleapis.com/youtube/v3/channels";
 /// with `redirect_uri_mismatch` and never reaches the user.
 const CALLBACK_PORT: u16 = 9876;
 
-/// Upload, and read the channel back to confirm which one was granted. Kept to
-/// two scopes deliberately: Google rejects a request that pairs `drive.file`
-/// with these, and Drive is not this app's business anyway.
-const SCOPES: [&str; 2] = [
+/// Upload, read the channel back to confirm which one was granted, and manage
+/// the videos put up — `videos.update`, which is how a live video's visibility
+/// is changed from the tab, is not covered by `youtube.upload`. Kept to these
+/// three deliberately: Google rejects a request that pairs `drive.file` with
+/// them, and Drive is not this app's business anyway. The first two are
+/// implied by the third, and kept so a grant on which someone unticks
+/// "Manage your YouTube account" in Google's granular consent still uploads.
+const SCOPES: [&str; 3] = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ];
 
 /// How long to hold the socket waiting for a human to finish in the browser.
@@ -426,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn the_authorize_url_carries_both_scopes_and_the_loopback_redirect() {
+    fn the_authorize_url_carries_every_scope_and_the_loopback_redirect() {
         let url = authorize_url(&creds(), "abc");
         assert!(url.contains("client_id=client-1"), "{url}");
         assert!(
@@ -435,6 +440,9 @@ mod tests {
         );
         assert!(url.contains("youtube.upload"), "{url}");
         assert!(url.contains("youtube.readonly"), "{url}");
+        // Without this one a video can go up but never be made public or
+        // private again from the tab — `videos.update` is not an upload scope.
+        assert!(url.contains("youtube.force-ssl"), "{url}");
         assert!(!url.contains("drive."), "drive scopes must stay out: {url}");
         assert!(url.contains("state=abc"), "{url}");
     }
