@@ -84,6 +84,28 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    up at once, down at 24 dB/s — green where speech should peak, yellow in the
    last of the headroom, red at the top, and all red once anything has clipped.
    It listens whenever the mic is open, recording or not.
+   The **Layout** dropdown offers three pairs. **Talking Head** records the
+   camera full-frame; **Split** records the screen beside it; **Outline**
+   records exactly what Talking Head records and becomes a different layout at
+   render: the chapter opens on you full-frame, and just before you reach your
+   first talking point a card slides in from the left (from the top, in the
+   vertical) with the chapter heading, pushing you over into the split's
+   column (its bottom band). The points list themselves one at a time on the
+   beat you say them, and before the cut the card slides away and the chapter
+   ends as it began. The points are written from the chapter's transcript by
+   the model chosen under Speaking notes, one line each: the model quotes the
+   words each point begins on, and the recorder matches the quote back to the
+   transcript's word timings and through the disfluency cut to place it. They
+   land in `outline/vN/outline.json`, where text and anchors can be edited by
+   hand and survive a re-render; the placed times are rewritten on every
+   render from the current cut, and `face_y` — where the face tracker last saw
+   you in the vertical take, which the vertical band centres on — can be
+   corrected there too. An outline chapter is the one kind whose horizontal
+   body is drawn by HyperFrames rather than spliced in as cut, so it costs
+   what a vertical chapter of the same length costs to render. A chapter
+   recorded as outline whose transcript never landed, or with no points, stays
+   a talking head; one whose points cannot be written — no OpenRouter key —
+   stops the render and says so.
    A chapter menu sits directly under **Start Recording**. Idle, it offers the
    next fresh chapter and every chapter already recorded; picking a recorded
    one turns the button into **Retake Chapter NN**, and pressing it moves that
@@ -96,7 +118,15 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    than the chapter after it, so it never lands on one already recorded. The
    **Retake ⌃⌥T** button is unchanged: it redoes the chapter that is rolling.
 2. **YouTube** — edit and save the title and description, choose visibility,
-   connect the channel, and upload (or re-upload) the longform by hand.
+   connect the channel, and upload (or re-upload) the longform by hand. The
+   **Visibility** picker is both the setting the next upload goes up with and
+   a control on the video already up: moving it makes the longform, and then
+   the Short, public, unlisted or private on YouTube straight away, and the
+   ledger records the change with its time. Changing a live video needs the
+   "Manage your YouTube account" permission, which connections made before
+   this asked for do not carry — the first change says so and asks for one
+   more press of **Connect…**. While an upload is running the change is held
+   and applied by the next Upload press.
 3. **Blog (Strapi)** — write and review the companion article, then publish it live at
    `/blog/{slug}`; the ledger row records whether Strapi actually published it.
    Deliberately not part of the render's chain: the blog carries the portrait

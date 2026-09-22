@@ -69,7 +69,7 @@
           .screen-camera-split-bg {
             position: absolute;
             inset: 0;
-            background: var(--saaga-peach);
+            background: var(--saaga-paper);
             z-index: 0;
           }
           /* Runs a few px under the screen render so the two never leave a
@@ -101,9 +101,9 @@
           .screen-camera-split-name {
             position: absolute;
             left: 1403px;
-            top: 1003px;
+            bottom: 0;
             width: 517px;
-            height: 77px;
+            height: 112px;
             box-sizing: border-box;
             background: var(--saaga-paper);
             display: flex;
@@ -127,14 +127,16 @@
           .scs-layer-logo { opacity: 0; }
           #screen-camera-split-name-text { padding: 0 24px; box-sizing: border-box; }
           .scs-badge { width: 44px; height: 44px; flex: none; display: block; }
-          .scs-wordmark { height: 24px; width: auto; flex: none; display: block; }
+          .scs-wordmark { height: 32px; width: auto; flex: none; display: block; }
           .screen-camera-split-name span {
             font-weight: 500;
-            font-size: 32px;
+            font-size: 40px;
             line-height: 1.2;
             letter-spacing: -0.02em;
             color: var(--saaga-ink);
-            white-space: nowrap;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            text-align: center;
             overflow: hidden;
           }
         </style>

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use super::cut;
+use crate::layouts::Orientation;
 
 pub const CARD_SECONDS: f64 = 3.0;
 /// Where the workspace records the encoder settings its renders were made at.
@@ -34,12 +35,14 @@ const HYPERFRAMES_JSON: &str = r#"{
 
 /// What a rendered composition is, which decides the resolution it renders at.
 ///
-/// There is no `Body`: a chapter body is passed through rather than rendered — see
-/// [`Segment`].
+/// `Body` is the one horizontal chapter body that *is* rendered: an outline
+/// chapter, whose points are drawn over its footage — see [`Segment`] for why
+/// every other body is passed through instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Card,
     Vertical,
+    Body,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +66,11 @@ pub struct Job {
 /// itself, and a worse one (HyperFrames writes Constrained Baseline, where the cut is
 /// High) built from a 64kbit mp3 rather than the cut's own 192kbit audio.
 ///
-/// So a body is named, not rendered.
+/// So a body is named, not rendered — with one exception. An outline chapter's
+/// body has its talking points drawn over it, and text that has to be laid out
+/// and timed is exactly what a browser is for. That chapter pays the render
+/// cost a vertical pays, once, and the outline stage is what decides which
+/// chapters those are — see [`crate::outline`].
 #[derive(Debug, Clone)]
 pub enum Segment {
     /// A composition a browser has to draw.
@@ -153,6 +160,7 @@ pub fn prepare(
         compose_root,
         library,
         titles,
+        &[],
         crate::config::RenderTargets::default(),
     )
 }
@@ -163,11 +171,16 @@ pub fn prepare(
 /// chapter compositions — so nothing is drawn for it. What it does not do is
 /// remove an earlier render's files: a box is "do not spend time on this", not
 /// "throw it away", and the pane lists what is on disk either way.
+///
+/// `outlines` names the chapters recorded in the outline layout, with their
+/// placed points. Those chapters render through the `outline-*` blocks in both
+/// orientations; every other chapter is laid out as it always was.
 pub fn prepare_targets(
     edit_root: &Path,
     compose_root: &Path,
     library: &Path,
     titles: &[(u32, String)],
+    outlines: &[crate::outline::ChapterOutline],
     targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
@@ -185,6 +198,7 @@ pub fn prepare_targets(
         &horizontal,
         &[
             "compositions/chapter-title-card.html",
+            "compositions/outline-horizontal.html",
             "assets/pattern-rings.svg",
             // The mark in the middle of the card's separator. Missing, the card
             // renders a broken image and says nothing about it.
@@ -201,6 +215,7 @@ pub fn prepare_targets(
         &vertical,
         &[
             "compositions/talking-head-vertical.html",
+            "compositions/outline-vertical.html",
             "assets/badge.svg",
             "assets/fonts/Booton-Regular.woff2",
             "assets/fonts/Booton-Medium.woff2",
@@ -216,6 +231,7 @@ pub fn prepare_targets(
         let audio = chapter.join("audio.mp3");
         let h_src = chapter.join(format!("chapter-{n:02}-horizontal.mp4"));
         let v_src = chapter.join(format!("chapter-{n:02}-vertical.mp4"));
+        let outline = outlines.iter().find(|outline| outline.n == *n);
         if targets.horizontal && h_src.exists() {
             // Chapter one has no card: the longform opens on its footage, with
             // nothing in front of it. The opening title card that used to stand
@@ -228,15 +244,42 @@ pub fn prepare_targets(
             if !h_segments.is_empty() {
                 h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
             }
-            // The cut itself, straight into the longform. Nothing is copied into the
-            // horizontal workspace for it either — the cards do not reference chapter
-            // media, and this take's footage is hundreds of megabytes.
-            h_segments.push(Segment::Passthrough(h_src));
+            match outline {
+                // An outline chapter is drawn: its footage goes into the
+                // workspace like a vertical's, and the block lays the points
+                // over it.
+                Some(outline) => {
+                    let seconds = cut::probe_duration_seconds(&h_src)?;
+                    copy_media(&horizontal, *n, &h_src, audio.exists().then_some(&audio))?;
+                    h_segments.push(Segment::Render(write_outline_chapter(
+                        &horizontal,
+                        *n,
+                        title,
+                        seconds,
+                        outline,
+                        Orientation::Horizontal,
+                    )?));
+                }
+                // The cut itself, straight into the longform. Nothing is copied into
+                // the horizontal workspace for it either — the cards do not reference
+                // chapter media, and this take's footage is hundreds of megabytes.
+                None => h_segments.push(Segment::Passthrough(h_src)),
+            }
         }
         if targets.vertical_parts() && v_src.exists() {
             let seconds = cut::probe_duration_seconds(&v_src)?;
             copy_media(&vertical, *n, &v_src, audio.exists().then_some(&audio))?;
-            v_jobs.push(write_v_chapter(&vertical, *n, title, seconds)?);
+            v_jobs.push(match outline {
+                Some(outline) => write_outline_chapter(
+                    &vertical,
+                    *n,
+                    title,
+                    seconds,
+                    outline,
+                    Orientation::Vertical,
+                )?,
+                None => write_v_chapter(&vertical, *n, title, seconds)?,
+            });
         }
     }
     let first_render = h_segments
@@ -404,47 +447,133 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
 }
 
 fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Result<Job> {
-    let id = format!("chapter-{n:02}");
-    let block = "talking-head-vertical";
     let camera = format!("assets/videos/chapter-{n:02}/chapter-{n:02}-vertical.mp4");
+    write_footage_chapter(
+        workspace,
+        &format!("chapter-{n:02}"),
+        "talking-head-vertical",
+        Kind::Vertical,
+        (1080, 1920),
+        n,
+        title,
+        seconds,
+        &camera,
+        serde_json::json!({
+            "openerSeconds": OPENER_SECONDS,
+            "cameraPosition": "center bottom",
+        }),
+    )
+}
+
+/// One outline chapter, in either orientation — see [`crate::outline`].
+///
+/// The horizontal is a *body* segment of the longform, named `seg-NN-body` the
+/// way its card is `seg-NN-card`; the vertical keeps the `chapter-NN` name every
+/// other vertical has, because that name is what the shorts, the S3 upload and
+/// the Buffer plan look for. The points ride in as one JSON string variable:
+/// HyperFrames variables are scalars, and the block parses this one once at
+/// load and builds its list from it.
+fn write_outline_chapter(
+    workspace: &Path,
+    n: u32,
+    title: &str,
+    seconds: f64,
+    outline: &crate::outline::ChapterOutline,
+    orientation: Orientation,
+) -> Result<Job> {
+    let (id, block, kind, size, camera) = match orientation {
+        Orientation::Horizontal => (
+            format!("seg-{n:02}-body"),
+            "outline-horizontal",
+            Kind::Body,
+            (1920, 1080),
+            format!("assets/videos/chapter-{n:02}/chapter-{n:02}-horizontal.mp4"),
+        ),
+        Orientation::Vertical => (
+            format!("chapter-{n:02}"),
+            "outline-vertical",
+            Kind::Vertical,
+            (1080, 1920),
+            format!("assets/videos/chapter-{n:02}/chapter-{n:02}-vertical.mp4"),
+        ),
+    };
+    // Where the card pushes the camera to. The horizontal column is centred on
+    // the frame: a tracked talking head keeps the face at the centre, and an
+    // untracked one is centred by the cover. The vertical band is centred on
+    // the face's height, which the tracker recorded and the manifest carries.
+    let extra = match orientation {
+        Orientation::Horizontal => serde_json::json!({
+            "outlinePoints": outline.variable_json(),
+            "focusX": 0.5,
+        }),
+        Orientation::Vertical => serde_json::json!({
+            "outlinePoints": outline.variable_json(),
+            "focusY": outline.face_y.unwrap_or(crate::outline::DEFAULT_FACE_Y),
+        }),
+    };
+    write_footage_chapter(
+        workspace, &id, block, kind, size, n, title, seconds, &camera, extra,
+    )
+}
+
+/// One footage-bearing block — a chapter's cut composited by a browser — in the
+/// workspace: the block copied and baked to the chapter's length with its
+/// placeholders pointed at the chapter's media, and a wrapper carrying the
+/// variables. `extra` is whatever the block wants beyond the chapter basics.
+#[allow(clippy::too_many_arguments)]
+fn write_footage_chapter(
+    workspace: &Path,
+    id: &str,
+    block: &str,
+    kind: Kind,
+    (width, height): (u32, u32),
+    n: u32,
+    title: &str,
+    seconds: f64,
+    camera: &str,
+    extra: serde_json::Value,
+) -> Result<Job> {
     let audio = format!("assets/videos/chapter-{n:02}/audio.mp3");
-    let values = serde_json::json!({
+    let mut values = serde_json::json!({
         "chapterLabel": "Chapter",
         "chapterNumber": format!("{n:02}"),
         "chapterTopic": title,
         "cameraSrc": camera,
         "audioSrc": audio,
         "durationSeconds": (seconds * 1000.0).round() / 1000.0,
-        "openerSeconds": OPENER_SECONDS,
-        "cameraPosition": "center bottom",
     });
+    if let (Some(values), Some(extra)) = (values.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            values.insert(key.clone(), value.clone());
+        }
+    }
     let library = workspace.join(format!("compositions/{block}.html"));
     let baked_name = format!("{id}.{block}.html");
     let baked = workspace.join("compositions").join(&baked_name);
     let mut body = std::fs::read_to_string(&library)
         .with_context(|| format!("reading {}", library.display()))?;
-    body = body.replace("assets/placeholder-camera.mp4", &camera);
+    body = body.replace("assets/placeholder-camera.mp4", camera);
     body = body.replace("assets/placeholder-audio.mp3", &audio);
     body = bake_duration(&body, seconds, block)?;
     write_if_changed(&baked, &body)?;
     let wrapper = write_wrapper(
         workspace,
-        &id,
+        id,
         block,
         &baked_name,
         &values,
         seconds,
-        1080,
-        1920,
+        width,
+        height,
     )?;
     Ok(Job {
-        id,
-        kind: Kind::Vertical,
-        composition: format!("compositions/chapter-{n:02}.html"),
+        id: id.to_string(),
+        kind,
+        composition: format!("compositions/{id}.html"),
         sources: vec![
             wrapper,
             baked,
-            workspace.join(&camera),
+            workspace.join(camera),
             workspace.join(&audio),
             workspace.join("assets/badge.svg"),
             workspace.join(QUALITY_FILE),
@@ -492,7 +621,13 @@ fn write_wrapper(
     height: u32,
 ) -> Result<PathBuf> {
     let duration = fmt_seconds(seconds);
-    let encoded = serde_json::to_string(values)?.replace('\'', "&#39;");
+    // The values sit in a single-quoted attribute, so the quote is escaped —
+    // and so are `&` and `<`, which a title or a talking point can carry and
+    // which an HTML parser would otherwise read as markup.
+    let encoded = serde_json::to_string(values)?
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('\'', "&#39;");
     let html = format!(
         r##"<!doctype html>
 <html lang="en">
@@ -761,8 +896,9 @@ mod tests {
             .unwrap();
         }
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
-        let plan =
-            |targets: RenderTargets| prepare_targets(&edit, &compose, &library, &titles, targets);
+        let plan = |targets: RenderTargets| {
+            prepare_targets(&edit, &compose, &library, &titles, &[], targets)
+        };
 
         // Only the horizontal: cards and bodies, no chapter compositions.
         let horizontal_only = plan(RenderTargets {
@@ -892,6 +1028,8 @@ mod library_tests {
         for rel in [
             "compositions/chapter-title-card.html",
             "compositions/talking-head-vertical.html",
+            "compositions/outline-horizontal.html",
+            "compositions/outline-vertical.html",
             "assets/pattern-rings.svg",
             "assets/badge.svg",
             "assets/silence.mp3",
@@ -1006,6 +1144,145 @@ mod library_tests {
             );
         }
         assert!(plan.render_count() > 0, "nothing to render");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An outline chapter is the one body that renders. Its horizontal is a
+    /// `seg-NN-body` render in the longform where a passthrough would be, its
+    /// vertical goes through the outline block under the name every short has,
+    /// and both carry the points as one JSON variable with the placed times.
+    #[test]
+    fn an_outline_chapter_renders_its_body_in_both_orientations() {
+        if std::process::Command::new("ffprobe")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            println!("skipping: no ffprobe to measure the fixture footage");
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("stream-recorder-outline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (edit, compose) = (root.join("edit"), root.join("compose"));
+        let footage = components_root().join("assets/placeholder-camera.mp4");
+        for n in 1..=2 {
+            let chapter = edit.join(format!("chapter-{n:02}"));
+            std::fs::create_dir_all(&chapter).unwrap();
+            for suffix in ["horizontal", "vertical"] {
+                std::fs::copy(
+                    &footage,
+                    chapter.join(format!("chapter-{n:02}-{suffix}.mp4")),
+                )
+                .unwrap();
+            }
+        }
+        let outline = crate::outline::ChapterOutline {
+            n: 2,
+            points: vec![
+                crate::outline::schema::OutlinePoint {
+                    text: "Why the retry storm happened".into(),
+                    anchor: "so the first".into(),
+                    at: Some(1.5),
+                },
+                crate::outline::schema::OutlinePoint {
+                    text: "Tom & Jerry's <fix>".into(),
+                    anchor: String::new(),
+                    at: Some(4.0),
+                },
+            ],
+            approved: false,
+            face_y: None,
+        };
+        let plan = prepare_targets(
+            &edit,
+            &compose,
+            &components_root(),
+            &[(1, "First".into()), (2, "Second".into())],
+            &[outline],
+            crate::config::RenderTargets::default(),
+        )
+        .expect("prepare with an outline chapter");
+
+        let ids: Vec<String> = plan
+            .h_segments
+            .iter()
+            .map(|segment| match segment {
+                Segment::Render(job) => job.id.clone(),
+                Segment::Passthrough(path) => path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            ["chapter-01-horizontal", "seg-02-card", "seg-02-body"],
+            "chapter one passes through, chapter two is drawn"
+        );
+        let body = plan
+            .h_segments
+            .iter()
+            .find_map(Segment::job)
+            .into_iter()
+            .chain(plan.h_segments.iter().filter_map(Segment::job))
+            .find(|job| job.id == "seg-02-body")
+            .expect("the body job");
+        assert_eq!(body.kind, Kind::Body);
+        let wrapper =
+            std::fs::read_to_string(compose.join("horizontal").join(&body.composition)).unwrap();
+        assert!(wrapper.contains("outline-horizontal"), "{wrapper}");
+        assert!(wrapper.contains(r#"\"at\":1.5"#), "{wrapper}");
+        assert!(
+            wrapper.contains("Tom &amp; Jerry&#39;s &lt;fix>"),
+            "markup in a point is escaped for the attribute: {wrapper}"
+        );
+        // The block was baked to the footage's length — root, media, panel and
+        // audio all — and the footage travelled.
+        let seconds = cut::probe_duration_seconds(&footage).unwrap();
+        let baked = std::fs::read_to_string(
+            compose.join("horizontal/compositions/seg-02-body.outline-horizontal.html"),
+        )
+        .unwrap();
+        let declared = format!(r#"data-duration="{}""#, fmt_seconds(seconds));
+        assert!(
+            baked.matches(declared.as_str()).count() >= 4,
+            "the block's timed elements were not baked to {declared}"
+        );
+        assert!(wrapper.contains(&declared), "{wrapper}");
+        assert!(baked.contains("assets/videos/chapter-02/chapter-02-horizontal.mp4"));
+        assert!(compose
+            .join("horizontal/assets/videos/chapter-02/chapter-02-horizontal.mp4")
+            .is_file());
+        assert!(body
+            .sources
+            .iter()
+            .any(|s| s.ends_with("chapter-02-horizontal.mp4")));
+
+        // The vertical keeps its name and switches block.
+        let verticals: Vec<(&str, &str)> = plan
+            .v_jobs
+            .iter()
+            .map(|job| (job.id.as_str(), job.composition.as_str()))
+            .collect();
+        assert_eq!(
+            verticals,
+            [
+                ("chapter-01", "compositions/chapter-01.html"),
+                ("chapter-02", "compositions/chapter-02.html")
+            ]
+        );
+        let v2 =
+            std::fs::read_to_string(compose.join("vertical/compositions/chapter-02.html")).unwrap();
+        assert!(v2.contains("outline-vertical"), "{v2}");
+        assert!(
+            v2.contains(r#""focusY":0.4"#),
+            "the band centres on the default face height: {v2}"
+        );
+        assert!(wrapper.contains(r#""focusX":0.5"#), "{wrapper}");
+        let v1 =
+            std::fs::read_to_string(compose.join("vertical/compositions/chapter-01.html")).unwrap();
+        assert!(v1.contains("talking-head-vertical"), "{v1}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

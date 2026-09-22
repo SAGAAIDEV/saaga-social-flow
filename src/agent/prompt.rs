@@ -22,6 +22,11 @@ use serde::{Deserialize, Serialize};
 
 pub const NOTES: &str = "notes.slide_deck";
 pub const TITLES: &str = "titles.chapter_cards";
+/// The on-screen outline an outline-layout chapter draws beside the speaker —
+/// see [`crate::outline`]. Its own id, not a section of [`NOTES`]: the notes
+/// are a teleprompter the presenter reads, this is copy the viewer reads, and
+/// tuning one must not retune the other.
+pub const OUTLINE: &str = "outline.talking_points";
 pub const POSTS: &str = "posts.social";
 pub const SUBSTACK: &str = "substack.notes";
 pub const BLOG: &str = "blog.article";
@@ -93,6 +98,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
     match prompt_id {
         NOTES => Some(super::notes::SYSTEM),
         TITLES => Some(super::titles::SYSTEM),
+        OUTLINE => Some(super::outline::SYSTEM),
         POSTS => Some(crate::posts::generate::SYSTEM_PROMPT),
         SUBSTACK => Some(crate::substack::generate::SYSTEM_PROMPT),
         BLOG => Some(crate::blog::generate::SYSTEM_PROMPT),

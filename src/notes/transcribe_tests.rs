@@ -44,7 +44,7 @@ impl TranscribeApi for OkApi {
     fn submit(&self, _: &str) -> Result<String> {
         Ok("id-1".into())
     }
-    fn poll(&self, _: &str) -> Result<ChapterTranscript> {
+    fn poll(&self, _: &str, _: &dyn Fn(&str)) -> Result<ChapterTranscript> {
         Ok(self.transcript.clone())
     }
 }
@@ -58,7 +58,7 @@ impl TranscribeApi for FailUpload {
     fn submit(&self, _: &str) -> Result<String> {
         unreachable!("submit")
     }
-    fn poll(&self, _: &str) -> Result<ChapterTranscript> {
+    fn poll(&self, _: &str, _: &dyn Fn(&str)) -> Result<ChapterTranscript> {
         unreachable!("poll")
     }
 }
@@ -221,4 +221,61 @@ fn an_unmeasured_chapter_is_uploaded() {
     let api = silent_api();
     finish_job(&api, &audio, &out, None);
     assert_eq!(api.uploads.load(Ordering::SeqCst), 1);
+}
+
+struct PanicApi;
+
+impl TranscribeApi for PanicApi {
+    fn upload(&self, _: &Path) -> Result<String> {
+        panic!("boom in upload");
+    }
+    fn submit(&self, _: &str) -> Result<String> {
+        unreachable!("submit")
+    }
+    fn poll(&self, _: &str, _: &dyn Fn(&str)) -> Result<ChapterTranscript> {
+        unreachable!("poll")
+    }
+}
+
+/// A panic used to end the thread and leave `processing` for good.
+#[test]
+fn a_panicking_job_is_recorded_as_an_error_not_left_processing() {
+    let (audio, out) = temp_pair("panic");
+    finish_job(&PanicApi, &audio, &out, None);
+    let t: ChapterTranscript =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    assert_eq!(t.status, TranscriptStatus::Error);
+    assert!(t.error.unwrap().contains("boom in upload"));
+}
+
+/// Every step lands in the session's ledger, so a stuck take can be read back.
+#[test]
+fn a_finished_job_leaves_its_steps_in_the_ledger() {
+    let (audio, out) = temp_pair("ledger");
+    let api = OkApi {
+        transcript: completed(),
+        uploads: AtomicU32::new(0),
+    };
+    finish_job(&api, &audio, &out, None);
+    let ledger = std::fs::read_to_string(audio.with_file_name("transcripts.jsonl")).unwrap();
+    for event in ["upload_started", "uploaded", "submitted", "finished"] {
+        assert!(
+            ledger.contains(&format!(r#""event":"{event}""#)),
+            "{event}: {ledger}"
+        );
+    }
+    assert!(ledger.contains(r#""assemblyai_id":"id-1""#), "{ledger}");
+}
+
+/// One job per chapter: a second would upload the same audio and race it to
+/// the same file. The place is given back however the job ends.
+#[test]
+fn a_chapter_has_at_most_one_job_running() {
+    let out = PathBuf::from("/tmp/stream-recorder-claim-test/chapter-01.transcript.json");
+    let first = Registered::claim(&out).expect("free");
+    assert!(Registered::claim(&out).is_none());
+    assert!(running(&out).is_some());
+    drop(first);
+    assert!(running(&out).is_none());
+    assert!(Registered::claim(&out).is_some());
 }

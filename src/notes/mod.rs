@@ -22,6 +22,7 @@ pub(crate) use deck::Chapter;
 pub use deck::{load as load_notes, NotesData};
 pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
 pub use picker::Picker;
+pub(crate) use transcribe::record_failure as record_transcript_failure;
 pub use transcribe::spawn_chapter_transcript;
 pub use view::NotesPane;
 
@@ -29,7 +30,9 @@ use crate::session::Session;
 pub(crate) use transcribe::{ChapterTranscript, TranscriptStatus, TranscriptWord};
 
 const WAIT_EVERY: Duration = Duration::from_secs(1);
-const WAIT_FOR: Duration = Duration::from_secs(600);
+/// As long as a job can legitimately take, plus a minute: a waiter that gives
+/// up sooner than the job it waits on drops a chapter that was about to land.
+pub(crate) const WAIT_FOR: Duration = Duration::from_secs(transcribe::JOB_MAX.as_secs() + 60);
 
 pub enum NotesEvent {
     Status(String),
@@ -116,8 +119,9 @@ fn unfinished_chapters(session_dir: &Path) -> Vec<PathBuf> {
     closed_chapter_numbers(session_dir)
         .into_iter()
         .filter(|&n| {
-            !load_transcript(session_dir, n)
-                .is_some_and(|t| t.status == TranscriptStatus::Completed)
+            !matches!(job_state(session_dir, n), JobState::Running(_))
+                && !load_transcript(session_dir, n)
+                    .is_some_and(|t| t.status == TranscriptStatus::Completed)
         })
         .map(|n| session_dir.join(format!("chapter-{n:02}.mp3")))
         .filter(|audio| audio.is_file())
@@ -139,6 +143,144 @@ pub fn retry_unfinished_transcripts(session_dir: &Path) -> usize {
         spawn_chapter_transcript(path.clone());
     }
     audio.len()
+}
+
+/// Make sure every closed chapter a job is about to wait on will finish, and
+/// stop right away, with the fix, when one cannot.
+///
+/// Called by the render and the notes job before they wait. Without it a
+/// chapter that could never finish — its key unset because the team file did
+/// not decrypt, its mp3 never made, its job gone with a crash — sat behind
+/// "Waiting for chapter 02 transcript…" for ten minutes and then went missing.
+///
+/// - The AssemblyAI key unset while the team file is the one holding it: the
+///   decrypt is tried again ([`crate::settings::sops::retry`]), so a login
+///   since launch is enough. Still failing, this is the error, and it names
+///   the login command.
+/// - Every chapter that is not transcribed and has no job running is started
+///   again: a skip or an error from an earlier try, a `processing` left by a
+///   crash, or no file at all. A chapter with an mp4 and no mp3 has the mp3
+///   made first.
+///
+/// `skip` is chapters the caller does not need words for (hand-edited ones, for
+/// the render). Returns how many chapters were started.
+pub fn prepare_transcripts(session_dir: &Path, skip: &[u32]) -> Result<usize> {
+    let restart: Vec<u32> = closed_chapter_numbers(session_dir)
+        .into_iter()
+        .filter(|n| !skip.contains(n))
+        .filter(|&n| match job_state(session_dir, n) {
+            JobState::Running(_) => false,
+            JobState::Finished(t) => t.status != TranscriptStatus::Completed,
+            JobState::Orphaned => true,
+        })
+        .collect();
+    if restart.is_empty() {
+        return Ok(0);
+    }
+    let list = restart
+        .iter()
+        .map(|n| format!("{n:02}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    const KEY: &str = "ASSEMBLYAI_API_KEY";
+    let key_unset = || std::env::var(KEY).map_or(true, |k| k.trim().is_empty());
+    if key_unset() && crate::settings::sops::undecrypted(KEY) {
+        if let Err(failed) = crate::settings::sops::retry() {
+            transcribe::ledger(
+                &session_dir.join(format!("chapter-{:02}.mp3", restart[0])),
+                "blocked",
+                serde_json::json!({ "chapters": list, "reason": failed.reason }),
+            );
+            bail!(
+                "AWS login needed — chapter {list} cannot transcribe: the AssemblyAI key is in \
+                 {}, which did not decrypt ({}). Run `aws sso login --profile dev` in a \
+                 terminal, then press this again (or restart the app).",
+                failed.path.display(),
+                failed.reason
+            );
+        }
+    }
+    if key_unset() {
+        bail!(
+            "{KEY} is not set, so chapter {list} cannot transcribe — add it in Settings, \
+             then press this again"
+        );
+    }
+
+    eprintln!("stream-recorder: starting transcripts again for chapter {list}");
+    for &n in &restart {
+        let mp3 = session_dir.join(format!("chapter-{n:02}.mp3"));
+        if mp3.is_file() {
+            spawn_chapter_transcript(mp3);
+        } else {
+            transcribe::spawn_from_video(session_dir.join(format!("chapter-{n:02}.mp4")));
+        }
+    }
+    Ok(restart.len())
+}
+
+/// Where one closed chapter's transcript stands, for a job about to wait on it.
+pub(crate) enum JobState {
+    /// The file says the job is over: completed, error or skipped.
+    Finished(ChapterTranscript),
+    /// A job is running for it in this process right now.
+    Running(transcribe::Stage),
+    /// Neither — no file, or a `processing` one with no job behind it. Nothing
+    /// is going to finish this chapter; waiting on it is waiting forever.
+    Orphaned,
+}
+
+pub(crate) fn job_state(session_dir: &Path, n: u32) -> JobState {
+    let out = session_dir.join(format!("chapter-{n:02}.transcript.json"));
+    if let Some(stage) = transcribe::running(&out) {
+        return JobState::Running(stage);
+    }
+    match load_transcript(session_dir, n) {
+        Some(t) if is_terminal(&t) => JobState::Finished(t),
+        _ => JobState::Orphaned,
+    }
+}
+
+/// The chapters among `chapters` a job is still running for, with its step.
+///
+/// An orphaned chapter is marked failed on the way — with a reason, so the
+/// render's and the notes' "none have words" can say what happened — rather
+/// than waited on.
+pub(crate) fn still_running(session_dir: &Path, chapters: &[u32]) -> Vec<(u32, transcribe::Stage)> {
+    chapters
+        .iter()
+        .filter_map(|&n| match job_state(session_dir, n) {
+            JobState::Running(stage) => Some((n, stage)),
+            JobState::Finished(_) => None,
+            JobState::Orphaned => {
+                let mp3 = session_dir.join(format!("chapter-{n:02}.mp3"));
+                let media = if mp3.is_file() {
+                    mp3
+                } else {
+                    session_dir.join(format!("chapter-{n:02}.mp4"))
+                };
+                transcribe::record_failure(
+                    &media,
+                    "no transcript job is running for this chapter (the app may have quit \
+                     mid-transcript) — press Render or Notes again to retry it",
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+/// "Waiting for chapter 02 transcript — uploading 28.1 MB, 1m05s…"
+pub(crate) fn waiting_message(running: &[(u32, transcribe::Stage)]) -> String {
+    let parts: Vec<String> = running
+        .iter()
+        .map(|(n, stage)| {
+            let secs = stage.since.elapsed().as_secs();
+            format!("{n:02} ({}, {}m{:02}s)", stage.step, secs / 60, secs % 60)
+        })
+        .collect();
+    format!("Waiting for chapter {} transcript…", parts.join(", "))
 }
 
 pub(crate) fn load_transcript(session_dir: &Path, n: u32) -> Option<ChapterTranscript> {
@@ -207,6 +349,7 @@ pub fn full_transcript(session_dir: &Path) -> Option<String> {
     Some(out)
 }
 
+#[cfg(test)]
 fn pending_closed(session_dir: &Path) -> Vec<u32> {
     closed_chapter_numbers(session_dir)
         .into_iter()
@@ -227,8 +370,8 @@ fn wait_for_closed_transcripts(
     }
     let deadline = Instant::now() + WAIT_FOR;
     loop {
-        let pending = pending_closed(session_dir);
-        if pending.is_empty() {
+        let running = still_running(session_dir, &closed);
+        if running.is_empty() {
             let chapters = collect_completed(session_dir);
             if chapters.is_empty() {
                 return Err(no_speech(session_dir).into());
@@ -236,27 +379,15 @@ fn wait_for_closed_transcripts(
             return Ok(chapters);
         }
         if Instant::now() > deadline {
-            let chapters = collect_completed(session_dir);
-            if chapters.is_empty() {
-                bail!(
-                    "timed out waiting for chapter {pending:?} transcripts in {}",
-                    session_dir.display()
-                );
-            }
-            eprintln!(
-                "stream-recorder: timed out waiting for chapter {pending:?}; using {} ready",
-                chapters.len()
+            // Not "use what is ready": that built notes missing a chapter and
+            // said so only on stderr.
+            bail!(
+                "gave up after {} minutes — {}",
+                WAIT_FOR.as_secs() / 60,
+                waiting_message(&running)
             );
-            return Ok(chapters);
         }
-        let msg = format!(
-            "Waiting for chapter {} transcript…",
-            pending
-                .iter()
-                .map(|n| format!("{n:02}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        let msg = waiting_message(&running);
         eprintln!("stream-recorder: {msg}");
         let _ = tx.send(NotesEvent::Status(msg));
         thread::sleep(WAIT_EVERY);
@@ -313,6 +444,7 @@ fn build_notes(
     let _ = tx.send(NotesEvent::Status(
         "Waiting for chapter transcripts…".into(),
     ));
+    prepare_transcripts(&session.dir, &[])?;
     let chapters = wait_for_closed_transcripts(&session.dir, tx)?;
     eprintln!(
         "stream-recorder: building notes from {} chapter(s) via {model}",
@@ -492,6 +624,61 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         let got = wait_for_closed_transcripts(&dir, &tx).expect("ready");
         assert_eq!(got, vec![(1, "one".into()), (2, "two".into())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The hang Laura hit: a `processing` file with no job behind it (a crash,
+    /// a quit mid-upload) used to be waited on for ten minutes. Now it is
+    /// marked failed with the reason and the wait ends at once.
+    #[test]
+    fn a_processing_file_with_no_job_behind_it_is_not_waited_on() {
+        let dir = temp("orphan");
+        std::fs::write(dir.join("chapter-01.mp3"), b"x").unwrap();
+        std::fs::write(
+            dir.join("chapter-01.transcript.json"),
+            r#"{"status":"processing","text":""}"#,
+        )
+        .unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let started = Instant::now();
+        let err = wait_for_closed_transcripts(&dir, &tx).expect_err("nothing to build from");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let text = err.to_string();
+        assert!(text.contains("no transcript job is running"), "{text}");
+        let ledger = std::fs::read_to_string(dir.join("transcripts.jsonl")).unwrap();
+        assert!(ledger.contains(r#""event":"failed""#), "{ledger}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without the key there is no point waiting: the guard says which
+    /// chapters and what to do before anything waits.
+    #[test]
+    fn the_guard_fails_fast_when_the_key_is_unset() {
+        if std::env::var_os("ASSEMBLYAI_API_KEY").is_some() {
+            return;
+        }
+        let dir = temp("guard");
+        std::fs::write(dir.join("chapter-01.mp3"), b"x").unwrap();
+        std::fs::write(dir.join("chapter-02.mp3"), b"x").unwrap();
+        std::fs::write(
+            dir.join("chapter-01.transcript.json"),
+            r#"{"status":"completed","text":"hello"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("chapter-02.transcript.json"),
+            r#"{"status":"skipped","error":"ASSEMBLYAI_API_KEY unset"}"#,
+        )
+        .unwrap();
+        let err = prepare_transcripts(&dir, &[]).expect_err("no key");
+        let text = err.to_string();
+        assert!(text.contains("chapter 02"), "{text}");
+        assert!(
+            !text.contains("01"),
+            "a finished chapter is not in it: {text}"
+        );
+        // Hand-edited chapters need no words, so they do not trip it.
+        assert_eq!(prepare_transcripts(&dir, &[2]).unwrap(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

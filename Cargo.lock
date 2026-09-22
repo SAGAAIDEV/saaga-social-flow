@@ -7503,6 +7503,7 @@ dependencies = [
  "dispatch2",
  "global-hotkey",
  "image",
+ "libc",
  "mediapipe",
  "minijinja",
  "objc2 0.6.4",

@@ -328,17 +328,14 @@ fn preview(value: &str) -> String {
 /// [`write`] folds the new values in.
 pub fn status() -> Vec<Status> {
     let stored = read().unwrap_or_default();
+    let team = sops::provided();
     FIELDS
         .iter()
         .map(|f| {
             let live = std::env::var(f.key).unwrap_or_default();
             let live = live.trim();
             let on_file = stored.get(f.key).map(String::as_str).unwrap_or("").trim();
-            let from_team = sops::provided()
-                .get(f.key)
-                .map(String::as_str)
-                .unwrap_or("")
-                .trim();
+            let from_team = team.get(f.key).map(String::as_str).unwrap_or("").trim();
             // Local before team: the local file is loaded first and therefore
             // wins, so when both carry the same value it is the local one in
             // effect — and the local one is what this pane can actually change.

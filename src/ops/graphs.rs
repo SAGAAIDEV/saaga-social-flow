@@ -103,8 +103,10 @@ pub struct Pointing {
 /// Live H and V views of the current pair.
 ///
 /// Talking Head covers the camera into each canvas. Split composites camera
-/// and the latest screen tap into each layout. Session-scoped: the UI binds
-/// to the two preview ports, and [`CAMERA_PREVIEW`] carries the raw source.
+/// and the latest screen tap into each layout, and Outline composites the
+/// camera alone into its slot over an empty canvas — the points that fill the
+/// rest are drawn at render. Session-scoped: the UI binds to the two preview
+/// ports, and [`CAMERA_PREVIEW`] carries the raw source.
 ///
 /// With `tracking` set, one [`FaceTrack`] node sits between the source and the
 /// fork, so both orientations are framed from a single detection — see that
@@ -150,16 +152,19 @@ pub fn preview_graph(
             Orientation::Horizontal => "horizontal",
             Orientation::Vertical => "vertical",
         };
-        let op_name = match (layout.screen_slot, orientation) {
-            (Some(_), Orientation::Horizontal) => "composite-horizontal",
-            (Some(_), Orientation::Vertical) => "composite-vertical",
-            (None, Orientation::Horizontal) => "cover-horizontal",
-            (None, Orientation::Vertical) => "cover-vertical",
+        // Keyed on whether the camera has to be *placed*, not on whether there
+        // is a screen: the outline pair has no screen and still cannot be
+        // covered, or its camera would fill the frame the points are drawn on.
+        let op_name = match (layout.composites(), orientation) {
+            (true, Orientation::Horizontal) => "composite-horizontal",
+            (true, Orientation::Vertical) => "composite-vertical",
+            (false, Orientation::Horizontal) => "cover-horizontal",
+            (false, Orientation::Vertical) => "cover-vertical",
         };
         let framing = tracking
             .map(|tracking| tracking.framing(layout))
             .unwrap_or_default();
-        let node = if layout.screen_slot.is_some() {
+        let node = if layout.composites() {
             builder.op(
                 camera_in,
                 Composite::for_layout(
@@ -313,7 +318,7 @@ mod tests {
 
     #[test]
     fn the_camera_port_is_present_in_every_pair() {
-        for pair in [Pair::TalkingHead, Pair::Split] {
+        for pair in Pair::ALL {
             let graph = preview_graph(pair, None, [None, None], None, None);
             let names: Vec<String> = graph
                 .preview_ports()
@@ -352,7 +357,7 @@ mod tests {
     /// subject is in the same frame.
     #[test]
     fn tracking_adds_one_node_ahead_of_both_orientations() {
-        for pair in [Pair::TalkingHead, Pair::Split] {
+        for pair in Pair::ALL {
             let untracked = preview_graph(pair, None, [None, None], None, None);
             let tracking = Tracking {
                 tracker: std::sync::Arc::new(
@@ -408,10 +413,17 @@ mod tests {
             config.zoom_for("talking-head-horizontal") > 1.0,
             "the one layout with no travel of its own must punch in"
         );
+        // The outline longform is the same full-bleed frame, so it punches in
+        // the same way; its vertical crops like the talking head's and does not.
+        assert_eq!(
+            config.zoom_for("outline-horizontal"),
+            config.zoom_for("talking-head-horizontal")
+        );
         for block in [
             "talking-head-vertical",
             "screen-camera-split",
             "screen-camera-vertical",
+            "outline-vertical",
         ] {
             assert_eq!(
                 config.zoom_for(block),
@@ -421,6 +433,25 @@ mod tests {
         }
         // A layout nobody configured frames as it always has.
         assert_eq!(config.zoom_for("some-future-block"), 1.0);
+    }
+
+    /// The outline pair records a talking head — the card that pushes the
+    /// camera aside exists only at render — so its graph is the talking head's
+    /// graph: cover into each canvas, no tap, no pointer node, no screen sink.
+    #[test]
+    fn the_outline_preview_graph_is_the_talking_heads() {
+        let graph = preview_graph(Pair::Outline, None, [None, None], None, None);
+        let talking = preview_graph(Pair::TalkingHead, None, [None, None], None, None);
+        assert_eq!(graph.op_names(), talking.op_names());
+        assert_eq!(graph.op_names(), vec!["cover-horizontal", "cover-vertical"]);
+        assert_eq!(graph.sinks().count(), 2);
+        let pointing = pointing_fixture();
+        let pointed = preview_graph(Pair::Outline, None, [None, None], None, Some(&pointing));
+        assert_eq!(
+            pointed.op_names(),
+            graph.op_names(),
+            "no screen crop to move, so no pointer node"
+        );
     }
 
     #[test]

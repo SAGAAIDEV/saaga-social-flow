@@ -1,4 +1,4 @@
-//! The 2x2 of hyperframes layouts a chapter can be recorded for, and where each
+//! The 3x2 of hyperframes layouts a chapter can be recorded for, and where each
 //! one's screen slot sits.
 //!
 //! A chapter is recorded *for* a layout. The layout decides the aspect the
@@ -14,14 +14,33 @@
 //!                 1920x1080, camera only        1080x1920, camera only
 //!  Split          screen-camera-split           screen-camera-vertical
 //!                 screen 0,0,1402.562,1080      screen 0,0,1080,1280
+//!  Outline        outline-horizontal            outline-vertical
+//!                 1920x1080, camera only        1080x1920, camera only
 //! ```
 //!
 //! Two things fall out of that table rather than out of special cases at the
 //! call sites. Only the Split pair has a [`Layout::screen_slot`], so a talking
-//! head chapter runs no `SCStream` at all — the `None` is the whole
+//! head or outline chapter runs no `SCStream` at all — the `None` is the whole
 //! implementation of "no screen capture for this layout". And the three screen
 //! aspects a recording can need are 1.299:1 and 0.844:1 and nothing else, so
 //! "horizontal vs vertical" is not the axis that matters; the *block* is.
+//!
+//! ## Outline: recorded as a talking head, cut into at render
+//!
+//! The Outline pair records exactly what the Talking Head pair records — the
+//! camera full frame, face-tracked, in both orientations. What makes it a
+//! different layout happens at render: the chapter opens as a talking head,
+//! and just before the speaker reaches their first point a card slides in
+//! from the left (from the top, in the vertical) carrying the chapter heading,
+//! pushing the camera over into the split layout's column (its bottom band)
+//! while the points list themselves as they are spoken, and slides away again
+//! before the cut. None of that can be captured, because the points do not
+//! exist until the transcript does — see [`crate::outline`]. So the camera
+//! slot here is the whole canvas, like the talking head's, the column and the
+//! band live in the `outline-*` compositions as the card's resting state, and
+//! an outline chapter is the one kind whose horizontal body is rendered rather
+//! than passed through. [`chapter_pair`] is how the render stage finds out
+//! which chapters those are.
 //!
 //! ## Hand-transcribed, with a test that notices drift
 //!
@@ -47,11 +66,17 @@
 //! Split layouts paint their two media layers in *opposite* orders, so it
 //! cannot be inferred.
 
-/// Which of the two layout pairs a chapter is recorded for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+/// Which of the three layout pairs a chapter is recorded for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Pair {
     TalkingHead,
     Split,
+    /// The split's camera column with talking points where the screen would
+    /// be — see the module docs.
+    Outline,
 }
 
 /// Which half of a pair — i.e. which output the chapter is framed for.
@@ -62,12 +87,13 @@ pub enum Orientation {
 }
 
 impl Pair {
-    pub const ALL: [Pair; 2] = [Pair::TalkingHead, Pair::Split];
+    pub const ALL: [Pair; 3] = [Pair::TalkingHead, Pair::Split, Pair::Outline];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Pair::TalkingHead => "Talking Head",
             Pair::Split => "Split",
+            Pair::Outline => "Outline",
         }
     }
 }
@@ -122,9 +148,9 @@ pub struct Layout {
     pub topmost: Topmost,
 }
 
-/// The 2x2, ordered pair-major so [`Layout::get`] can index rather than search.
+/// The 3x2, ordered pair-major so [`Layout::get`] can index rather than search.
 /// `layouts_are_indexed_pair_major` pins that ordering.
-pub const LAYOUTS: [Layout; 4] = [
+pub const LAYOUTS: [Layout; 6] = [
     Layout {
         pair: Pair::TalkingHead,
         orientation: Orientation::Horizontal,
@@ -175,10 +201,33 @@ pub const LAYOUTS: [Layout; 4] = [
         camera_slot: (0.0, 1280.0, 1080.0, 640.0),
         topmost: Topmost::Camera,
     },
+    Layout {
+        pair: Pair::Outline,
+        orientation: Orientation::Horizontal,
+        block: "outline-horizontal",
+        canvas: (1920.0, 1080.0),
+        screen_slot: None,
+        // Full bleed, the talking head's own slot: the chapter opens and
+        // closes as one, and the composition slides the frame over into the
+        // split's 522px column only while the card is in.
+        camera_slot: (0.0, 0.0, 1920.0, 1080.0),
+        topmost: Topmost::Camera,
+    },
+    Layout {
+        pair: Pair::Outline,
+        orientation: Orientation::Vertical,
+        block: "outline-vertical",
+        canvas: (1080.0, 1920.0),
+        screen_slot: None,
+        // Full bleed of the 9:16 canvas, as talking-head-vertical; the
+        // composition slides it down into the split's bottom band.
+        camera_slot: (0.0, 0.0, 1080.0, 1920.0),
+        topmost: Topmost::Camera,
+    },
 ];
 
 impl Layout {
-    /// The cell for one pair and orientation. Total, because the 2x2 is
+    /// The cell for one pair and orientation. Total, because the 3x2 is
     /// complete — every combination names a real block.
     pub fn get(pair: Pair, orientation: Orientation) -> &'static Layout {
         &LAYOUTS[pair as usize * 2 + orientation as usize]
@@ -204,6 +253,19 @@ impl Layout {
     /// Whether recording this layout needs the screen captured at all.
     pub fn needs_screen(&self) -> bool {
         self.screen_slot.is_some()
+    }
+
+    /// Whether the camera has to be *placed* into the canvas rather than
+    /// simply covering it.
+    ///
+    /// True for every layout with a screen, and for any layout whose camera
+    /// lands in a sub-rect of a canvas with nothing else in it — none today,
+    /// since the outline pair records full frame, but the graph builder keys
+    /// on this rather than on the screen so such a layout could not be added
+    /// and quietly recorded as a talking head. Cover fills the whole canvas
+    /// from the camera and never consults [`Layout::camera_slot`].
+    pub fn composites(&self) -> bool {
+        self.screen_slot.is_some() || self.camera_slot != (0.0, 0.0, self.canvas.0, self.canvas.1)
     }
 
     /// The layout this one's region is parented to, if any.
@@ -252,8 +314,70 @@ impl Layout {
             LAYOUTS[1].block,
             LAYOUTS[2].block,
             LAYOUTS[3].block,
+            LAYOUTS[4].block,
+            LAYOUTS[5].block,
         ]
     }
+}
+
+/// What a chapter was recorded for, written beside its media.
+///
+/// The router holds the pair in memory and the composite's sidecar records
+/// only the canvas, so until this existed nothing on disk said which layout a
+/// chapter was framed for — and the render did not need to know, because every
+/// horizontal body went into the longform as it was cut. An outline chapter is
+/// the one that has to be rendered, so the render has to be able to tell.
+///
+/// One small file per chapter rather than a session-wide manifest, for the
+/// same reason the transcripts and sidecars are: `retire_chapter` moves
+/// everything named for a chapter into `.discarded/` by prefix, so a per-chapter
+/// file travels with its take without that code learning a new name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChapterLayout {
+    pub pair: Pair,
+    /// The block ids, so a reader that only wants the names need not know the
+    /// table — and so the file still says something if a pair is ever renamed.
+    pub horizontal: String,
+    pub vertical: String,
+}
+
+impl ChapterLayout {
+    pub fn of(pair: Pair) -> ChapterLayout {
+        ChapterLayout {
+            pair,
+            horizontal: Layout::get(pair, Orientation::Horizontal).block.to_string(),
+            vertical: Layout::get(pair, Orientation::Vertical).block.to_string(),
+        }
+    }
+}
+
+/// `chapter-03.layout.json`, beside the chapter's media.
+pub fn layout_path(session_dir: &std::path::Path, chapter: u32) -> std::path::PathBuf {
+    session_dir.join(format!("chapter-{chapter:02}.layout.json"))
+}
+
+/// Record that `chapter` is being recorded for `pair`. Written when the chapter
+/// opens, so it exists whatever happens to the take afterwards.
+pub fn record_chapter_layout(
+    session_dir: &std::path::Path,
+    chapter: u32,
+    pair: Pair,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let path = layout_path(session_dir, chapter);
+    let text =
+        serde_json::to_string_pretty(&ChapterLayout::of(pair)).context("serializing layout")?;
+    std::fs::write(&path, text + "\n").with_context(|| format!("writing {}", path.display()))
+}
+
+/// The pair `chapter` was recorded for, if it was recorded since this file
+/// existed. `None` for an older take — which every stage treats as it always
+/// did, a passthrough body with no outline — rather than a guess.
+pub fn chapter_pair(session_dir: &std::path::Path, chapter: u32) -> Option<Pair> {
+    let text = std::fs::read_to_string(layout_path(session_dir, chapter)).ok()?;
+    serde_json::from_str::<ChapterLayout>(&text)
+        .ok()
+        .map(|layout| layout.pair)
 }
 
 #[cfg(test)]

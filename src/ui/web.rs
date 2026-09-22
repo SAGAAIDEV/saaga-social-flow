@@ -196,6 +196,10 @@ pub enum WebEvent {
     TestSettings {
         service: String,
     },
+    /// The Settings tab's photo countdown box, as typed.
+    PhotoCountdown {
+        value: String,
+    },
 }
 
 impl WebEvent {
@@ -249,6 +253,7 @@ impl WebEvent {
             WebEvent::CopyText { text } => UiEvent::CopyText(text),
             WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
             WebEvent::TestSettings { service } => UiEvent::TestSettings(service),
+            WebEvent::PhotoCountdown { value } => UiEvent::PhotoCountdown(value),
         }
     }
 }

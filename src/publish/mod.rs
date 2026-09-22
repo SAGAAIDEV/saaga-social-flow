@@ -111,15 +111,21 @@ pub struct Upload {
     /// on rows whose thumbnail never set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail_at: Option<String>,
-    /// What it went up as.
+    /// Who can see it on YouTube now.
     ///
     /// Recorded rather than inferred from the current setting, because the
     /// setting is a standing preference that outlives any one upload: reading
     /// it back later would report what the *next* video would do, not what this
     /// one did. Defaults to public when absent, which is what every row written
-    /// before this field existed actually was.
+    /// before this field existed actually was. Changed after the upload by
+    /// [`run_visibility`], which appends a row with the new value and a
+    /// [`Upload::privacy_at`].
     #[serde(default)]
     pub privacy: youtube::Privacy,
+    /// When the visibility was last changed on YouTube from the tab. `None` on
+    /// a video still at the visibility it went up with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy_at: Option<String>,
     /// Which cut this is. Defaults to the longform, which is what every row
     /// written before the Short existed was.
     #[serde(default)]
@@ -158,6 +164,9 @@ pub enum PublishEvent {
     /// The poster on a video already up was replaced with the selected artwork.
     /// Not terminal either: the Short's follows the longform's.
     ThumbnailSet(Upload),
+    /// Who can see a video already up was changed to match the picker. Not
+    /// terminal either, for the same reason.
+    VisibilitySet(Upload),
     /// The press is over, however many videos it put up.
     Done,
     /// The OAuth flow finished. Terminal like `Done` and `Failed` — the app has
@@ -212,6 +221,115 @@ pub fn spawn_thumbnail(session: Session, tx: Sender<PublishEvent>) {
             "Could not start the thumbnail job: {err}"
         )));
     }
+}
+
+/// Changes who can see what is already up, from the Visibility picker, without
+/// touching the video. See [`run_visibility`].
+pub fn spawn_visibility(session: Session, privacy: youtube::Privacy, tx: Sender<PublishEvent>) {
+    let unstarted = tx.clone();
+    if let Err(err) = std::thread::Builder::new()
+        .name("youtube-visibility".into())
+        .spawn(move || match run_visibility(&session, privacy, &tx) {
+            Ok(()) => {
+                let _ = tx.send(PublishEvent::Done);
+            }
+            Err(err) => {
+                eprintln!("stream-recorder: youtube visibility change failed: {err:#}");
+                let _ = tx.send(PublishEvent::Failed(format!(
+                    "Changing the visibility failed: {err:#}"
+                )));
+            }
+        })
+    {
+        eprintln!("stream-recorder: could not start the youtube visibility job: {err}");
+        let _ = unstarted.send(PublishEvent::Failed(format!(
+            "Could not start the visibility job: {err}"
+        )));
+    }
+}
+
+/// The picker's visibility onto the newest longform on YouTube, then onto the
+/// Short if there is one.
+///
+/// The ledger row names the video, as it does for the poster: the video people
+/// are already watching is the one whose visibility changed, whatever the
+/// render on disk now hashes to. A video already at the picker's setting is
+/// left alone — the API call is skipped, and so is the ledger row, so pressing
+/// the same choice twice writes nothing.
+///
+/// The longform is the reason the picker exists, so its failure is the job's
+/// failure. The Short's is best effort, as everywhere else: it is a companion
+/// to the longform, and a Short left at the old visibility is reported rather
+/// than allowed to undo a longform that changed.
+fn run_visibility(
+    session: &Session,
+    privacy: youtube::Privacy,
+    tx: &Sender<PublishEvent>,
+) -> Result<()> {
+    let status = |msg: String| {
+        let _ = tx.send(PublishEvent::Status(msg));
+    };
+    let longform = longform(session).context(
+        "nothing on YouTube yet from this project — the visibility applies to the next upload",
+    )?;
+    if longform.privacy == privacy {
+        status(format!(
+            "The longform is already {} on YouTube.",
+            privacy.label()
+        ));
+    } else {
+        status(format!(
+            "Making the longform {} on YouTube…",
+            privacy.label()
+        ));
+        let token = youtube::access_token()?;
+        youtube::update_privacy(&token, &longform.video_id, privacy).with_context(|| {
+            format!(
+                "{} is still {} on YouTube",
+                longform.url,
+                longform.privacy.label()
+            )
+        })?;
+        let row = record_privacy(session, longform, privacy)?;
+        eprintln!(
+            "stream-recorder: youtube visibility → {} on {}",
+            privacy.as_str(),
+            row.url
+        );
+        let _ = tx.send(PublishEvent::VisibilitySet(row));
+    }
+
+    let Some(short) = short(session) else {
+        return Ok(());
+    };
+    if short.privacy == privacy {
+        return Ok(());
+    }
+    status(format!("Making the Short {} on YouTube…", privacy.label()));
+    match youtube::access_token()
+        .and_then(|token| youtube::update_privacy(&token, &short.video_id, privacy))
+    {
+        Ok(()) => {
+            let row = record_privacy(session, short, privacy)?;
+            let _ = tx.send(PublishEvent::VisibilitySet(row));
+        }
+        Err(err) => {
+            eprintln!("stream-recorder: the Short's visibility did not change: {err:#}");
+            status(format!(
+                "The Short is still {} on YouTube: {err:#}",
+                short.privacy.label()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The row that says who can see the video now, and since when.
+fn record_privacy(session: &Session, mut row: Upload, privacy: youtube::Privacy) -> Result<Upload> {
+    row.privacy = privacy;
+    row.privacy_at = Some(crate::schedule::ledger::now_rfc3339());
+    append(session, &row)?;
+    Ok(row)
 }
 
 /// The selected horizontal artwork onto the newest longform on YouTube, then
@@ -356,7 +474,8 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
 /// The ledger, not the API, is what stops a double upload: YouTube will happily
 /// accept the same video twice and give it two ids, and the second one is a
 /// duplicate on the channel that nothing here would ever clean up. A render
-/// already up gets its poster set again and nothing else.
+/// already up gets its poster set again and its visibility brought in line
+/// with the picker, and nothing else.
 fn upload_one(
     session: &Session,
     video: &Path,
@@ -365,6 +484,7 @@ fn upload_one(
     status: &dyn Fn(String),
 ) -> Result<Upload> {
     let source_hash = hash_of_file(video)?;
+    let meta = video_meta(session, orientation)?;
     if let Some(mut prior) = uploaded(session, &source_hash) {
         if let Some(jpeg) = poster {
             status(format!(
@@ -375,10 +495,38 @@ fn upload_one(
                 prior = record_poster(session, prior)?;
             }
         }
+        // The picker may have moved since this went up — while a job was
+        // running, say, when the change is held for the next press. The
+        // picker is the truth for what is up, so a press brings it in line.
+        if prior.privacy != meta.privacy {
+            status(format!(
+                "Making {} {} on YouTube…",
+                orientation.noun(),
+                meta.privacy.label()
+            ));
+            match youtube::access_token()
+                .and_then(|token| youtube::update_privacy(&token, &prior.video_id, meta.privacy))
+            {
+                Ok(()) => prior = record_privacy(session, prior, meta.privacy)?,
+                Err(err) => match orientation {
+                    Orientation::Horizontal => {
+                        return Err(err).with_context(|| {
+                            format!(
+                                "{} is up but still {} on YouTube",
+                                prior.url,
+                                prior.privacy.label()
+                            )
+                        })
+                    }
+                    Orientation::Vertical => {
+                        eprintln!("stream-recorder: the Short's visibility did not change: {err:#}")
+                    }
+                },
+            }
+        }
         return Ok(prior);
     }
 
-    let meta = video_meta(session, orientation)?;
     status(format!(
         "Uploading “{}” to YouTube as {}…",
         meta.title,
@@ -402,6 +550,7 @@ fn upload_one(
         thumbnail_set: false,
         thumbnail_at: None,
         privacy: meta.privacy,
+        privacy_at: None,
         orientation,
     };
     append(session, &upload)?;
@@ -576,6 +725,7 @@ mod tests {
             thumbnail_set: false,
             thumbnail_at: None,
             privacy: youtube::Privacy::Public,
+            privacy_at: None,
             orientation: Orientation::Horizontal,
         }
     }
@@ -711,6 +861,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(old.thumbnail_at, None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A visibility change from the picker is a row like a poster's: newest
+    /// wins, the upload time is history, the change has its own time, and it
+    /// lands on the video that is live rather than on a hash of the render.
+    #[test]
+    fn a_visibility_change_is_recorded_against_the_live_video() {
+        let root = temp("visibility");
+        let session = session(&root);
+        append(&session, &upload("aaaa", "long-1")).unwrap();
+        append(&session, &short_row("bbbb", "short-1")).unwrap();
+        let live = longform(&session).unwrap();
+        assert_eq!(live.privacy, youtube::Privacy::Public);
+        let row = record_privacy(&session, live, youtube::Privacy::Unlisted).unwrap();
+        assert_eq!(row.video_id, "long-1");
+        assert_eq!(row.privacy, youtube::Privacy::Unlisted);
+        assert!(row.privacy_at.as_deref().unwrap().ends_with('Z'));
+        assert_eq!(row.uploaded_at, "2026-08-16T12:00:00Z");
+        assert_eq!(
+            longform(&session).unwrap(),
+            row,
+            "the newest row is the truth"
+        );
+        assert_eq!(
+            short(&session).unwrap().privacy,
+            youtube::Privacy::Public,
+            "the Short has its own row and its own change"
+        );
+        // A row from before the field existed has no change time.
+        let old: Upload = serde_json::from_str(
+            r#"{"video_id":"abc","url":"https://y/abc","title":"A video",
+                "source_hash":"h","uploaded_at":"2026-08-16T12:00:00Z","privacy":"private"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.privacy, youtube::Privacy::Private);
+        assert_eq!(old.privacy_at, None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

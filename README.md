@@ -5,6 +5,7 @@ A native macOS screen, camera, and microphone recorder built for social content 
 ## Features
 
 - **Multi-track recording**: Screen capture, camera feed, and microphone all synced to a shared clock
+- **Three layouts**: Talking Head, Split (screen beside the camera), and Outline — a talking head that a card of the chapter's talking points slides into, extracted from the transcript and revealed as they are spoken
 - **Procedural thumbnails**: Generate procedural cards with offscreen WebView rendering and face-tracked overlays
 - **Chapter markers**: Streamed take/chapter markers with global hotkey support (⌃⇧S)
 - **Silent mic detection**: Automatic fallback device resolution when configured device goes silent

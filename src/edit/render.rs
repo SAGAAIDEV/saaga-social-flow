@@ -581,7 +581,7 @@ fn render_job(workspace: &Path, job: &Job, dest: &Path, workers: usize) -> Resul
         "--resolution",
         match job.kind {
             Kind::Vertical => "portrait",
-            Kind::Card => "landscape",
+            Kind::Card | Kind::Body => "landscape",
         },
         "--output",
     ]);

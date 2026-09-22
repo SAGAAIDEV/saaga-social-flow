@@ -93,6 +93,18 @@ impl Router {
         // to build.
         let camera_graph = self.open_graph(StreamId::Camera, chapter)?;
 
+        // Which layout this chapter is framed for, beside where its media will
+        // land. The render reads it to tell an outline chapter — whose body it
+        // has to draw — from one it passes through. A warning rather than an
+        // abort: a session directory that cannot take a hundred-byte file is
+        // about to fail on the writer anyway, and this must never be the thing
+        // that stops a take.
+        if let Err(err) =
+            crate::layouts::record_chapter_layout(&self.session_dir, chapter, self.pair)
+        {
+            eprintln!("stream-recorder: could not record chapter {chapter:02}'s layout: {err:#}");
+        }
+
         let chapter_writer = create_chapter_writer(
             &self.video_settings,
             &self.audio_settings,
@@ -209,9 +221,34 @@ impl Router {
     /// it has no audio track; the mic lives in the camera file.
     pub(super) fn finish_chapter(
         &self,
+        av: AvState,
+        screen: Option<ScreenState>,
+        chapter_num: u32,
+    ) -> Result<()> {
+        let mut transcribing = false;
+        let result = self.finish_chapter_files(av, screen, chapter_num, &mut transcribing);
+        // A failure before the transcript job started used to leave a closed
+        // chapter (its mp4 is on disk) with no job and no transcript file, and
+        // the render waited on it for ten minutes. Written down instead, with
+        // the error, so the wait ends and says why; the next Render remakes the
+        // mp3 and tries again.
+        if let Err(err) = &result {
+            if !transcribing {
+                crate::notes::record_transcript_failure(
+                    &self.chapter_path(chapter_num),
+                    &format!("closing the chapter failed before its audio was sent: {err:#}"),
+                );
+            }
+        }
+        result
+    }
+
+    fn finish_chapter_files(
+        &self,
         mut av: AvState,
         mut screen: Option<ScreenState>,
         chapter_num: u32,
+        transcribing: &mut bool,
     ) -> Result<()> {
         let chapter_path = self.chapter_path(chapter_num);
 
@@ -249,6 +286,7 @@ impl Router {
         let mp3_path =
             transcode::to_mp3(&chapter_path).context("transcoding chapter audio to mp3")?;
         crate::notes::spawn_chapter_transcript(mp3_path);
+        *transcribing = true;
 
         if let Some(screen) = &mut screen {
             let screen_path = self.screen_chapter_path(chapter_num);
@@ -311,6 +349,21 @@ impl Router {
                     format!("moving {} to {}", path.display(), discarded.display())
                 })?;
             }
+        }
+
+        // The layout record goes with the take it describes, under the same
+        // stamp, so a recovered take still says what it was framed for.
+        let layout = crate::layouts::layout_path(&self.session_dir, chapter_num);
+        if layout.exists() {
+            let discarded_layout =
+                discarded_dir.join(format!("chapter-{chapter_num:02}-{now}.layout.json"));
+            fs::rename(&layout, &discarded_layout).with_context(|| {
+                format!(
+                    "moving {} to {}",
+                    layout.display(),
+                    discarded_layout.display()
+                )
+            })?;
         }
 
         if let Some(screen) = &mut screen {

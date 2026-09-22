@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en" data-composition-variables="[
+    {&quot;id&quot;:&quot;cameraSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Camera Movie&quot;,&quot;default&quot;:&quot;assets/placeholder-camera.mp4&quot;},
+    {&quot;id&quot;:&quot;chapterLabel&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Label&quot;,&quot;default&quot;:&quot;Chapter&quot;,&quot;maxLength&quot;:24},
+    {&quot;id&quot;:&quot;chapterNumber&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Number&quot;,&quot;default&quot;:&quot;01&quot;,&quot;maxLength&quot;:4},
+    {&quot;id&quot;:&quot;chapterTopic&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Topic&quot;,&quot;default&quot;:&quot;The New Workflow&quot;,&quot;maxLength&quot;:80},
+    {&quot;id&quot;:&quot;outlinePoints&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Talking Points (JSON)&quot;,&quot;default&quot;:&quot;{\&quot;points\&quot;:[{\&quot;text\&quot;:\&quot;Why the retry storm happened\&quot;,\&quot;at\&quot;:3},{\&quot;text\&quot;:\&quot;Two config lines that fix it\&quot;,\&quot;at\&quot;:5},{\&quot;text\&quot;:\&quot;What to watch after the deploy\&quot;,\&quot;at\&quot;:7}]}&quot;},
+    {&quot;id&quot;:&quot;focusX&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Face position across the frame (0 left, 1 right)&quot;,&quot;default&quot;:0.5,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01},
+    {&quot;id&quot;:&quot;audioSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Audio&quot;,&quot;default&quot;:&quot;assets/placeholder-audio.mp3&quot;},
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <div id="root" data-composition-id="outline-horizontal" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+        <style>
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Medium.woff2') format('woff2');
+            font-weight: 500; font-style: normal; font-display: block;
+          }
+          /* Brand font. Vendored as woff2 under assets/fonts so renders are
+             deterministic and do not depend on a system-installed copy. */
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Regular.woff2') format('woff2');
+            font-weight: 400; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
+            font-weight: 600; font-style: normal; font-display: block;
+          }
+          /* Outline layout — a talking head that a card cuts into.
+
+             The chapter opens full frame, exactly as talking-head-horizontal:
+             the camera source is the recorder's talking-head master, 1920x1080,
+             face-tracked, shown at its own size. Just before the speaker
+             reaches their first point the card slides in from the left with
+             the chapter heading on it and pushes the camera over into the split
+             layout's column — 522px from x=1398, the card ending at the split's
+             visible join, 1402.562 — where the points list themselves as they
+             are spoken. Before the cut the card slides away and the frame is a
+             talking head again. Every beat comes from the recorder's `outline`
+             stage through the outlinePoints variable; the motion is transforms
+             only, so it is seek-safe and cheap.
+
+             --olh-column-left / --olh-column-width name the resting column for
+             a reader; the timeline computes the camera's travel from focusX. */
+          #root {
+            --chapter-width: 1186px;
+            --chapter-title-size: 88px;
+            --chapter-accent: var(--saaga-orange);
+            --chapter-text: var(--saaga-ink);
+            --olh-card-width: 1402.562px;
+            --olh-column-left: 1398px;
+            --olh-column-width: 522px;
+            /* SAAGA video theme — see components/design.md.
+               Kept inside the template so compiler scoping preserves it. */
+            --saaga-ink: #1d1d1d;
+            --saaga-paper: #f6f6f6;
+            --saaga-muted: #626262;
+            --saaga-orange: #eb5201;
+            --saaga-peach: #ffeee5;
+            --saaga-line: #d1d1cc;
+            --saaga-orange-on-dark: #ff9561;
+            --saaga-radius: 24px;
+            color: var(--saaga-ink);
+            font-weight: 500;
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background: var(--saaga-paper);
+            font-family: 'Booton', system-ui, sans-serif;
+          }
+          .olh-bg {
+            position: absolute;
+            inset: 0;
+            background: var(--saaga-paper);
+            z-index: 0;
+          }
+          /* The camera, full frame — the talking head's own slot. Translated
+             right while the card is in; never scaled or cropped, so the face
+             the recorder framed is the face in the column. */
+          .olh-camera-wrap {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            z-index: 1;
+          }
+          .olh-camera-video {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            object-fit: fill;
+          }
+          /* The card: the split layout's panel geometry, above the camera so
+             its leading edge hides the camera's trailing edge during the slide
+             and the 4.5px overlap at rest leaves no seam. Offstage at frame
+             zero — the timeline puts it there. */
+          .olh-card {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1402.562px;
+            height: 1080px;
+            box-sizing: border-box;
+            padding: 64px 96px 56px 120px;
+            background: var(--saaga-paper);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 2;
+          }
+          .olh-heading { flex: none; }
+          /* The list grows downward as points arrive. Hidden overflow rather
+             than a scroll: the recorder caps the count and the line length so
+             eight points fit under a two-line topic. */
+          .olh-points {
+            list-style: none;
+            margin: 40px 0 0;
+            padding: 0;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+          }
+          .olh-point {
+            display: flex;
+            align-items: flex-start;
+            gap: 22px;
+            margin: 0 0 18px;
+            /* Arrivals are driven from the timeline; until a point's beat it
+               is simply not there. */
+            opacity: 0;
+          }
+          /* The current point's badge is filled orange with paper digits; the
+             ones before it step back to paper with muted digits and a muted
+             outline. 24px is deliberate: it is the size at which WCAG counts
+             text as large and asks 3:1, which the brand orange under paper
+             clears (3.39:1) — at 22px it would need 4.5:1 and fail `check`.
+             The outline is `currentColor`, so it follows the colour tween and
+             needs no border tween of its own. */
+          .olh-point-index {
+            flex: none;
+            box-sizing: border-box;
+            min-width: 60px;
+            padding: 8px 12px;
+            margin-top: 6px;
+            border: 1px solid currentColor;
+            border-radius: 8px;
+            background: var(--saaga-orange);
+            color: var(--saaga-paper);
+            font-size: 32px;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+            letter-spacing: -0.02em;
+            text-align: center;
+          }
+          .olh-point-text {
+            display: block;
+            color: var(--saaga-ink);
+            font-size: 48px;
+            font-weight: 600;
+            line-height: 1.22;
+            letter-spacing: -0.03em;
+            overflow-wrap: anywhere;
+          }
+          /* chapter-style:start */
+          /* Shared chapter typography. Embedded into each template by sync-chapters.mjs;
+             no stylesheet fetch is required in generated render workspaces. */
+          .chapter-heading {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: var(--chapter-width, 1440px);
+            text-align: left;
+            color: var(--chapter-text, var(--saaga-ink));
+          }
+          .chapter-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 32px;
+            color: var(--chapter-accent, var(--saaga-orange));
+          }
+          .chapter-label {
+            font-size: 40px;
+            font-weight: 500;
+            line-height: 1.2;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            overflow-wrap: anywhere;
+          }
+          .chapter-number {
+            flex: none;
+            box-sizing: border-box;
+            min-width: 84px;
+            padding: 10px 18px;
+            border: 1px solid currentColor;
+            border-radius: 10px;
+            font-size: 40px;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+            letter-spacing: -0.02em;
+            text-align: center;
+          }
+          .chapter-topic {
+            margin: 0;
+            max-width: 100%;
+            color: var(--chapter-text, var(--saaga-ink));
+            font-size: var(--chapter-title-size, 144px);
+            font-weight: 600;
+            line-height: 1.1;
+            letter-spacing: -0.035em;
+            overflow-wrap: anywhere;
+            text-wrap: balance;
+          }
+          .chapter-topic:empty { display: none; }
+          .chapter-signature {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            width: 100%;
+            margin-top: 32px;
+          }
+          .chapter-rule {
+            display: block;
+            width: 120px;
+            height: 4px;
+            background: var(--chapter-accent, var(--saaga-orange));
+            transform-origin: left center;
+          }
+          .chapter-mark {
+            display: block;
+            width: 48px;
+            height: 48px;
+            flex: none;
+          }
+          /* A paper chapter surface, shared by the footage openers. The existing plate
+             exit carries the surface and its type away together. */
+          .chapter-heading.chapter-opener {
+            max-width: none;
+            height: 100%;
+            padding: var(--chapter-padding, 96px 144px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: var(--saaga-paper);
+          }
+          /* chapter-style:end */
+        </style>
+
+        <div id="olh-bg" class="olh-bg clip" data-start="0" data-duration="10" data-track-index="0"></div>
+
+        <div data-layout-allow-overflow="true" id="olh-camera-wrap" class="olh-camera-wrap">
+          <video id="olh-camera-video" class="olh-camera-video clip" data-start="0" data-duration="10" data-track-index="1" data-var-src="cameraSrc" src="assets/placeholder-camera.mp4" muted playsinline></video>
+        </div>
+
+        <!-- Audio is always its own element. The authored src must stay a real
+             file for render-time extraction (lint: media_variable_src_no_fallback);
+             audioSrc does override it. -->
+        <audio id="olh-audio" data-start="0" data-duration="10" data-track-index="9" data-var-src="audioSrc" src="assets/placeholder-audio.mp3" data-volume="1"></audio>
+
+        <div data-layout-allow-overflow="true" id="olh-card" class="olh-card clip" data-start="0" data-duration="10" data-track-index="2">
+          <div id="olh-heading" class="chapter-heading olh-heading">
+            <div id="olh-meta" class="chapter-meta">
+              <div id="olh-label" class="chapter-label" data-var-text="chapterLabel">Chapter</div>
+              <div id="olh-number" class="chapter-number" data-var-text="chapterNumber">01</div>
+            </div>
+            <div id="olh-topic" class="chapter-topic" data-var-text="chapterTopic">The New Workflow</div>
+            <div id="olh-signature" class="chapter-signature" aria-hidden="true">
+              <span id="olh-rule" class="chapter-rule"></span>
+              <img id="olh-mark" class="chapter-mark" src="assets/badge.svg" alt="">
+            </div>
+          </div>
+          <ol id="olh-points" class="olh-points"></ol>
+        </div>
+
+        <script>
+          (function () {
+            window.__timelines = window.__timelines || {};
+            var tl = gsap.timeline({ paused: true });
+            /* chapter-motion:start */
+            /* Embedded inside each template's IIFE; no globals or extra timelines.
+               Selectors are passed explicitly so instances keep their own scoped targets. */
+            function addChapterMotion(tl, options) {
+              var elements = [options.meta, options.title, options.signature];
+              if (options.animateIn) {
+                // Even a one-second card completes its entrance with time left to read.
+                var beat = Math.min(1, options.duration / 1.8);
+                tl.fromTo(options.meta,
+                  { autoAlpha: 0, y: 14 },
+                  { autoAlpha: 1, y: 0, duration: 0.36 * beat, ease: 'power3.out' },
+                  0.04 * beat);
+                tl.fromTo(options.title,
+                  { autoAlpha: 0, y: 28 },
+                  { autoAlpha: 1, y: 0, duration: 0.5 * beat, ease: 'power3.out' },
+                  0.12 * beat);
+                tl.fromTo(options.signature,
+                  { autoAlpha: 0, y: 0 },
+                  { autoAlpha: 1, y: 0, duration: 0.3 * beat, ease: 'power2.out' },
+                  0.22 * beat);
+                tl.fromTo(options.rule,
+                  { scaleX: 0 },
+                  { scaleX: 1, duration: 0.48 * beat, ease: 'power3.out' },
+                  0.22 * beat);
+              } else {
+                // Footage openers and holdFromStart cards remain readable in frame zero.
+                tl.set(elements, { autoAlpha: 1, y: 0 }, 0);
+                tl.set(options.rule, { scaleX: 1 }, 0);
+              }
+              if (typeof options.exitAt === 'number') {
+                tl.fromTo(options.plate,
+                  { autoAlpha: 1, y: 0 },
+                  { autoAlpha: 0, y: -24, duration: options.exitDuration,
+                    ease: 'power2.in', immediateRender: false },
+                  options.exitAt);
+              }
+            }
+            /* chapter-motion:end */
+            var vars = (window.__hyperframes && window.__hyperframes.getVariables)
+              ? window.__hyperframes.getVariables() : {};
+
+            /* Chapter length. Every timed element takes it, or that element's
+               hardcoded duration ends its clip early and part of the frame goes
+               blank partway through a longer chapter. */
+            var D = Number(vars.durationSeconds);
+            if (!isFinite(D) || D < 1 || D > 900) { D = 10; }
+            ['olh-bg', 'olh-camera-video', 'olh-audio', 'olh-card'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el) { el.setAttribute('data-duration', String(D)); }
+            });
+
+            /* ---- The points ------------------------------------------------
+               One JSON string variable, parsed once at load: HyperFrames
+               variables are scalars, and this is the documented way to carry a
+               list. Built synchronously, before the timeline is registered, so
+               every frame — including frame zero under seek — sees the same DOM. */
+            var data = { points: [] };
+            try {
+              var raw = vars.outlinePoints;
+              if (typeof raw === 'string' && raw.trim()) { data = JSON.parse(raw); }
+              else if (raw && typeof raw === 'object') { data = raw; }
+            } catch (e) { data = { points: [] }; }
+            var points = Array.isArray(data.points) ? data.points.slice(0, 8) : [];
+            var list = document.getElementById('olh-points');
+            var INK = '#1d1d1d', MUTED = '#626262', PAPER = '#f6f6f6', ORANGE = '#eb5201';
+            var items = points.map(function (point, i) {
+              var li = document.createElement('li');
+              li.className = 'olh-point';
+              li.id = 'olh-point-' + (i + 1);
+              var index = document.createElement('span');
+              index.className = 'olh-point-index';
+              index.id = 'olh-point-index-' + (i + 1);
+              index.textContent = (i + 1 < 10 ? '0' : '') + (i + 1);
+              var text = document.createElement('span');
+              text.className = 'olh-point-text';
+              text.id = 'olh-point-text-' + (i + 1);
+              text.textContent = String(point && point.text != null ? point.text : '');
+              li.appendChild(index);
+              li.appendChild(text);
+              list.appendChild(li);
+              return { li: li, index: index, text: text };
+            });
+
+            /* ---- The card ---------------------------------------------------
+               The chapter opens as a talking head. LEAD seconds before the first
+               point the card slides in and the camera slides with it — the same
+               distance ratio, the same ease, the same beat — so the card's
+               leading edge always covers the camera's trailing edge and the
+               frame reads as one push. It leaves the same way OUTRO seconds
+               before the cut, so the chapter ends as it began. The card's
+               resting position is the split layout's: the camera in its column
+               (its band), the card ending at the split's own visible join.
+
+               A chapter with no points, or too short to open, hold and close,
+               stays a talking head throughout — nothing is set up for a card
+               that would never be read. */
+            var SLIDE = 0.8, LEAD = 1.2, OUTRO = 1.6, MIN_STAY = 1.0;
+            var beats = items.map(function (_, i) {
+              var at = Number(points[i] && points[i].at);
+              return isFinite(at) ? at : NaN;
+            });
+            var firstBeat = beats.filter(isFinite).reduce(function (a, b) { return Math.min(a, b); }, Infinity);
+            var cardIn = Math.max(0.2, (isFinite(firstBeat) ? firstBeat : LEAD + 0.2) - LEAD);
+            var cardOut = D - OUTRO;
+            var card = document.getElementById('olh-card');
+            var camera = document.getElementById('olh-camera-wrap');
+            var CARD_TRAVEL = 1402.562;
+            var focus = Number(vars.focusX);
+            if (!isFinite(focus)) { focus = 0.5; }
+            focus = Math.max(0, Math.min(1, focus));
+            var CAMERA_SHIFT = 1398 - focus * (1920 - 522);
+            var hasCard = items.length > 0 && cardOut - (cardIn + SLIDE) >= MIN_STAY;
+
+            /* Offstage from frame zero. A zero-duration set at the timeline's
+               start rather than a CSS transform, so nothing fights the tween. */
+            tl.set(card, { x: -CARD_TRAVEL }, 0);
+            tl.set(camera, { x: 0 }, 0);
+            if (hasCard) {
+              tl.to(card, { x: 0, duration: SLIDE, ease: 'power3.inOut' }, cardIn);
+              tl.to(camera, { x: CAMERA_SHIFT, duration: SLIDE, ease: 'power3.inOut' }, cardIn);
+              tl.to(card, { x: -CARD_TRAVEL, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
+              tl.to(camera, { x: 0, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
+            }
+
+            /* Each point whips in from below on its beat — never before the
+               card has landed, never after it starts to leave — and the point
+               before it steps back to muted so the current one is the one that
+               reads. Every tween declares both ends, so a seek to any frame
+               lands on the same picture. */
+            var landed = cardIn + SLIDE;
+            var lastCall = cardOut - 0.3;
+            var lastBeat = -Infinity;
+            items.forEach(function (item, i) {
+              if (!hasCard) { return; }
+              var at = beats[i];
+              if (!isFinite(at)) { at = lastBeat + 1; }
+              at = Math.max(landed, Math.min(at, lastCall));
+              if (at < lastBeat) { at = lastBeat; }
+              lastBeat = at;
+              tl.fromTo(item.li,
+                { autoAlpha: 0, y: 36 },
+                { autoAlpha: 1, y: 0, duration: 0.45, ease: 'power3.out', immediateRender: false },
+                at);
+              if (i > 0) {
+                var prev = items[i - 1];
+                tl.fromTo(prev.text, { color: INK }, { color: MUTED, duration: 0.4, ease: 'power2.out', immediateRender: false }, at);
+                tl.fromTo(prev.index, { backgroundColor: ORANGE, color: PAPER },
+                  { backgroundColor: PAPER, color: MUTED, duration: 0.4, ease: 'power2.out', immediateRender: false }, at);
+              }
+            });
+
+            /* The heading is composed on the card from frame zero and slides
+               in with it; nothing about it animates on its own. */
+            addChapterMotion(tl, {
+              duration: D,
+              animateIn: false,
+              meta: '#olh-meta',
+              title: '#olh-topic',
+              signature: '#olh-signature',
+              rule: '#olh-rule'
+            });
+
+            window.__timelines['outline-horizontal'] = tl;
+          })();
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

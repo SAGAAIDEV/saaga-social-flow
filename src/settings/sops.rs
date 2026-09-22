@@ -32,7 +32,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, RwLock};
 
 /// The committed file, and the AWS profile whose KMS key it is encrypted under.
 ///
@@ -47,7 +47,10 @@ const PROFILE: &str = "dev";
 /// Empty when the decrypt did not happen, which is indistinguishable from "the
 /// file had nothing in it" and does not need to be distinguished: either way no
 /// live value came from here.
-static PROVIDED: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+///
+/// A lock rather than a set-once cell because [`retry`] can fill it later in
+/// the run, after the login that the launch-time decrypt was missing.
+static PROVIDED: RwLock<BTreeMap<String, String>> = RwLock::new(BTreeMap::new());
 
 /// Why the team file did not decrypt this run, when it did not.
 ///
@@ -66,11 +69,16 @@ pub struct Failure {
     pub names: Vec<String>,
 }
 
-static FAILED: OnceLock<Failure> = OnceLock::new();
+static FAILED: RwLock<Option<Failure>> = RwLock::new(None);
 
-/// The failure this run's decrypt ended in, if it did.
-pub fn failure() -> Option<&'static Failure> {
-    FAILED.get()
+/// Serializes [`retry`]: the render and the notes job can both reach for it at
+/// once, and two `sops` runs racing to set the same variables gains nothing.
+static RETRYING: Mutex<()> = Mutex::new(());
+
+/// The failure this run's decrypt ended in, if it did — and still does: a
+/// [`retry`] that got through clears it.
+pub fn failure() -> Option<Failure> {
+    FAILED.read().ok()?.clone()
 }
 
 /// Whether `key` is named in a team file that did not decrypt this run.
@@ -88,8 +96,8 @@ pub fn unset_hint(key: &str) -> Option<String> {
 
 fn hint(key: &str, reason: &str) -> String {
     format!(
-        "{key} is in {FILE} but the team file did not decrypt at launch ({reason}); \
-         fix that and relaunch"
+        "{key} is in {FILE} but the team file did not decrypt ({reason}); \
+         log in, then press Render again — or relaunch"
     )
 }
 
@@ -116,8 +124,8 @@ pub fn path() -> Option<PathBuf> {
 }
 
 /// Values decrypted from the team file this run.
-pub fn provided() -> &'static BTreeMap<String, String> {
-    PROVIDED.get_or_init(BTreeMap::new)
+pub fn provided() -> BTreeMap<String, String> {
+    PROVIDED.read().map(|p| p.clone()).unwrap_or_default()
 }
 
 /// Decrypt `dev.sops.env` and fold it into the process environment.
@@ -139,30 +147,84 @@ pub fn load() -> usize {
                  stream-recorder: continuing with local settings only.",
                 path.display()
             );
-            let names = names_in(&std::fs::read_to_string(&path).unwrap_or_default());
-            let _ = FAILED.set(Failure {
-                path,
-                reason,
-                names,
-            });
+            record_failure(path, reason);
             return 0;
         }
     };
+    apply(&decrypted)
+}
 
-    let values = crate::settings::parse(&decrypted);
+/// Try the decrypt again, when the launch-time one failed.
+///
+/// The way out of "the app was opened before `aws sso login`": until this, the
+/// only fix was a relaunch, and nothing said so at the moment it mattered —
+/// the render sat on "Waiting for chapter 02 transcript…" instead. The render
+/// and the notes job call this before they wait, so logging in and pressing
+/// the button again is enough.
+///
+/// `Ok` with the number of variables it contributed when the file decrypted
+/// (now or at launch), `Err` with the reason it still does not. With no team
+/// file at all there is nothing to retry and that is `Ok(0)`.
+pub fn retry() -> Result<usize, Failure> {
+    let _one_at_a_time = RETRYING.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(failed) = failure() else {
+        return Ok(0);
+    };
+    match decrypt(&failed.path) {
+        Ok(decrypted) => {
+            if let Ok(mut slot) = FAILED.write() {
+                *slot = None;
+            }
+            let applied = apply(&decrypted);
+            eprintln!(
+                "stream-recorder: team credentials in {} decrypted on retry ({applied} set)",
+                failed.path.display()
+            );
+            Ok(applied)
+        }
+        Err(reason) => {
+            eprintln!(
+                "stream-recorder: team credentials in {} still do not decrypt — {reason}",
+                failed.path.display()
+            );
+            record_failure(failed.path, reason);
+            Err(failure().expect("just recorded"))
+        }
+    }
+}
+
+fn record_failure(path: PathBuf, reason: String) {
+    let names = names_in(&std::fs::read_to_string(&path).unwrap_or_default());
+    if let Ok(mut slot) = FAILED.write() {
+        *slot = Some(Failure {
+            path,
+            reason,
+            names,
+        });
+    }
+}
+
+/// Fold a decrypted file into the environment, never over a value already set.
+fn apply(decrypted: &str) -> usize {
+    let values = crate::settings::parse(decrypted);
     let mut applied = 0;
     for (key, value) in &values {
         if value.trim().is_empty() {
             continue;
         }
         if std::env::var_os(key).is_none() {
-            // SAFETY: called from `load_dotenv` at the top of `main`, before any
-            // thread that reads the environment has been spawned.
+            // SAFETY: at launch this runs from `load_dotenv` at the top of
+            // `main`, before any thread exists. On a `retry` it runs on a
+            // worker, but only for keys that were unset — which is exactly
+            // what every reader was failing on, so there is no read of that
+            // value in flight to race; the same trade `settings::write` makes.
             unsafe { std::env::set_var(key, value) };
             applied += 1;
         }
     }
-    let _ = PROVIDED.set(values);
+    if let Ok(mut slot) = PROVIDED.write() {
+        *slot = values;
+    }
     applied
 }
 
@@ -337,7 +399,7 @@ Recovery failed because no master key was able to decrypt the file.";
             "ASSEMBLYAI_API_KEY",
             "dev.sops.env",
             "aws sso login",
-            "relaunch",
+            "Render again",
         ] {
             assert!(said.contains(expected), "missing {expected:?}: {said}");
         }
