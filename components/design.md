@@ -4,8 +4,12 @@ Style reference noted by the user: **SAAGA Brand Guidelines, page 2**.
 Implementation references: the sibling landing app's Booton font declarations
 and color tokens, and the approved direction in `artifacts/content-workflow-deck`.
 
-Use Booton Medium (500) for supporting text and chapter numbers, Semibold (600)
-for headings and labels. Fonts must be local and declared inside each template.
+Chapter cards and outline cards follow the Figma file "Video Layouts and
+Thumbnails", section **Chapter Card** (node 67:987): the left-aligned card with
+peach arcs, and Topic Card option 2.
+
+Use Booton Medium (500) for supporting text and point text, Semibold (600) for
+labels, Bold (700) for titles and Heavy (800) for the chapter number. Fonts must be local and declared inside each template.
 The matching `--saaga-*` variables live on each template's `#root`, where the
 HyperFrames compiler can scope them correctly.
 
@@ -19,15 +23,21 @@ HyperFrames compiler can scope them correctly.
 | line | #D1D1CC | Fine panel borders |
 | orange-on-dark | #FF9561 | Reserved accent for photographic media when needed |
 | radius | 24px | Rectangular camera card corners |
+| chapter peach | #FDEEE6 | Chapter card inner arc, portrait chapter surface, outline cards |
+| chapter blush | #FFF4EE | Chapter card outer arc |
+| chapter muted | #555554 | The CHAPTER label |
+| badge card | #FCFCFB | Outline badges for points already covered |
+| badge border | #CACAC5 | Outline badge outline |
 
-Chapter cards and footage openers use the same off-white canvas, dark type and
-orange accents as the layouts. The chapter label and number are 40px; the topic
-is the focal point (144px landscape, 112px portrait, 88px inside outline cards).
-An orange rule and upright SAAGA mark form a quiet signature below it. All four
-chapter variants share the same hierarchy. Titles wrap without clipping,
-including long single words.
-The shared badge SVG is static; the split layout's existing inline badge
-animation remains controlled by its seekable timeline.
+Chapter cards and footage openers share one hierarchy, left-aligned: a muted
+CHAPTER label centred over a large orange Heavy number, a thin orange rule,
+then the Bold title. Landscape: label 41px, number 188px, 392px x 2px rule,
+title 107px, 122px from the left edge and lifted 77px above centre, on white
+with two peach arcs (`assets/chapter-arc-outer.svg`, `-inner.svg`). Portrait
+(Figma drawn at 375 wide, x2.88): label 64px, number 292px, 648px rule, title
+104px, 89px from the left, centred, on flat chapter peach. Titles wrap without
+clipping, including long single words. The SAAGA mark is no longer part of the
+chapter signature; the split layout still draws its own inline badge.
 
 Keep the full-bleed screen and camera geometry, framing variables, audio tracks
 and chapter durations. Do not add identity strips
@@ -36,17 +46,21 @@ surface, dark medium-weight type and an orange top rule.
 
 The two `outline-*` layouts are talking heads that a card cuts into. The
 chapter opens full frame, exactly as the talking-head layouts do; 1.2 seconds
-before the speaker reaches their first point a paper card slides in — from the
-left in landscape, from the top in portrait — carrying the chapter heading at
-card scale (88px in both orientations), and pushes the camera over into the
-split layout's column (its bottom band) in the same 0.8-second move. Points
-appear beneath the heading one at a time on the beat they are spoken, whipping
-in from below; the point before steps back to muted and its badge from filled
-orange to a muted outline, so the current point is the one that reads. 1.6
-seconds before the cut the card slides away and the frame is a talking head
-again. A chapter with no points, or too short to open, hold and close, stays a
-talking head throughout. Badge digits are 32px and point text is 48px, keeping
-the outline readable in both formats. The motion is transforms only — the card and the camera
+before the speaker reaches their first point a chapter-peach card slides in —
+from the right in landscape, from the top in portrait — and pushes the camera
+into a 784px column on the left (the bottom band in portrait) in the same
+0.8-second move. The card's heading is the Topic Card pill: the number and
+CHAPTER in one orange-outlined pill, then the chapter title with a short orange
+rule under it. Points appear beneath one at a time on the beat they are spoken,
+whipping in from below, each behind a rounded-square number badge: the current
+point's badge is filled orange, the ones before it step back to card white with
+dark digits; the text stays black. 1.6 seconds before the cut the card slides
+away and the frame is a talking head again. A chapter with no points, or too
+short to open, hold and close, stays a talking head throughout. Landscape sizes
+are Figma's (title 78px, badges 85px, point text 40px); portrait is Figma x2.88
+(title 91px, badges 99px, point text 52px). A card with five to eight points
+adds `is-dense`, which scales everything by 0.75 in landscape and 0.62 in
+portrait so eight points fit; it is decided from the count, not measured. The motion is transforms only — the card and the camera
 wrapper translate, nothing is scaled or cropped — so the face the recorder
 framed is the face in the column; `focusX` (landscape) and `focusY` (portrait)
 say where in the frame the face sits so the resting column or band centres on
@@ -63,8 +77,8 @@ shared code.
 The code is embedded into each template so render workspaces need no new
 runtime dependencies. Per-template root variables specify size and color.
 
-Cards reveal metadata, title and signature in an overlapping 0.7-second
-sequence, shortened proportionally for one-second cards. `holdFromStart` and
+Cards reveal the label and number, then draw the rule, then raise the title, in
+an overlapping 0.7-second sequence, shortened proportionally for one-second cards. `holdFromStart` and
 footage openers are composed in frame zero. Openers leave with a 24px lift as
 the existing blur/exposure treatment resolves; cards hold until the cut.
 

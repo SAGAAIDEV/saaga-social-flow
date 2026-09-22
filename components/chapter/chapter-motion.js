@@ -9,18 +9,20 @@ function addChapterMotion(tl, options) {
       { autoAlpha: 0, y: 14 },
       { autoAlpha: 1, y: 0, duration: 0.36 * beat, ease: 'power3.out' },
       0.04 * beat);
-    tl.fromTo(options.title,
-      { autoAlpha: 0, y: 28 },
-      { autoAlpha: 1, y: 0, duration: 0.5 * beat, ease: 'power3.out' },
-      0.12 * beat);
+    // The rule sits between the number and the title, so it draws first and
+    // the title rises in beneath it.
     tl.fromTo(options.signature,
       { autoAlpha: 0, y: 0 },
       { autoAlpha: 1, y: 0, duration: 0.3 * beat, ease: 'power2.out' },
-      0.22 * beat);
+      0.12 * beat);
     tl.fromTo(options.rule,
       { scaleX: 0 },
       { scaleX: 1, duration: 0.48 * beat, ease: 'power3.out' },
-      0.22 * beat);
+      0.12 * beat);
+    tl.fromTo(options.title,
+      { autoAlpha: 0, y: 28 },
+      { autoAlpha: 1, y: 0, duration: 0.5 * beat, ease: 'power3.out' },
+      0.2 * beat);
   } else {
     // Footage openers and holdFromStart cards remain readable in frame zero.
     tl.set(elements, { autoAlpha: 1, y: 0 }, 0);

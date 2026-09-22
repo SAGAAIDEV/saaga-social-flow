@@ -87,12 +87,14 @@ fn library() -> Finding {
         "compositions/chapter-title-card.html",
         "compositions/talking-head-vertical.html",
         "assets/pattern-rings.svg",
-        "assets/badge.svg",
+        "assets/chapter-arc-outer.svg",
+        "assets/chapter-arc-inner.svg",
         "assets/silence.mp3",
         "assets/fonts/Booton-Regular.woff2",
         "assets/fonts/Booton-Medium.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2",
     ];
     let missing: Vec<&str> = required
         .iter()
