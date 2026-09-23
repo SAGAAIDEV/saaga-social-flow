@@ -152,18 +152,44 @@ pub fn html(
 ///
 /// Without one, a renderer that blocks on stdin — the failure mode of every
 /// mistake in the script above — hangs the UI thread with no way back.
+///
+/// The pipes are drained on their own threads while this watches the clock.
+/// Waiting for the exit first and reading after only works while the page fits
+/// in the pipe's 64 KB buffer; the page carries its fonts now, several hundred
+/// KB, so bun blocked writing to a pipe nobody was reading and every card
+/// "did not finish".
 fn wait(mut child: std::process::Child) -> Result<std::process::Output> {
+    use std::io::Read;
+
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
     let started = std::time::Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait().context("waiting for bun")? {
-            Some(_) => return child.wait_with_output().context("reading bun's output"),
+            Some(status) => break status,
             None if started.elapsed() >= TIMEOUT => {
+                // Killing it closes the pipes, which ends both readers.
                 let _ = child.kill();
+                let _ = child.wait();
                 bail!("the card renderer did not finish within {:?}", TIMEOUT);
             }
             None => std::thread::sleep(std::time::Duration::from_millis(5)),
         }
-    }
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 /// Same encoding as everywhere else in this crate that builds one.
@@ -257,7 +283,7 @@ mod tests {
     fn an_unknown_theme_falls_back_rather_than_reaching_the_renderer() {
         let mut odd = card();
         odd.theme = "neon".into();
-        assert_eq!(payload(&odd, None, None, 1280, 720)["theme"], "dark");
+        assert_eq!(payload(&odd, None, None, 1280, 720)["theme"], "light");
     }
 
     #[test]
@@ -303,9 +329,15 @@ mod tests {
         );
         assert!(page.contains("Ship it anyway"));
         assert!(page.contains("Why the queue fell over."));
-        // The light theme's panel, so the theme reached the layout rather than
-        // being defaulted somewhere in the middle.
-        assert!(page.contains("#F6F6F6"), "the light theme did not arrive");
+        // The light theme's inner arc, so the theme reached the layout rather
+        // than being defaulted somewhere in the middle.
+        assert!(page.contains("#FDEEE6"), "the light theme did not arrive");
+        // And the brand face, embedded: the rasteriser cannot fetch a font
+        // from outside the project folder.
+        assert!(
+            page.contains("font-family:\"Booton\";src:url(data:font/woff2;base64,"),
+            "Booton was not embedded"
+        );
         assert!(page.contains("width:1280px"));
     }
 

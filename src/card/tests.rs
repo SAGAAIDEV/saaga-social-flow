@@ -41,8 +41,8 @@ fn a_project_with_no_card_reads_as_empty() {
     let blank = load(&root);
     assert!(blank.is_empty());
     assert_eq!(
-        blank.theme, "dark",
-        "the default theme is the grid-proof one"
+        blank.theme, "light",
+        "the default theme is the chapter card's"
     );
     assert_eq!(blank.focus, 0.5);
     let _ = std::fs::remove_dir_all(&root);
@@ -66,7 +66,7 @@ fn a_card_with_only_a_title_still_loads() {
     std::fs::write(path(&root), r#"{"title":"Ship it"}"#).unwrap();
     let loaded = load(&root);
     assert_eq!(loaded.title, "Ship it");
-    assert_eq!(loaded.theme, "dark");
+    assert_eq!(loaded.theme, "light");
     assert_eq!(loaded.focus, 0.5);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -89,14 +89,14 @@ fn a_title_alone_is_a_card() {
 /// A hand-edited theme would otherwise reach the renderer as an index into a
 /// map that has no such key, and draw a card with no colours at all.
 #[test]
-fn an_unknown_theme_falls_back_to_dark() {
+fn an_unknown_theme_falls_back_to_light() {
     assert_eq!(
         Card {
             theme: "neon".into(),
             ..card()
         }
         .theme_or_default(),
-        "dark"
+        "light"
     );
     assert_eq!(
         Card {

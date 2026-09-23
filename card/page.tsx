@@ -1,5 +1,6 @@
 import { h } from "./jsx";
 import { Card, type CardProps } from "./Card";
+import { FONT_FACES } from "./components";
 import { SIZES } from "./layout";
 /**
  * The card at the requested output size.
@@ -20,8 +21,9 @@ export function page(props: CardProps & { width: number; height: number }): stri
   const x = (props.width - base.width * scale) / 2;
   const y = (props.height - base.height * scale) / 2;
   return "<!doctype html>" + <html><head><meta charset="utf-8" /><style>{`
+    ${FONT_FACES}
     * { margin:0;padding:0;box-sizing:border-box; }
-    html,body { width:${props.width}px;height:${props.height}px;overflow:hidden;background:${props.theme === "light" ? "#F6F6F6" : "#1D1D1D"}; }
+    html,body { width:${props.width}px;height:${props.height}px;overflow:hidden;background:${props.theme === "dark" ? "#1D1D1D" : "#FFFFFF"}; }
     #card { position:absolute;left:${x}px;top:${y}px;width:${base.width}px;height:${base.height}px;transform:scale(${scale});transform-origin:0 0; }
   `}</style></head><body><div id="card">{Card({ ...props, format })}</div></body></html>;
 }

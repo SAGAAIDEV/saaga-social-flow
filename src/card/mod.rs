@@ -71,7 +71,7 @@ pub struct Card {
     /// A small word above the title, in brand orange. Empty draws nothing.
     #[serde(default)]
     pub kicker: String,
-    /// `dark` or `light`.
+    /// `light` (the chapter card's look) or `dark`.
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Where across the camera still the presenter is, 0–1.
@@ -95,9 +95,10 @@ pub struct Card {
 }
 
 fn default_theme() -> String {
-    // Dark, because a thumbnail is seen in a grid of other thumbnails and the
-    // light one is the polite neighbour.
-    "dark".to_string()
+    // Light: the chapter card's own look, so the thumbnail and the cards inside
+    // the video read as one family. Dark stays a choice for a grid of loud
+    // neighbours.
+    "light".to_string()
 }
 
 fn default_focus() -> f64 {
@@ -119,7 +120,7 @@ impl Default for Card {
 }
 
 /// The two themes the TSX knows about, in the order the picker shows them.
-pub const THEMES: [&str; 2] = ["dark", "light"];
+pub const THEMES: [&str; 2] = ["light", "dark"];
 
 impl Card {
     /// Nothing to draw. The title alone is enough — a card is a headline with a
@@ -141,6 +142,8 @@ impl Card {
     /// without the bump it would pass every freshness check and never be redrawn.
     /// v5: the focus became a point the box is centred on rather than a raw
     /// `object-position`, which moves the crop for every value but 0.5.
+    /// v6: the chapter card's styling — Booton, the arcs, the rule above the
+    /// title — so every set drawn in the old type is the wrong picture.
     ///
     /// `format` is deliberately *not*. The set is always all three destinations
     /// and each one composes on its own artboard — see `assets::Kind` — so the
@@ -149,7 +152,7 @@ impl Card {
     /// only real effect is on the prompt sent to an image model.
     pub fn fingerprint(&self) -> String {
         format!(
-            "card-v5\n{}\n{}\n{}\n{}\n{:.4}\n{:.4}",
+            "card-v6\n{}\n{}\n{}\n{}\n{:.4}\n{:.4}",
             self.title.trim(),
             self.description.trim(),
             self.kicker.trim(),
@@ -167,7 +170,7 @@ impl Card {
     pub fn theme_or_default(&self) -> &str {
         match THEMES.contains(&self.theme.trim()) {
             true => self.theme.trim(),
-            false => "dark",
+            false => "light",
         }
     }
 
