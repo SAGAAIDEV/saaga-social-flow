@@ -27,6 +27,10 @@ pub const TITLES: &str = "titles.chapter_cards";
 /// are a teleprompter the presenter reads, this is copy the viewer reads, and
 /// tuning one must not retune the other.
 pub const OUTLINE: &str = "outline.talking_points";
+/// The suggest-shorts pass over a finished take — see [`crate::shorts`]. Its
+/// own id, not a section of [`NOTES`]: the notes tighten the take that ships,
+/// this picks what to record *beside* it.
+pub const SHORTS: &str = "shorts.suggestions";
 pub const POSTS: &str = "posts.social";
 pub const SUBSTACK: &str = "substack.notes";
 pub const BLOG: &str = "blog.article";
@@ -99,6 +103,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
         NOTES => Some(super::notes::SYSTEM),
         TITLES => Some(super::titles::SYSTEM),
         OUTLINE => Some(super::outline::SYSTEM),
+        SHORTS => Some(super::shorts::SYSTEM),
         POSTS => Some(crate::posts::generate::SYSTEM_PROMPT),
         SUBSTACK => Some(crate::substack::generate::SYSTEM_PROMPT),
         BLOG => Some(crate::blog::generate::SYSTEM_PROMPT),

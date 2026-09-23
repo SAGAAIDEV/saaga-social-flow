@@ -64,6 +64,7 @@ mod schedule;
 mod session;
 mod sessions;
 mod settings;
+mod shorts;
 mod stage;
 mod substack;
 mod thumbnail;
@@ -156,6 +157,11 @@ fn main() -> Result<()> {
         match command {
             Command::Credentials => return settings::report(&mut std::io::stdout()),
             Command::Doctor => return preflight::report(&mut std::io::stdout()),
+            Command::Render {
+                project,
+                version,
+                cloud,
+            } => return edit::render_headless(project, *version, *cloud),
             Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,

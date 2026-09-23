@@ -25,6 +25,12 @@ pub const NOTES_JSON: &str = "notes.json";
 pub const NOTES_HTML: &str = "notes.html";
 
 pub fn write(dir: &Path, data: &NotesData) -> Result<PathBuf> {
+    write_as(dir, data, "Chapter")
+}
+
+/// [`write`], with each slide's header reading `label` rather than "Chapter" —
+/// a short's teleprompter is one slide, and it is not chapter one of anything.
+pub fn write_as(dir: &Path, data: &NotesData, label: &str) -> Result<PathBuf> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let json_path = dir.join(NOTES_JSON);
     std::fs::write(
@@ -33,7 +39,7 @@ pub fn write(dir: &Path, data: &NotesData) -> Result<PathBuf> {
     )
     .with_context(|| format!("writing {}", json_path.display()))?;
     let html_path = dir.join(NOTES_HTML);
-    std::fs::write(&html_path, render(data))
+    std::fs::write(&html_path, render_as(data, label))
         .with_context(|| format!("writing {}", html_path.display()))?;
     Ok(html_path)
 }
@@ -81,7 +87,14 @@ fn json_for_script(data: &NotesData) -> String {
         .replace('<', "\\u003c")
 }
 
-pub fn render(data: &NotesData) -> String {
+#[cfg(test)]
+fn render(data: &NotesData) -> String {
+    render_as(data, "Chapter")
+}
+
+/// [`render`], with each slide's header reading `label`.
+pub fn render_as(data: &NotesData, label: &str) -> String {
+    let label = esc(label);
     let total = data.chapters.len().max(1);
     let slides: String = if data.chapters.is_empty() {
         "<section class=\"slide active\"><h1>No chapters</h1><ul class=points><li>Notes produced nothing.</li></ul></section>".into()
@@ -111,7 +124,7 @@ pub fn render(data: &NotesData) -> String {
                     .collect::<String>();
                 format!(
                     "<section class=slide data-index=\"{n}\">\
-                     <header><span class=chapter>Chapter {num}</span>\
+                     <header><span class=chapter>{label} {num}</span>\
                      <span class=count>{num} / {total}</span></header>\
                      <h1>{title}</h1>\
                      <ul class=points>{points}</ul>\

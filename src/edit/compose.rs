@@ -17,7 +17,6 @@ pub const CARD_SECONDS: f64 = 3.0;
 /// on disk stayed at the old setting for as long as the project lived.
 pub const QUALITY_FILE: &str = "render-quality.txt";
 pub const OPENER_SECONDS: f64 = 2.6;
-const HF_VERSION: &str = "0.7.107";
 
 const HYPERFRAMES_JSON: &str = r#"{
   "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
@@ -313,7 +312,8 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
     std::fs::write(root.join("hyperframes.json"), HYPERFRAMES_JSON)
         .with_context(|| format!("writing {}", root.join("hyperframes.json").display()))?;
     let package = format!(
-        "{{\n  \"name\": \"stream-recorder-compose\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"render\": \"npx --yes hyperframes@{HF_VERSION} render\"\n  }}\n}}\n"
+        "{{\n  \"name\": \"stream-recorder-compose\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"render\": \"npx --yes hyperframes@{} render\"\n  }}\n}}\n",
+        super::render::HF_VERSION
     );
     std::fs::write(root.join("package.json"), package)?;
     std::fs::write(root.join("index.html"), blank_index(width, height))?;
@@ -910,6 +910,7 @@ mod tests {
             horizontal: true,
             vertical: false,
             shorts: false,
+            cloud: false,
         });
         match horizontal_only {
             Ok(plan) => {
@@ -927,6 +928,7 @@ mod tests {
             horizontal: false,
             vertical: false,
             shorts: false,
+            cloud: false,
         };
         let plan = plan(no_horizontal).unwrap();
         assert!(plan.h_segments.is_empty());

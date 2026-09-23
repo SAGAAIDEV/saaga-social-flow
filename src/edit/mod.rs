@@ -19,9 +19,11 @@ use anyhow::{bail, Context, Result};
 pub mod compose;
 pub mod compute;
 pub mod cut;
+pub mod gpu;
 pub mod keep;
 pub mod pane;
 pub mod render;
+pub mod stage;
 pub mod waveform;
 
 use crate::notes::{
@@ -95,6 +97,41 @@ pub fn spawn_render(session: Session, tx: Sender<RenderEvent>) {
             "Could not start the render job: {err}"
         )));
     }
+}
+
+/// `stream-recorder render`: the Render button's cut and render, printed to the
+/// terminal instead of the window.
+pub fn render_headless(project: &Path, version: Option<u32>, cloud: bool) -> Result<()> {
+    if cloud {
+        std::env::set_var(crate::config::CLOUD_OVERRIDE, "1");
+    }
+    let mut session = Session::open_root(project.to_path_buf())?;
+    if let Some(v) = version {
+        session = session.open_version(v)?;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let printer = thread::spawn(move || {
+        let mut last = String::new();
+        for event in rx {
+            if let RenderEvent::Status(line) = event {
+                if line != last {
+                    println!("{line}");
+                    last = line;
+                }
+            }
+        }
+    });
+    let started = std::time::Instant::now();
+    let result = run_render(&session, &tx);
+    drop(tx);
+    let _ = printer.join();
+    let dir = result?;
+    println!(
+        "rendered in {:.0}s → {}",
+        started.elapsed().as_secs_f64(),
+        dir.display()
+    );
+    Ok(())
 }
 
 pub fn run_cut(
@@ -242,7 +279,7 @@ pub fn run_render(session: &Session, tx: &Sender<RenderEvent>) -> Result<PathBuf
 fn compose_and_render(
     session: &Session,
     edit_root: &Path,
-    status: &dyn Fn(&str),
+    status: &(dyn Fn(&str) + Sync),
     progress: &(dyn Fn(f64) + Sync),
 ) -> Result<PathBuf> {
     let numbers = existing_cut_numbers(edit_root);
@@ -255,11 +292,11 @@ fn compose_and_render(
     let titles = chapter_titles(session, &numbers);
     // The boxes above the Render button, read here rather than passed in, so
     // a re-cut from the Edit tab honours them the same way Render does.
-    let targets = crate::config::load().render;
+    let targets = crate::config::render_targets(session);
     if !targets.any() {
         bail!(
             "every render output is switched off — tick the horizontal longform, the vertical \
-             longform or the shorts above the Render button"
+             longform or the chapter clips above the Render button"
         );
     }
     // Outline chapters draw their talking points, which have to be written

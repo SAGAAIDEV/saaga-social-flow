@@ -92,11 +92,31 @@ impl Session {
 
     /// The durable identity every path, S3 key and schedule row is written
     /// against — the timestamped folder name, never the given name.
+    ///
+    /// A short's folder is `short-01` in every project that has one, so its
+    /// identity carries the parent's: `2026-09-22_10-00-00-short-01`. Without
+    /// that, two projects' first shorts would share an S3 prefix.
     pub fn folder(&self) -> String {
-        self.root
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "session".into())
+        let own = |root: &std::path::Path| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "session".into())
+        };
+        match crate::shorts::parent_of(&self.root) {
+            Some(parent) => format!("{}-{}", own(parent), own(&self.root)),
+            None => own(&self.root),
+        }
+    }
+
+    /// Whether this project is a short recorded beside another — see
+    /// [`crate::shorts`].
+    pub fn is_short(&self) -> bool {
+        crate::shorts::is_short(&self.root)
+    }
+
+    /// The project a short was recorded from, where its take is back to.
+    pub fn parent_root(&self) -> Option<PathBuf> {
+        crate::shorts::parent_of(&self.root).map(std::path::Path::to_path_buf)
     }
 
     pub fn set_name(&self, name: &str) -> Result<()> {

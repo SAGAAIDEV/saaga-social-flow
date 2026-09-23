@@ -275,6 +275,10 @@ pub struct App {
     posts_pick: crate::notes::Picker,
     posts_prompt: String,
     posts_manifest: Option<crate::posts::PostsManifest>,
+    /// Which short Start Short records: 0 for a freeform one, else the
+    /// suggestion at `short_pick - 1` in the project's list — see
+    /// [`crate::shorts`]. View state, like `open_edit_chapter`.
+    short_pick: usize,
 }
 
 impl App {
@@ -322,7 +326,7 @@ impl App {
             self.face_tracking_wanted(),
             self.mouse_tracking_wanted(),
             self.show_app,
-            crate::config::load().render,
+            crate::config::render_targets(&self.session),
             self.youtube_privacy,
             self.notes_pick.menu(),
             self.notes_pick.menu_index(),
@@ -411,6 +415,7 @@ impl App {
             live.control_target.set_recording(
                 self.router.as_ref().map(|r| r.current_chapter_number()),
                 self.session.version,
+                crate::shorts::number(&self.session.root),
                 waiting.as_deref(),
                 hold,
                 &ui::NextTake {
@@ -419,8 +424,27 @@ impl App {
                 },
             );
             live.control_target.set_stage_gates(&self.stages());
-            live.control_target
-                .set_render_targets(crate::config::load().render);
+            live.control_target.set_render_targets(
+                crate::config::render_targets(&self.session),
+                self.session.is_short(),
+            );
+            live.control_target.set_shorts(&self.short_controls());
+        }
+    }
+
+    /// What the Start Short row shows: the suggestions to pick from, or — inside
+    /// a short — which one this is and the way back.
+    fn short_controls(&self) -> ui::ShortControls {
+        match crate::shorts::number(&self.session.root) {
+            Some(n) => ui::ShortControls::Inside {
+                label: format!("Short {n:02} · {}", self.session.title()),
+            },
+            None => ui::ShortControls::Pick {
+                suggestions: crate::shorts::load_suggestions(&self.session.root)
+                    .map(|list| list.shorts.into_iter().map(|s| s.title).collect())
+                    .unwrap_or_default(),
+                selected: self.short_pick,
+            },
         }
     }
 
@@ -503,7 +527,9 @@ impl App {
             }
             Action::Stop => self.stop_recording(),
             Action::NewChapter => self.start_or_cut(),
+            Action::StartShort => self.start_short(),
             Action::Notes => self.build_notes(),
+            Action::SuggestShorts => self.suggest_shorts(),
             Action::CopyTranscript => self.copy_transcript(),
             Action::Render => self.run_render(),
             Action::RerenderMissing => self.run_rerender(),
@@ -825,6 +851,10 @@ impl App {
             }
             UiEvent::VersionSelected(n) => self.switch_version(n),
             UiEvent::ChapterSelected(n) => self.select_chapter(n),
+            UiEvent::ShortSelected(pick) => {
+                self.short_pick = pick;
+                self.sync_controls();
+            }
             UiEvent::ProjectSelected(index) => self.switch_project(index),
             UiEvent::ValidateRewrite(index) => self.run_validate_rewrite(index),
             UiEvent::WebApprove { index, value } => self.set_rewrite_approval(index, value),
@@ -992,7 +1022,14 @@ impl App {
     /// been generated there.
     fn refresh_version_views(&mut self) {
         if let Some(live) = self.live.as_ref() {
-            if let Some(html) = crate::notes::existing_html(&self.session) {
+            // A video with no notes yet but suggested shorts shows those: it is
+            // the deck the Start Short menu is read against.
+            let deck = crate::notes::existing_html(&self.session).or_else(|| {
+                (!self.session.is_short())
+                    .then(|| crate::shorts::suggestions_html(&self.session.root))
+                    .flatten()
+            });
+            if let Some(html) = deck {
                 live.notes.load(&html);
                 live.notes.reset_slide();
             } else {
@@ -1140,6 +1177,76 @@ impl App {
         );
     }
 
+    /// ⌃⌥S and the Start Short button: close out the open chapter and record a
+    /// short beside the video, or — from inside a short — go back to the video.
+    ///
+    /// The chapter is finished, not paused: one writer records at a time, and
+    /// the short is a project of its own, `{root}/shorts/short-NN` — see
+    /// [`crate::shorts`]. So the video's numbering carries on where it was when
+    /// you come back, and the short gets the whole pipeline to itself: retake,
+    /// the chapter menu, Edit, Render (vertical only) and the upload as a Short.
+    fn start_short(&mut self) {
+        if let Some(parent) = self.session.parent_root() {
+            // The take in flight is the short's; it closes where it was made.
+            self.finish_open_chapter();
+            match crate::session::Session::open_root(parent) {
+                Ok(video) => {
+                    println!("stream-recorder: back to {}", video.title());
+                    self.adopt_session(video);
+                }
+                Err(err) => eprintln!("stream-recorder: could not reopen the video: {err:#}"),
+            }
+            return;
+        }
+        self.finish_open_chapter();
+        let suggestion = self.short_pick.checked_sub(1).and_then(|i| {
+            crate::shorts::load_suggestions(&self.session.root)?
+                .shorts
+                .into_iter()
+                .nth(i)
+        });
+        match crate::shorts::create(&self.session, suggestion.as_ref()) {
+            Ok(short) => {
+                self.short_pick = 0;
+                self.adopt_session(short);
+                // Rolling straight away: the press is "record a short", and the
+                // project it records into is bookkeeping.
+                self.start_or_cut();
+            }
+            Err(err) => {
+                eprintln!("stream-recorder: could not start a short: {err:#}");
+                self.set_render_status(&format!("Could not start a short: {err:#}"));
+            }
+        }
+    }
+
+    /// Suggest Shorts: read the finished take and propose asides worth their own
+    /// Short. The suggestions land in the notes pane and in the menu beside
+    /// Start Short.
+    fn suggest_shorts(&mut self) {
+        if self.session.is_short() {
+            if let Some(live) = self.live.as_ref() {
+                live.notes.show_status(
+                    "Shorts are suggested from the video — press Back to Video first.",
+                );
+            }
+            return;
+        }
+        self.finish_open_chapter();
+        let title = self
+            .session
+            .name()
+            .unwrap_or_else(|| "Untitled video".into());
+        println!("stream-recorder: suggesting shorts…");
+        crate::notes::spawn_suggest_shorts(
+            self.session.clone(),
+            title,
+            self.notes_pick.model().to_string(),
+            self.notes_pick.provider().map(str::to_string),
+            self.notes_tx.clone(),
+        );
+    }
+
     /// The one press. Photo, cut, title and description, artwork, YouTube.
     ///
     /// The photograph is taken first, while whoever pressed the button is
@@ -1207,9 +1314,9 @@ impl App {
         }
         // Refused before the photo is taken and the cut starts: a render with
         // nothing to produce would still cost both.
-        if !crate::config::load().render.any() {
+        if !crate::config::render_targets(&self.session).any() {
             let reason = "Every render output is switched off — tick the horizontal longform, \
-                          the vertical longform or the shorts above the Render button";
+                          the vertical longform or the chapter clips above the Render button";
             self.set_render_status(reason);
             self.set_thumbnail_status(reason);
             return false;
@@ -1365,7 +1472,8 @@ impl App {
         if self.distribute_busy {
             return;
         }
-        let check = crate::distribute::check(&self.session, crate::config::load().render);
+        let check =
+            crate::distribute::check(&self.session, crate::config::render_targets(&self.session));
         let line = match self.stages().distribute {
             // The check's line still says which videos are behind; the gate's
             // reason says why the button beside it is off.
@@ -1723,6 +1831,13 @@ impl App {
     /// draws only what the ticked outputs still lack — the plan leaves an
     /// unticked output out, and the renderer skips anything already current.
     fn set_render_target(&mut self, name: &str, value: bool) {
+        if self.session.is_short() && name != "cloud" {
+            // The boxes are switched off in a short, but a queued click can
+            // still land; put them back to what a short renders.
+            self.set_render_status("A short always renders vertical — its outputs are fixed.");
+            self.sync_controls();
+            return;
+        }
         let mut config = crate::config::load();
         if !config.render.set(name, value) {
             return;
@@ -1731,12 +1846,16 @@ impl App {
         match crate::config::save(&config) {
             Ok(()) => {
                 let label = crate::config::RenderTargets::label(name);
-                let message = match (value, targets.any()) {
-                    (true, _) => format!(
+                let message = match (name, value, targets.any()) {
+                    ("cloud", true, _) => "Render will draw on GPU machines in AWS — this Mac \
+                                           only uploads, waits and downloads."
+                        .to_string(),
+                    ("cloud", false, _) => "Render will draw on this Mac.".to_string(),
+                    (_, true, _) => format!(
                         "Render will produce {label}. Only what is missing or stale gets drawn."
                     ),
-                    (false, true) => format!("Render will skip {label}."),
-                    (false, false) => {
+                    (_, false, true) => format!("Render will skip {label}."),
+                    (_, false, false) => {
                         "Every render output is off — Render will refuse until one is ticked."
                             .to_string()
                     }
@@ -3446,7 +3565,7 @@ impl App {
         // the tab never leaves anyone guessing whether Upload will send it.
         let vertical = self.session.render_dir().join("vertical/longform.mp4");
         let has_vertical = vertical.is_file();
-        let targets = crate::config::load().render;
+        let targets = crate::config::render_targets(&self.session);
         match crate::publish::short(&self.session) {
             Some(short) => {
                 info.push_str("\n## Short\n");
@@ -3504,7 +3623,8 @@ impl App {
         self.update_distribute_summary();
         let schedule_dir = self.session.schedule_dir();
         let plan = crate::schedule::load_plan(&schedule_dir).ok();
-        let hosting = crate::distribute::check(&self.session, crate::config::load().render);
+        let hosting =
+            crate::distribute::check(&self.session, crate::config::render_targets(&self.session));
         match &plan {
             Some(saved) => live.schedule_form.show(saved),
             None => live.schedule_form.show_empty(),
@@ -3620,12 +3740,18 @@ impl App {
         let Some(live) = self.live.as_ref() else {
             return;
         };
+        let mut suggested = false;
         for event in events {
             match event {
                 crate::notes::NotesEvent::Status(msg) => live.notes.show_status(&msg),
                 crate::notes::NotesEvent::Ready(html) => {
                     live.notes.load(&html);
                     live.notes.reset_slide();
+                }
+                crate::notes::NotesEvent::Shorts(html) => {
+                    live.notes.load(&html);
+                    live.notes.reset_slide();
+                    suggested = true;
                 }
                 crate::notes::NotesEvent::NoSpeech(why) => {
                     // The one thing the notes thread cannot know: which mic these
@@ -3639,6 +3765,12 @@ impl App {
                     ));
                 }
             }
+        }
+        if suggested {
+            // A fresh list: the menu beside Start Short is refilled from it, and
+            // a pick into the old one would name a different short now.
+            self.short_pick = 0;
+            self.sync_controls();
         }
     }
 

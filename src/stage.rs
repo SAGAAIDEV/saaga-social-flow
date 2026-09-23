@@ -17,6 +17,8 @@ use std::path::Path;
 use crate::session::Session;
 
 const LONGFORM: &str = "horizontal/longform.mp4";
+/// What a short uploads: its vertical longform — see [`crate::shorts`].
+const VERTICAL: &str = "vertical/longform.mp4";
 
 /// Whether one stage will accept a press.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,10 +99,12 @@ impl Stages {
         // Reads the same config the pane does, so the button and the dropdown
         // never disagree. A file read, like the checks around it.
         let config = crate::config::load();
+        let targets = config.render.for_session(session);
+        let short = session.is_short();
         // Not "is there a links.json" but "is every video on S3 as it is now":
         // the file survives a re-render, and a plan built from it would hand
         // Buffer the old cut. The check's own line is the reason.
-        let hosting = crate::distribute::check(session, config.render);
+        let hosting = crate::distribute::check(session, targets);
         let hosting_reason = hosting.summary();
         let linked = hosting.complete();
         let posted = session
@@ -124,6 +128,8 @@ impl Stages {
         // The blog needs the YouTube URL, not the render: the article is built
         // around an embed, and there is no embed before the upload.
         let uploaded = crate::publish::longform(session).is_some();
+        // A short goes up as the Short alone — see `crate::publish`.
+        let short_up = crate::publish::short(session).is_some();
         // The reason, not a flag: a set that is on disk but stale reads the
         // same as one that was never drawn if all the gate can say is "no".
         // The render button draws the set, so that is where a blocked stage
@@ -138,7 +144,7 @@ impl Stages {
         let has_author =
             crate::blog::chosen_author(&config, &crate::blog::library::load()).is_set();
         // "Not rendered" and "switched off" are different instructions.
-        let longform_reason = match config.render.horizontal {
+        let longform_reason = match targets.horizontal {
             true => "No longform rendered yet — run Render first",
             false => {
                 "The horizontal longform is switched off above the Render button — tick it and Render"
@@ -175,7 +181,13 @@ impl Stages {
             publish: gate(
                 busy.publish,
                 &[
-                    (longform, longform_reason),
+                    match short {
+                        false => (longform, longform_reason),
+                        true => (
+                            session.render_dir().join(VERTICAL).is_file(),
+                            "The short is not rendered yet — run Render first",
+                        ),
+                    },
                     has_thumbnail,
                     (crate::publish::metadata::load(session).validate().is_ok(), "Save a valid title and description on the YouTube tab"),
                 ],
@@ -183,13 +195,20 @@ impl Stages {
             thumbnail: gate(
                 busy.publish,
                 &[
-                    (uploaded, "Nothing on YouTube yet — press Upload to YouTube first"),
+                    (
+                        if short { short_up } else { uploaded },
+                        "Nothing on YouTube yet — press Upload to YouTube first",
+                    ),
                     has_thumbnail,
                 ],
             ),
             blog: gate(
                 busy.blog,
                 &[
+                    (
+                        !short,
+                        "A short has no blog post — the video it was recorded beside does",
+                    ),
                     (uploaded, "Not on YouTube yet — upload it on the YouTube tab first"),
                     has_thumbnail,
                     // The URL has a default — production — so only the token
@@ -364,6 +383,40 @@ mod tests {
             .to_string();
         assert!(reason.contains("Design changed"), "{reason}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A short has no longform: it uploads its vertical cut as the Short, so
+    /// that is what Upload waits on — and it has no blog post to write.
+    #[test]
+    fn a_short_uploads_its_vertical_and_has_no_blog() {
+        let parent = temp("short");
+        let root = parent.join("shorts/short-01");
+        let short = session(&root);
+        write(root.join("render/vertical/chapter-01.mp4"));
+        let stages = Stages::read(&short, Busy::default());
+        assert!(
+            stages
+                .publish
+                .missing()
+                .unwrap()
+                .contains("short is not rendered"),
+            "{:?}",
+            stages.publish
+        );
+        write(root.join("render/vertical/longform.mp4"));
+        crate::card::assets::fixture(&root);
+        let stages = Stages::read(&short, Busy::default());
+        assert!(
+            !stages.publish.missing().unwrap_or("").contains("longform"),
+            "{:?}",
+            stages.publish
+        );
+        assert!(stages
+            .blog
+            .missing()
+            .unwrap()
+            .contains("A short has no blog post"));
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     /// Replace thumbnail is the mirror of Upload: it opens once a video is up

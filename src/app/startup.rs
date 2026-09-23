@@ -390,6 +390,7 @@ pub fn run_record_session(
         posts_pick,
         posts_prompt: cfg.posts_prompt.clone().unwrap_or_default(),
         posts_manifest: None,
+        short_pick: 0,
     };
     // Fills `geometry` and both Split regions from the selected display, so the
     // overlay and the next chapter agree with the stream that just came up.

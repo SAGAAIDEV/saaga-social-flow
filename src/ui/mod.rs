@@ -69,6 +69,19 @@ impl NextTake {
     }
 }
 
+/// What the Start Short row shows — see [`crate::shorts`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShortControls {
+    /// On the video: the menu offers a freeform short, then every suggestion
+    /// by title; `selected` is the menu index, 0 being freeform.
+    Pick {
+        suggestions: Vec<String>,
+        selected: usize,
+    },
+    /// Inside a short: which one it is, and the button goes back to the video.
+    Inside { label: String },
+}
+
 /// Which queue [`ControlTarget::confirm_clear`] was told to empty.
 ///
 /// Mirrors `schedule::clear::Scope` rather than using it, so the AppKit layer
@@ -178,6 +191,9 @@ pub enum UiEvent {
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].
     ChapterSelected(u32),
+    /// The menu beside Start Short: which short the press records, by
+    /// [`ShortControls::Pick`] index.
+    ShortSelected(usize),
     ProjectSelected(usize),
     ValidateRewrite(usize),
     /// A checkbox in an HTML pane moved, carrying its new value.
@@ -333,6 +349,9 @@ pub struct ControlTargetIvars {
     /// rather than as a title to parse.
     chapter_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     retake_button: RefCell<Option<Retained<NSButton>>>,
+    /// Start Short, and the menu beside it naming which — see [`ShortControls`].
+    short_button: RefCell<Option<Retained<NSButton>>>,
+    short_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     pause_button: RefCell<Option<Retained<NSButton>>>,
     regions_button: RefCell<Option<Retained<NSButton>>>,
     status: RefCell<Option<Retained<NSTextField>>>,
@@ -433,6 +452,26 @@ define_class!(
                     let _ = self.ivars().tx.send(UiEvent::ChapterSelected(tag as u32));
                 }
             }
+        }
+
+        #[unsafe(method(onStartShort:))]
+        fn on_start_short(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::StartShort));
+        }
+
+        #[unsafe(method(onShortChanged:))]
+        fn on_short_changed(&self, _sender: Option<&AnyObject>) {
+            if let Some(popup) = self.ivars().short_popup.borrow().as_ref() {
+                let idx = popup.indexOfSelectedItem();
+                if idx >= 0 {
+                    let _ = self.ivars().tx.send(UiEvent::ShortSelected(idx as usize));
+                }
+            }
+        }
+
+        #[unsafe(method(onSuggestShorts:))]
+        fn on_suggest_shorts(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::SuggestShorts));
         }
 
         #[unsafe(method(onStop:))]
@@ -809,6 +848,8 @@ impl ControlTarget {
             chapter_button: RefCell::new(None),
             chapter_popup: RefCell::new(None),
             retake_button: RefCell::new(None),
+            short_button: RefCell::new(None),
+            short_popup: RefCell::new(None),
             pause_button: RefCell::new(None),
             regions_button: RefCell::new(None),
             status: RefCell::new(None),
@@ -1079,7 +1120,11 @@ impl ControlTarget {
 
     /// Put the three Render boxes into the state the config holds — after a
     /// click, so the box and the file agree, and on every control sync.
-    pub fn set_render_targets(&self, targets: crate::config::RenderTargets) {
+    ///
+    /// `locked` is a short's: its outputs are fixed — see
+    /// [`crate::config::RenderTargets::for_session`] — so the three output
+    /// boxes show them and are switched off. Where it renders still moves.
+    pub fn set_render_targets(&self, targets: crate::config::RenderTargets, locked: bool) {
         if MainThreadMarker::new().is_none() {
             return;
         }
@@ -1087,13 +1132,57 @@ impl ControlTarget {
             let on = match *name {
                 "horizontal" => targets.horizontal,
                 "vertical" => targets.vertical,
-                _ => targets.shorts,
+                "shorts" => targets.shorts,
+                "cloud" => targets.cloud,
+                _ => continue,
             };
             checkbox.setState(if on {
                 NSControlStateValueOn
             } else {
                 NSControlStateValueOff
             });
+            checkbox.setEnabled(!locked || *name == "cloud");
+        }
+    }
+
+    /// Fill the Start Short row: the menu, and what the button says.
+    pub fn set_shorts(&self, controls: &ShortControls) {
+        if MainThreadMarker::new().is_none() {
+            return;
+        }
+        let Some(button) = self.ivars().short_button.borrow().clone() else {
+            return;
+        };
+        let Some(popup) = self.ivars().short_popup.borrow().clone() else {
+            return;
+        };
+        popup.removeAllItems();
+        match controls {
+            ShortControls::Pick {
+                suggestions,
+                selected,
+            } => {
+                popup.addItemWithTitle(&NSString::from_str("Freeform short"));
+                for title in suggestions {
+                    popup.addItemWithTitle(&NSString::from_str(&format!("Short: {title}")));
+                }
+                let at = (*selected).min(suggestions.len());
+                popup.selectItemAtIndex(at as isize);
+                popup.setEnabled(true);
+                button.setTitle(&NSString::from_str("Start Short  ⌃⌥S"));
+                button.setToolTip(Some(&NSString::from_str(
+                    "Close out the open chapter and record the short picked beside this — \
+                     its own vertical video, kept out of this one",
+                )));
+            }
+            ShortControls::Inside { label } => {
+                popup.addItemWithTitle(&NSString::from_str(label));
+                popup.setEnabled(false);
+                button.setTitle(&NSString::from_str("Back to Video  ⌃⌥S"));
+                button.setToolTip(Some(&NSString::from_str(
+                    "Finish this short and go back to the video it was recorded beside",
+                )));
+            }
         }
     }
 
@@ -1129,6 +1218,7 @@ impl ControlTarget {
         &self,
         chapter: Option<u32>,
         version: Option<u32>,
+        short: Option<u32>,
         pending: Option<&str>,
         hold: Option<Hold>,
         next: &NextTake,
@@ -1152,6 +1242,12 @@ impl ControlTarget {
             return;
         };
         fill_chapter_menu(&menu, chapter, next);
+        // Inside a short, the lines name the short, not its version: there is
+        // one take of it, and "v1 chapter 01" reads as the video's.
+        let version = version.filter(|_| short.is_none());
+        let within = short
+            .map(|n| format!("short {n:02} · "))
+            .unwrap_or_default();
         // Offered while a chapter is open and not on a figure's break: that
         // break ends with the snip chord, and a Resume that lifted it would
         // pull the take back up under the aside still being recorded.
@@ -1169,7 +1265,10 @@ impl ControlTarget {
                 let n = next.chapter;
                 button.setTitle(&NSString::from_str(&format!("Retake Chapter {n:02}")));
                 retake.setEnabled(false);
-                let v = version.map(|n| format!("v{n} ")).unwrap_or_default();
+                let v = format!(
+                    "{within}{}",
+                    version.map(|n| format!("v{n} ")).unwrap_or_default()
+                );
                 status.setStringValue(&NSString::from_str(&format!(
                     "Ready to retake {v}chapter {n:02} — the take it has now moves to \
                      .discarded/ when recording starts"
@@ -1178,7 +1277,10 @@ impl ControlTarget {
             None => {
                 button.setTitle(&NSString::from_str("Start Recording"));
                 retake.setEnabled(false);
-                let v = version.map(|n| format!("v{n}")).unwrap_or_default();
+                let v = match short {
+                    Some(n) => format!("short {n:02}"),
+                    None => version.map(|n| format!("v{n}")).unwrap_or_default(),
+                };
                 status.setStringValue(&NSString::from_str(&format!(
                     "Ready to record {v} — press Start Recording"
                 )));
@@ -1189,7 +1291,10 @@ impl ControlTarget {
                     None => "New Chapter",
                 }));
                 retake.setEnabled(true);
-                let v = version.map(|n| format!("v{n} ")).unwrap_or_default();
+                let v = format!(
+                    "{within}{}",
+                    version.map(|n| format!("v{n} ")).unwrap_or_default()
+                );
                 let waiting = pending
                     .map(|layout| format!(" — {layout} starts at the next chapter"))
                     .unwrap_or_default();
@@ -1796,10 +1901,14 @@ fn layout_right(
     prompt.0.setFrame(row(y, LABEL_H));
     y -= GAP + PROMPT_H;
     prompt.1.setFrame(row(y, PROMPT_H));
-    y -= SECTION_GAP + GROUP_H;
+    // Tall enough for every row, the way the left column's groups are.
+    let rows = group_rows(&notes_group.1).len();
+    let group_h =
+        (rows as f64 * BUTTON_H + rows.saturating_sub(1) as f64 * BUTTON_GAP + 32.0).max(GROUP_H);
+    y -= SECTION_GAP + group_h;
     notes_group.0.setFrame(NSRect::new(
         NSPoint::new(PAD, y),
-        NSSize::new(content_w, GROUP_H),
+        NSSize::new(content_w, group_h),
     ));
     layout_group_buttons(&notes_group.0, &notes_group.1);
     let deck_h = (y - SECTION_GAP - PAD).max(80.0);
@@ -2332,7 +2441,8 @@ pub fn attach_controls(
 
     // The Render output boxes: one row directly above the Render button, in
     // the group it belongs to. Small, so three fit across the Record group;
-    // tagged, so `layout_group_buttons` lays the run out side by side.
+    // tagged, so `layout_group_buttons` lays the run out side by side. The
+    // AWS box follows on its own row.
     let render_target_boxes: Vec<(&'static str, Retained<NSButton>)> = [
         (
             "horizontal",
@@ -2343,14 +2453,21 @@ pub fn attach_controls(
         (
             "vertical",
             "Vertical",
-            "Render the vertical longform — the shorts joined end to end",
+            "Render the vertical longform — the chapter clips joined end to end",
             render_targets.vertical,
         ),
         (
             "shorts",
-            "Shorts",
-            "Render each chapter's vertical cut as a short",
+            "Chapter clips",
+            "Render each chapter's vertical cut as its own clip, for Buffer",
             render_targets.shorts,
+        ),
+        (
+            "cloud",
+            "Render on AWS GPU",
+            "Render on GPU machines in AWS instead of this Mac — started for the render and \
+             gone after it. Needs the infra/gpu-render stack and a live aws sso login",
+            render_targets.cloud,
         ),
     ]
     .into_iter()
@@ -2372,7 +2489,11 @@ pub fn attach_controls(
         } else {
             NSControlStateValueOff
         });
-        checkbox.setTag(ROW_TAG);
+        // The three outputs share a row; where they are drawn is a different
+        // question, so it takes a row of its own beneath them.
+        if name != "cloud" {
+            checkbox.setTag(ROW_TAG);
+        }
         (name, checkbox)
     })
     .collect();
@@ -2381,25 +2502,28 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 13] = [
+    let buttons: [(&str, Sel); 15] = [
         ("", sel!(onNewChapter:)),                           // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
         ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
         ("Stop", sel!(onStop:)),                             // 3 │
         ("Render video and thumbnails", sel!(onRunRender:)), // 4 │
         ("Re-render missing", sel!(onRerenderMissing:)),     // 5 ┘
-        ("Notes", sel!(onNotes:)),                           // 6 ┐ Notes (right pane)
-        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 ┘
-        ("New Project", sel!(onNewProject:)),                // 8 ┐
-        ("New Version", sel!(onNewVersion:)),                // 9 │
-        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 10 │ Session
-        ("", sel!(onToggleRegions:)),                        // 11 │ title set by set_regions
-        ("Open Rendered Video", sel!(onOpenVideo:)),         // 12 ┘
+        ("", sel!(onStartShort:)),                           // 6   Record, title set by set_shorts
+        ("Notes", sel!(onNotes:)),                           // 7 ┐ Notes (right pane)
+        ("Copy Transcript", sel!(onCopyTranscript:)),        // 8 │
+        ("Suggest Shorts", sel!(onSuggestShorts:)),          // 9 ┘
+        ("New Project", sel!(onNewProject:)),                // 10 ┐
+        ("New Version", sel!(onNewVersion:)),                // 11 │
+        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 12 │ Session
+        ("", sel!(onToggleRegions:)),                        // 13 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),         // 14 ┘
     ];
     const RECORD: Range<usize> = 0..6;
-    const NOTES: Range<usize> = 6..8;
-    const SESSION: Range<usize> = 8..13;
-    const REGIONS: usize = 11;
+    const START_SHORT: usize = 6;
+    const NOTES: Range<usize> = 7..10;
+    const SESSION: Range<usize> = 10..15;
+    const REGIONS: usize = 13;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
         let button = unsafe {
@@ -2430,6 +2554,31 @@ pub fn attach_controls(
         chapter_popup.setAction(Some(sel!(onChapterChanged:)));
     }
     *target.ivars().chapter_popup.borrow_mut() = Some(chapter_popup.clone());
+
+    // The Start Short row: which short, then the press. Tagged so the two
+    // share one row, and filled by `set_shorts` like the chapter menu is by
+    // `set_recording`.
+    let short_popup = NSPopUpButton::initWithFrame_pullsDown(
+        NSPopUpButton::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, BUTTON_H)),
+        false,
+    );
+    unsafe {
+        short_popup.setTarget(Some(&target));
+        short_popup.setAction(Some(sel!(onShortChanged:)));
+    }
+    short_popup.setTag(ROW_TAG);
+    built[START_SHORT].setTag(ROW_TAG);
+    *target.ivars().short_popup.borrow_mut() = Some(short_popup.clone());
+    *target.ivars().short_button.borrow_mut() = Some(built[START_SHORT].clone());
+    target.set_shorts(&ShortControls::Pick {
+        suggestions: Vec::new(),
+        selected: 0,
+    });
+    built[9].setToolTip(Some(&NSString::from_str(
+        "Read the finished take and suggest asides worth their own Short — pick one \
+         beside Start Short",
+    )));
 
     *target.ivars().render_button.borrow_mut() = Some(built[4].clone());
     built[5].setToolTip(Some(&NSString::from_str(
@@ -2483,6 +2632,11 @@ pub fn attach_controls(
     // A popup is a button as far as the group's rows are concerned; it takes
     // the row under Start Recording.
     record.insert(1, chapter_popup.into_super());
+    // Above Stop, not below it: the Render boxes that follow Stop are tagged
+    // too, and a tagged run shares one row.
+    let stop_at = record.len() - 3;
+    record.insert(stop_at, built[START_SHORT].clone());
+    record.insert(stop_at, short_popup.into_super());
     let rerender = record
         .pop()
         .expect("Re-render missing closes the Record group");

@@ -49,6 +49,16 @@ impl SessionEntry {
     /// A dropdown row. An unnamed project is parenthesised so a named list does
     /// not read as though the timestamps were chosen.
     pub fn label(&self) -> String {
+        // A short is listed under its video, so its row says which it is
+        // before what it is called.
+        if let Some(n) = crate::shorts::number(&self.root) {
+            return format!(
+                "    ↳ Short {n:02} · {} — {} files, {}",
+                self.title(),
+                self.files,
+                human_bytes(self.bytes)
+            );
+        }
         let title = match &self.name {
             Some(name) if !name.trim().is_empty() => name.trim().to_string(),
             _ => format!("({})", self.folder),
@@ -102,8 +112,29 @@ pub fn list() -> Vec<SessionEntry> {
 /// field both say otherwise. Every caller that populates the picker and every
 /// caller that resolves a picked row must use this same list, or the row indices
 /// the UI sends back would address the wrong project.
+///
+/// The open project's shorts follow it, one row each — see [`crate::shorts`].
+/// Only that project's: they are how you get back into a short you recorded,
+/// and every project's shorts at once would bury the videos. A short that is
+/// open brings its parent's in the same way, so the video it came from and its
+/// siblings are one pick away.
 pub fn list_including(open: &Path) -> Vec<SessionEntry> {
-    merge_open(list(), describe(open))
+    let family = crate::shorts::parent_of(open).unwrap_or(open);
+    with_shorts(merge_open(list(), describe(family)), family)
+}
+
+/// `family`'s shorts, spliced in directly under it. Listed even while empty —
+/// a short just started has no files yet, and it is the one being recorded.
+fn with_shorts(mut listed: Vec<SessionEntry>, family: &Path) -> Vec<SessionEntry> {
+    let Some(at) = listed.iter().position(|entry| entry.root == family) else {
+        return listed;
+    };
+    let shorts: Vec<SessionEntry> = crate::shorts::roots(family)
+        .iter()
+        .filter_map(|root| describe(root))
+        .collect();
+    listed.splice(at + 1..at + 1, shorts);
+    listed
 }
 
 /// Splices the open project into the listing, keeping it newest-first. A project
@@ -526,6 +557,41 @@ mod tests {
         let listed = vec![aged("a", 200), aged("b", 100)];
         let merged = merge_open(listed.clone(), Some(listed[1].clone()));
         assert_eq!(merged, listed);
+    }
+
+    /// A short is reached from the picker, so it has to be listed — under its
+    /// video, and only under the open one's.
+    #[test]
+    fn the_open_projects_shorts_follow_it_in_the_picker() {
+        let dir = temp("shorts");
+        let video = dir.join("2026-09-22_10-00-00");
+        for n in [2, 1] {
+            let short = video.join(format!("shorts/short-{n:02}"));
+            std::fs::create_dir_all(short.join("drafts/v1")).unwrap();
+            save_name(&short, &format!("Aside {n}")).unwrap();
+        }
+        let listed = vec![
+            SessionEntry {
+                root: dir.join("newer"),
+                ..aged("newer", 300)
+            },
+            SessionEntry {
+                root: video.clone(),
+                ..aged("2026-09-22_10-00-00", 200)
+            },
+            SessionEntry {
+                root: dir.join("older"),
+                ..aged("older", 100)
+            },
+        ];
+        let rows = with_shorts(listed, &video);
+        let labels: Vec<String> = rows.iter().map(|e| e.label()).collect();
+        assert_eq!(rows.len(), 5, "{labels:?}");
+        assert_eq!(rows[1].root, video);
+        assert!(labels[2].contains("↳ Short 01 · Aside 1"), "{labels:?}");
+        assert!(labels[3].contains("↳ Short 02 · Aside 2"), "{labels:?}");
+        assert_eq!(rows[4].folder, "older");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

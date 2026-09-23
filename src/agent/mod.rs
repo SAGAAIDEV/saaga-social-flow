@@ -5,6 +5,7 @@ pub mod notes;
 pub mod outline;
 pub mod prompt;
 pub mod reflect;
+pub mod shorts;
 pub mod titles;
 pub mod trace;
 

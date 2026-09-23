@@ -79,7 +79,7 @@ ureq = { version = "2.12", features = ["json"] }
 libc = "0.2"
 rig = "0.41.0"
 schemars = "1"
-tokio = { version = "1", features = ["rt", "macros", "time", "net"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 objc2-web-kit = { version = "0.3", features = [
@@ -115,6 +115,12 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 aws-config = { version = "1.12.0", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.146.1"
+# Render on AWS GPU: launching the machines, and reading where the stack is —
+# see src/edit/gpu.rs.
+aws-sdk-ec2 = "1"
+aws-credential-types = "1"
+aws-sdk-ssm = "1"
+base64 = "0.22"
 sha2 = "0.11.0"
 
 [profile.release]

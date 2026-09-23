@@ -397,6 +397,45 @@ fn record_poster(session: &Session, mut row: Upload) -> Result<Upload> {
     Ok(row)
 }
 
+/// A short's upload: its vertical cut as the Short, and nothing else — it has
+/// no longform, and it was recorded to be exactly this one video.
+///
+/// Over the Shorts limit is a failure here rather than the skip it is for a
+/// video's vertical longform: there, the longform is the press's job and is
+/// already live; here, the Short *is* the job, and an upload that YouTube files
+/// as an ordinary video would be the wrong thing done quietly.
+fn run_short(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
+    let status = |msg: String| {
+        let _ = tx.send(PublishEvent::Status(msg));
+    };
+    let vertical = session.render_dir().join("vertical/longform.mp4");
+    if !vertical.is_file() {
+        bail!("the short is not rendered yet — run Render first");
+    }
+    if let Some(seconds) = crate::edit::cut::probe_duration_seconds(&vertical)
+        .ok()
+        .filter(|&seconds| seconds > SHORT_MAX_SECONDS)
+    {
+        bail!(
+            "the short is {} long, over the {} YouTube allows a Short — trim it on the Edit tab \
+             or retake it, then Render",
+            mmss(seconds),
+            mmss(SHORT_MAX_SECONDS)
+        );
+    }
+    let poster = chosen_thumbnail(session, crate::card::assets::Kind::Vertical);
+    let short = upload_one(
+        session,
+        &vertical,
+        Orientation::Vertical,
+        poster.as_deref(),
+        &status,
+    )?;
+    eprintln!("stream-recorder: youtube short → {}", short.url);
+    let _ = tx.send(PublishEvent::Uploaded(short));
+    Ok(())
+}
+
 /// The longform first, then the vertical cut as a Short when the project has
 /// one. Each lands as its own row and its own event, so a Short that fails
 /// leaves the longform live and reported rather than rolled into one failure.
@@ -408,7 +447,10 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
     // The Render boxes above the Render button. An output that is switched
     // off is not uploaded even when an earlier render left its file behind:
     // the box is the decision, the file is history.
-    let targets = crate::config::load().render;
+    if session.is_short() {
+        return run_short(session, tx);
+    }
+    let targets = crate::config::render_targets(session);
     if !targets.horizontal {
         bail!(
             "the horizontal longform is switched off above the Render button — tick it and Render \

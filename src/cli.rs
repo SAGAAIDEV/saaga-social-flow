@@ -30,6 +30,18 @@ pub enum Command {
     /// Check everything a render needs: the component library, the HyperFrames
     /// renderer, and the S3 uploader. No GUI window.
     Doctor,
+    /// Cut and render a recorded project, as the Render button does, without the
+    /// window — no camera, no microphone. For checking a render path end to end.
+    Render {
+        /// The project folder under ~/.stream-recorder/sessions/.
+        project: std::path::PathBuf,
+        /// Which version to render; the one it was left on by default.
+        #[arg(long)]
+        version: Option<u32>,
+        /// Render on AWS for this run, whatever the Render on AWS box says.
+        #[arg(long)]
+        cloud: bool,
+    },
     /// Report which API keys are set and where each one came from. No GUI window.
     ///
     /// The first thing to run on a new machine: it names the file it would
@@ -83,8 +95,8 @@ pub enum Command {
         /// A small orange word above the title.
         #[arg(long, default_value = "")]
         kicker: String,
-        /// `dark` or `light`.
-        #[arg(long, default_value = "dark")]
+        /// `light` (the chapter card's look) or `dark`.
+        #[arg(long, default_value = "light")]
         theme: String,
         /// A camera still to put beside the words — right of them on the landscape
         /// card, below them on the portrait one. Omitted draws a title card.
