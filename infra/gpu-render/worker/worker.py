@@ -16,6 +16,7 @@ off, which the launch template turns into a terminate.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -143,10 +144,23 @@ def fetch(bucket, digests):
         if not dest.exists():
             part = dest.with_suffix(".part")
             aws("s3", "cp", f"s3://{bucket}/blobs/{digest}", str(part), "--only-show-errors")
+            # The key is the content's sha256; a blob that is not what its name
+            # says is never rendered from.
+            if sha256_of(part) != digest:
+                part.unlink(missing_ok=True)
+                raise RuntimeError(f"blobs/{digest} does not match its own digest")
             part.rename(dest)
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         list(pool.map(one, sorted(digests)))
+
+
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def lay_out(job):
@@ -155,7 +169,9 @@ def lay_out(job):
     if root.exists():
         shutil.rmtree(root)
     for rel, digest in job["files"].items():
-        dest = root / rel
+        dest = (root / rel).resolve()
+        if root.resolve() not in dest.parents:
+            raise RuntimeError(f"{rel!r} is outside the job's project")
         dest.parent.mkdir(parents=True, exist_ok=True)
         os.link(BLOBS / digest, dest)
     return root
@@ -251,7 +267,8 @@ def main():
     jobs = [job for job in manifest["jobs"] if job["id"] in mine]
     status = Status(args.bucket, args.run, args.shard, [job["id"] for job in jobs])
     try:
-        aws("s3", "cp", f"s3://{args.bucket}/worker/setup.sh", str(ROOT / "setup.sh"))
+        for name in ("setup.sh", "package.json", "package-lock.json"):
+            aws("s3", "cp", f"s3://{args.bucket}/worker/{name}", str(ROOT / name))
         # Install and download at once: both are minutes, and neither needs
         # the other.
         digests = {d for job in jobs for d in job["files"].values()}

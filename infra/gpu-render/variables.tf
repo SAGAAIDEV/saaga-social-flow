@@ -32,7 +32,7 @@ variable "subnet_ids" {
     out of GPU capacity. The machines get a public address for egress (npm, the
     Chrome download, S3) and accept no inbound traffic.
   EOT
-  type = list(string)
+  type        = list(string)
   default = [
     "subnet-098ddb191ee6f09cc", # saaga-dev-public-us-east-1a
     "subnet-05f08c1e71f21f6a9", # saaga-dev-public-us-east-1b

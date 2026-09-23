@@ -180,6 +180,7 @@ pub fn upload_assets(
 async fn client(config: &Config) -> Client {
     let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(config.region.clone()))
+        .profile_name(crate::settings::sops::aws_profile())
         .load()
         .await;
     let mut builder = aws_sdk_s3::config::Builder::from(&shared);
@@ -382,7 +383,7 @@ where
         .iter()
         .any(|needle| lower.contains(needle));
     if login {
-        let profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "dev".to_string());
+        let profile = crate::settings::sops::aws_profile();
         anyhow!(
             "{what}: {detail} — run `aws sso login --profile {profile}` and press Distribute again"
         )

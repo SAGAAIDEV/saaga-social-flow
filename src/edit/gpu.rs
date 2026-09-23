@@ -114,16 +114,17 @@ fn region() -> String {
 /// Fails once, up front, when AWS cannot be reached — one message rather than
 /// a failure per chapter.
 pub fn check_ready() -> Result<()> {
+    let profile = crate::settings::sops::aws_profile();
     let status = Command::new("aws")
-        .args(["sts", "get-caller-identity"])
+        .args(["sts", "get-caller-identity", "--profile", &profile])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
     match status {
         Ok(s) if s.success() => Ok(()),
         Ok(_) => bail!(
-            "AWS is not signed in — run `aws sso login --profile dev`, then press Render again \
-             (or untick Render on AWS to draw on this Mac)"
+            "AWS is not signed in — run `aws sso login --profile {profile}`, then press Render \
+             again (or untick Render on AWS GPU to draw on this Mac)"
         ),
         Err(err) => bail!("could not run the aws CLI to check the sign-in: {err}"),
     }
@@ -398,6 +399,7 @@ pub(super) fn render_all(
     let clients = runtime.block_on(async {
         let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(region()))
+            .profile_name(crate::settings::sops::aws_profile())
             .load()
             .await;
         // The same credentials every call below uses, asked for once: the CLI
@@ -409,8 +411,9 @@ pub(super) fn render_all(
             if let Err(err) = provider.provide_credentials().await {
                 eprintln!("stream-recorder: AWS credentials: {err}");
                 bail!(
-                    "the AWS sign-in has expired — run `aws sso login --profile dev`, then press \
-                     Render again (or untick Render on AWS GPU to draw on this Mac)"
+                    "the AWS sign-in has expired — run `aws sso login --profile {}`, then press \
+                     Render again (or untick Render on AWS GPU to draw on this Mac)",
+                    crate::settings::sops::aws_profile()
                 );
             }
         }
@@ -562,8 +565,9 @@ pub(super) fn render_all(
                     if since.elapsed() > Duration::from_secs(10 * 60) {
                         bail!(
                             "lost contact with AWS for 10 minutes ({err:#}) — sign in with `aws \
-                             sso login --profile dev` and press Render again; finished renders \
-                             are kept"
+                             sso login --profile {}` and press Render again; finished renders \
+                             are kept",
+                            crate::settings::sops::aws_profile()
                         );
                     }
                     None

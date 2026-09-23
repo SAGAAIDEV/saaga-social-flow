@@ -80,6 +80,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "render" {
   }
 
   rule {
+    id     = "expire-old-versions"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  rule {
     id     = "abort-incomplete-uploads"
     status = "Enabled"
     filter {}
@@ -89,15 +98,66 @@ resource "aws_s3_bucket_lifecycle_configuration" "render" {
   }
 }
 
-# The scripts every machine fetches at boot. In the bucket rather than baked
-# into the launch template, so changing the worker is `terraform apply` and
-# nothing else.
+# Versioned, so an object overwritten by mistake — or by a machine that should
+# not have — can be put back. Old versions go after a day; nothing here is
+# precious for longer than a render.
+resource "aws_s3_bucket_versioning" "render" {
+  bucket = aws_s3_bucket.render.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# TLS or nothing, for the team's Macs and the machines alike.
+data "aws_iam_policy_document" "bucket" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.render.arn,
+      "${aws_s3_bucket.render.arn}/*",
+    ]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "render" {
+  bucket = aws_s3_bucket.render.id
+  policy = data.aws_iam_policy_document.bucket.json
+  # Applied after the public access block, which this policy does not loosen.
+  depends_on = [aws_s3_bucket_public_access_block.render]
+}
+
+# What every machine fetches at boot: the worker scripts, and the renderer's
+# package.json and lockfile, so a machine installs exactly what the Mac does.
+# In the bucket rather than baked into the launch template, so changing the
+# worker is `terraform apply` and nothing else — and read-only to the machines
+# (see render_s3), so a machine cannot change what the next one runs.
+locals {
+  worker_files = merge(
+    { for f in fileset("${path.module}/worker", "*") : f => "${path.module}/worker/${f}" },
+    {
+      "package.json"      = "${path.module}/../../renderer/package.json"
+      "package-lock.json" = "${path.module}/../../renderer/package-lock.json"
+    },
+  )
+}
+
 resource "aws_s3_object" "worker" {
-  for_each    = fileset("${path.module}/worker", "*")
+  for_each    = local.worker_files
   bucket      = aws_s3_bucket.render.id
-  key         = "worker/${each.value}"
-  source      = "${path.module}/worker/${each.value}"
-  source_hash = filemd5("${path.module}/worker/${each.value}")
+  key         = "worker/${each.key}"
+  source      = each.value
+  source_hash = filemd5(each.value)
 }
 
 # -----------------------------------------------------------------------------
@@ -118,16 +178,29 @@ resource "aws_iam_role" "render" {
   assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
 }
 
-# Its own bucket and nothing else. Its own credentials rather than anything
-# the app hands it, so a render outlives an `aws sso login` expiring on the Mac.
+# Its own credentials rather than anything the app hands it, so a render
+# outlives an `aws sso login` expiring on the Mac. Least privilege: a machine
+# reads the worker, the inputs and the manifests, and writes only a run's
+# status, outputs and logs. It cannot touch worker/ — which every later machine
+# runs as root — nor blobs/, which other renders reuse.
 data "aws_iam_policy_document" "render_s3" {
   statement {
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
-    resources = ["${aws_s3_bucket.render.arn}/*"]
+    sid     = "Read"
+    actions = ["s3:GetObject"]
+    resources = [
+      "${aws_s3_bucket.render.arn}/worker/*",
+      "${aws_s3_bucket.render.arn}/blobs/*",
+      "${aws_s3_bucket.render.arn}/runs/*",
+    ]
   }
   statement {
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.render.arn]
+    sid     = "WriteRunResults"
+    actions = ["s3:PutObject", "s3:AbortMultipartUpload"]
+    resources = [
+      "${aws_s3_bucket.render.arn}/runs/*/status/*",
+      "${aws_s3_bucket.render.arn}/runs/*/out/*",
+      "${aws_s3_bucket.render.arn}/runs/*/logs/*",
+    ]
   }
 }
 
@@ -138,10 +211,32 @@ resource "aws_iam_role_policy" "render_s3" {
 }
 
 # Session Manager, so a machine that misbehaves can be looked at from the
-# console without opening a port.
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.render.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# console without opening a port. Only the channel itself: AWS's managed
+# AmazonSSMManagedInstanceCore also grants ssm:GetParameter(s) on every
+# parameter in the account, which a render machine has no business reading.
+data "aws_iam_policy_document" "session_manager" {
+  statement {
+    actions = [
+      "ssm:UpdateInstanceInformation",
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+      "ec2messages:AcknowledgeMessage",
+      "ec2messages:DeleteMessage",
+      "ec2messages:FailMessage",
+      "ec2messages:GetEndpoint",
+      "ec2messages:GetMessages",
+      "ec2messages:SendReply",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "session_manager" {
+  name   = "session-manager"
+  role   = aws_iam_role.render.id
+  policy = data.aws_iam_policy_document.session_manager.json
 }
 
 resource "aws_iam_instance_profile" "render" {

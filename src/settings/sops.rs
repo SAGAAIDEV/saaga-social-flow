@@ -41,6 +41,21 @@ use std::sync::{Mutex, RwLock};
 const FILE: &str = "dev.sops.env";
 const PROFILE: &str = "dev";
 
+/// The AWS profile every AWS call in the app signs with: `AWS_PROFILE` when it
+/// is set, else the team's `dev` SSO profile.
+///
+/// Without the fallback an unset `AWS_PROFILE` means the SDK's `default`
+/// profile — for a teammate whose SSO login is `dev` and whose `default` is
+/// something else or nothing, a render or an upload that fails, or worse, runs
+/// in another account.
+pub fn aws_profile() -> String {
+    std::env::var("AWS_PROFILE")
+        .ok()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| PROFILE.to_string())
+}
+
 /// What `sops` handed back this run, for the Settings pane to attribute values
 /// to the team file rather than to something the reader typed.
 ///
@@ -240,10 +255,7 @@ fn decrypt(path: &Path) -> Result<String, String> {
         // when *creating* a file. Decrypting reads the key arn baked into the
         // file itself and resolves credentials the ordinary way, so the profile
         // has to be handed over here or an unset AWS_PROFILE picks `default`.
-        .env(
-            "AWS_PROFILE",
-            std::env::var("AWS_PROFILE").as_deref().unwrap_or(PROFILE),
-        )
+        .env("AWS_PROFILE", aws_profile())
         .output()
         .map_err(|err| match err.kind() {
             std::io::ErrorKind::NotFound => "sops is not installed (brew install sops)".to_string(),
