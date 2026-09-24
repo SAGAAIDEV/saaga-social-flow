@@ -261,6 +261,9 @@ pub struct App {
     /// `config.show_app_in_capture` so the switch, the running stream and the
     /// next `open_screen` cannot disagree within a session.
     show_app: bool,
+    /// Whether the pointer is kept out of the screen recording. Mirrors
+    /// `config.hide_cursor_in_capture`, as `show_app` mirrors its setting.
+    hide_mouse: bool,
     /// The Notes tab's provider→model choice. One value, because the provider
     /// decides which models exist — see [`crate::notes::Picker`].
     notes_pick: crate::notes::Picker,
@@ -326,6 +329,7 @@ impl App {
             self.face_tracking_wanted(),
             self.mouse_tracking_wanted(),
             self.show_app,
+            self.hide_mouse,
             crate::config::render_targets(&self.session),
             self.youtube_privacy,
             self.notes_pick.menu(),
@@ -831,6 +835,7 @@ impl App {
             }
             UiEvent::MouseTrackToggled(on) => self.set_mouse_tracking(on),
             UiEvent::ShowAppToggled(on) => self.set_show_app(on),
+            UiEvent::HideMouseToggled(on) => self.set_hide_mouse(on),
             UiEvent::FaceTrackReady(built) => self.face_tracker_ready(built),
             UiEvent::YoutubePrivacySelected(idx) => self.select_youtube_privacy(idx),
             UiEvent::ModelSelected(idx) => self.select_model(idx),

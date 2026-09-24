@@ -130,6 +130,15 @@ pub struct Config {
     /// regions for that take.
     #[serde(default)]
     pub show_app_in_capture: bool,
+    /// Whether the pointer is left out of the screen recording.
+    ///
+    /// Off by default: on a screencast the pointer is usually where the
+    /// operator is pointing, and Track Mouse frames on it. On is for a take
+    /// where it is only in the way — a slide deck, a video playing. Tracking
+    /// still works with it hidden; it reads the pointer's position, not the
+    /// pixels.
+    #[serde(default)]
+    pub hide_cursor_in_capture: bool,
     /// YouTube category for queued posts, as YouTube's own numeric id.
     ///
     /// Buffer rejects a YouTube post that has none — "YouTube posts require a

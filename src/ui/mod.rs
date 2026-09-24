@@ -174,6 +174,8 @@ pub enum UiEvent {
     MouseTrackToggled(bool),
     /// The Show App checkbox moved.
     ShowAppToggled(bool),
+    /// The Hide Mouse checkbox moved.
+    HideMouseToggled(bool),
     /// The YouTube tab's Visibility popup moved, as an index into
     /// [`crate::publish::youtube::Privacy::ALL`].
     YoutubePrivacySelected(usize),
@@ -330,6 +332,9 @@ pub struct ControlTargetIvars {
     /// recorded frame contains — and set for a take rather than during one,
     /// though flipping it mid-take works.
     show_app_checkbox: RefCell<Option<Retained<NSButton>>>,
+    /// The Hide Mouse switch, last in the row: whether the pointer is drawn
+    /// into the screen recording. Flipping it mid-take works too.
+    hide_mouse_checkbox: RefCell<Option<Retained<NSButton>>>,
     /// The three Render output boxes — horizontal longform, vertical longform,
     /// shorts — one row in the Record group directly above the Render button,
     /// so what a press produces is decided where it is pressed. Named, because
@@ -533,6 +538,14 @@ define_class!(
             if let Some(checkbox) = self.ivars().show_app_checkbox.borrow().as_ref() {
                 let on = checkbox.state() == NSControlStateValueOn;
                 let _ = self.ivars().tx.send(UiEvent::ShowAppToggled(on));
+            }
+        }
+
+        #[unsafe(method(onHideMouseChanged:))]
+        fn on_hide_mouse_changed(&self, _sender: Option<&AnyObject>) {
+            if let Some(checkbox) = self.ivars().hide_mouse_checkbox.borrow().as_ref() {
+                let on = checkbox.state() == NSControlStateValueOn;
+                let _ = self.ivars().tx.send(UiEvent::HideMouseToggled(on));
             }
         }
 
@@ -837,6 +850,7 @@ impl ControlTarget {
             face_checkbox: RefCell::new(None),
             mouse_checkbox: RefCell::new(None),
             show_app_checkbox: RefCell::new(None),
+            hide_mouse_checkbox: RefCell::new(None),
             render_target_boxes: RefCell::new(Vec::new()),
             privacy_popup: RefCell::new(None),
             version_popup: RefCell::new(None),
@@ -2069,6 +2083,7 @@ pub fn attach_controls(
     face_tracking: bool,
     mouse_tracking: bool,
     show_app: bool,
+    hide_mouse: bool,
     render_targets: crate::config::RenderTargets,
     youtube_privacy: crate::publish::youtube::Privacy,
     model_menu: &[crate::notes::ModelMenuRow],
@@ -2439,6 +2454,25 @@ pub fn attach_controls(
     });
     *target.ivars().show_app_checkbox.borrow_mut() = Some(show_app_checkbox.clone());
 
+    let hide_mouse_checkbox = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Hide Mouse"),
+            Some(&target),
+            Some(sel!(onHideMouseChanged:)),
+            mtm,
+        )
+    };
+    hide_mouse_checkbox.setButtonType(NSButtonType::Switch);
+    hide_mouse_checkbox.setToolTip(Some(&NSString::from_str(
+        "Leave the mouse pointer out of the screen recording",
+    )));
+    hide_mouse_checkbox.setState(if hide_mouse {
+        NSControlStateValueOn
+    } else {
+        NSControlStateValueOff
+    });
+    *target.ivars().hide_mouse_checkbox.borrow_mut() = Some(hide_mouse_checkbox.clone());
+
     // The Render output boxes: one row directly above the Render button, in
     // the group it belongs to. Small, so three fit across the Record group;
     // tagged, so `layout_group_buttons` lays the run out side by side. The
@@ -2670,6 +2704,7 @@ pub fn attach_controls(
         face_checkbox,
         mouse_checkbox,
         show_app_checkbox,
+        hide_mouse_checkbox,
     );
     let notes = crate::notes::NotesPane::attach(&right, mtm);
 

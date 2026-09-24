@@ -214,6 +214,7 @@ pub fn run_record_session(
                     uid,
                     capture,
                     cfg.show_app_in_capture,
+                    !cfg.hide_cursor_in_capture,
                 )
             })
             .map_err(|e| eprintln!("stream-recorder: could not start screen capture: {e:#}"))
@@ -384,6 +385,7 @@ pub fn run_record_session(
         pointer_config: cfg.mouse_tracking,
         pointer_tracker: None,
         show_app: cfg.show_app_in_capture,
+        hide_mouse: cfg.hide_cursor_in_capture,
         notes_pick,
         notes_providers,
         notes_prompt,
