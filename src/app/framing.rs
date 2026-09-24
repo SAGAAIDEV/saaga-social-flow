@@ -446,7 +446,8 @@ impl App {
                     (true, true) => screen.as_mut().expect("checked").set_capture(capture)?,
                     (true, false) => {
                         let uid = screen_uid.context("no display selected")?;
-                        let connection = ScreenConnection::start_capture(&uid, capture, show_app, show_cursor)?;
+                        let connection =
+                            ScreenConnection::start_capture(&uid, capture, show_app, show_cursor)?;
                         // Not fatal: an idle display legitimately delivers
                         // nothing until something on it changes.
                         let _ = connection.wait_for_warmup(Duration::from_secs(2));

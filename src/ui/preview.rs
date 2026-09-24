@@ -73,6 +73,7 @@ struct PreviewSlot {
 }
 
 impl PreviewHost {
+    #[allow(clippy::too_many_arguments)]
     pub fn attach(
         parent: &NSView,
         mtm: MainThreadMarker,
