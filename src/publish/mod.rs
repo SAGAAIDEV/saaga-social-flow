@@ -37,7 +37,12 @@ pub mod youtube;
 /// `UCX6g-NfcY2x-…` tells nobody they are about to publish to the wrong channel,
 /// and "Andrew Melnychuk-Oseen" tells them immediately.
 pub fn connected_channel() -> Option<String> {
-    let token = token_store::load().ok().flatten()?;
+    let token = youtube::current_token().ok().flatten()?;
+    if youtube::is_unverified_shared(&token) {
+        return Some(
+            "the team's shared grant from dev.sops.env (channel confirmed on first use)".into(),
+        );
+    }
     let title = token.channel_title.unwrap_or_else(|| "untitled".into());
     Some(match token.channel_id {
         Some(id) => format!("{title} ({id})"),

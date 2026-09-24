@@ -166,6 +166,15 @@ fn youtube() -> Result<String> {
              .apps.googleusercontent.com"
         );
     }
+    // A shared refresh token can be tested without a browser: refreshing it
+    // proves Google still honours it, and confirms the channel it grants.
+    if !std::env::var("YOUTUBE_REFRESH_TOKEN")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        crate::publish::youtube::access_token()?;
+    }
     match crate::publish::connected_channel() {
         Some(channel) => Ok(format!("signed in as {channel}")),
         None => Ok("client looks right — press Connect on the YouTube tab to sign in".into()),

@@ -243,6 +243,17 @@ pub const FIELDS: &[Field] = &[
         url: None,
     },
     Field {
+        key: "YOUTUBE_REFRESH_TOKEN",
+        label: "Shared YouTube refresh token",
+        group: Group::Video,
+        need: Need::Optional,
+        secret: true,
+        help: "The brand channel owner's grant, shared so nobody else has to Connect. \
+               The owner presses Connect once, then copies refresh_token out of \
+               ~/.saaga/auth.db. It starts with 1//.",
+        url: None,
+    },
+    Field {
         key: "YOUTUBE_CHANNEL_ID",
         label: "Expected channel ID",
         group: Group::Video,
