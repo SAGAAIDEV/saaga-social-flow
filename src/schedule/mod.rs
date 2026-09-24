@@ -222,6 +222,9 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
         session.version,
         &youtube_category,
     );
+    if session.is_short() {
+        skip_youtube_shorts(&mut built);
+    }
 
     // A re-plan must not silently discard review work, and must not silently keep
     // a tick that belongs to copy nobody has read. `carry_approvals` matches on the
@@ -388,6 +391,18 @@ fn version_mismatch(session: Option<u32>, posts: Option<u32>, links: u32) -> Opt
 fn skip_item(plan: &mut SchedulePlan, index: usize, reason: String) {
     if let Some(item) = plan.items.get_mut(index) {
         item.skip = Some(reason);
+    }
+}
+
+/// A short's clip is the Short itself — one chapter, the same cut the YouTube
+/// tab uploads — so a `youtube_shorts` post through Buffer would put the same
+/// video up twice. Kept as a skip, not dropped, like the longform's `youtube`.
+fn skip_youtube_shorts(plan: &mut SchedulePlan) {
+    for item in &mut plan.items {
+        if item.platform == "youtube_shorts" && item.skip.is_none() {
+            item.skip =
+                Some("uploaded straight to YouTube as the Short — see the YouTube tab".into());
+        }
     }
 }
 

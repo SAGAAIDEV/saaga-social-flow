@@ -47,7 +47,9 @@
         "assets/fonts/Booton-Semibold.woff2",
         "assets/silence.mp3",
         "assets/fonts/Booton-Medium.woff2",
-        "assets/badge.svg"
+        "assets/fonts/Booton-Heavy.woff2",
+        "assets/chapter-arc-outer.svg",
+        "assets/chapter-arc-inner.svg"
       ]
     },
     {
@@ -178,7 +180,7 @@
         "assets/fonts/Booton-Regular.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Medium.woff2",
-        "assets/badge.svg"
+        "assets/fonts/Booton-Heavy.woff2"
       ]
     },
     {
@@ -207,7 +209,10 @@
         "assets/fonts/Booton-Regular.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Medium.woff2",
-        "assets/badge.svg"
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2",
+        "assets/chapter-arc-outer.svg",
+        "assets/chapter-arc-inner.svg"
       ]
     },
     {
@@ -236,7 +241,8 @@
         "assets/fonts/Booton-Regular.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Medium.woff2",
-        "assets/badge.svg"
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2"
       ]
     },
     {
@@ -271,10 +277,11 @@
       "assets": [
         "assets/placeholder-camera.mp4",
         "assets/placeholder-audio.mp3",
-        "assets/badge.svg",
         "assets/fonts/Booton-Medium.woff2",
         "assets/fonts/Booton-Regular.woff2",
-        "assets/fonts/Booton-Semibold.woff2"
+        "assets/fonts/Booton-Semibold.woff2",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2"
       ]
     },
     {
@@ -309,10 +316,11 @@
       "assets": [
         "assets/placeholder-camera.mp4",
         "assets/placeholder-audio.mp3",
-        "assets/badge.svg",
         "assets/fonts/Booton-Medium.woff2",
         "assets/fonts/Booton-Regular.woff2",
-        "assets/fonts/Booton-Semibold.woff2"
+        "assets/fonts/Booton-Semibold.woff2",
+        "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2"
       ]
     }
   ]

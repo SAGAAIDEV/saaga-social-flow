@@ -152,6 +152,9 @@ impl SnapshotDelegate {
 /// never settles cannot hold the card forever — and answers with how many
 /// images are still not showing a picture. Zero is the only good answer.
 const AWAIT_IMAGES_JS: &str = r#"
+    // The card's Booton is embedded as data URIs, which decode off the main
+    // thread too: a snapshot taken before they land draws the system font.
+    await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 8000))]);
     const images = Array.from(document.images);
     const decoded = Promise.all(images.map(img => img.decode().catch(() => undefined)));
     const ceiling = new Promise(resolve => setTimeout(resolve, 8000));

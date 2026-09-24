@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use anyhow::{bail, Context, Result};
 
 use super::compose::{Job, Kind, Plan, Segment};
-use super::cut;
+use super::{cut, gpu};
 
 /// HyperFrames' encoder quality for every deliverable this renders: the title
 /// cards spliced into the horizontal longform, and the vertical chapters that
@@ -32,10 +32,17 @@ pub const QUALITY: &str = "high";
 /// chapter is the cut composited and encoded again here, and a second
 /// generation looser than the first undoes the first.
 pub const CRF: &str = "12";
-/// How HyperFrames pulls frames out of the footage it composites: PNG, in place
-/// of the JPEG it picks for anything without alpha, so the cut is not run
-/// through a third lossy codec on its way into Chrome.
-pub const VIDEO_FRAME_FORMAT: &str = "png";
+/// How HyperFrames pulls frames out of the footage it composites: JPEG, at the
+/// extractor's quality 95 (ffmpeg `-q:v 2`).
+///
+/// This was PNG, to keep the cut out of a third lossy codec on its way into
+/// Chrome. That cost more than it bought: a PNG frame of the portrait cut is
+/// about 1.1 MB, so a 158 s chapter extracted to 5 GB. Locally those frames are
+/// injected into Chrome as data URIs, part of what put 8 to 9 GB behind each
+/// render, and a GPU machine writes every frame of a chapter to its disk.
+/// JPEG frames are roughly a tenth the size. Shared by both paths, so a chapter
+/// looks the same wherever it was drawn.
+pub const VIDEO_FRAME_FORMAT: &str = "jpg";
 
 /// Everything about the encode a rendered file depends on, as one line.
 ///
@@ -43,11 +50,12 @@ pub const VIDEO_FRAME_FORMAT: &str = "png";
 /// source of every job, so a change to any of these re-renders everything
 /// exactly once.
 pub fn encoder_stamp() -> String {
-    format!("{QUALITY} crf={CRF} frames={VIDEO_FRAME_FORMAT}")
+    format!("{QUALITY} crf={CRF} frames={VIDEO_FRAME_FORMAT} hyperframes={HF_VERSION}")
 }
-/// Pinned so the cache path, the npx fallback and the preflight check cannot
-/// drift apart into three different renderers.
-pub const HF_VERSION: &str = "0.7.107";
+/// The renderer version, pinned exactly in `renderer/package.json` (a test holds
+/// the two together). Part of [`encoder_stamp`], so moving it re-renders every
+/// composition once rather than leaving a project half on each version.
+pub const HF_VERSION: &str = "0.8.62";
 /// The assembled cut, in whichever orientation's directory it lands.
 pub const LONGFORM: &str = "longform.mp4";
 /// Beside each longform, the list of parts it was joined from.
@@ -74,7 +82,7 @@ struct Task<'a> {
 pub fn render_plan(
     plan: &Plan,
     publish: &Path,
-    status: &dyn Fn(&str),
+    status: &(dyn Fn(&str) + Sync),
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(publish).with_context(|| format!("creating {}", publish.display()))?;
@@ -138,9 +146,28 @@ pub fn render_plan(
     }
     let all = skipped.len() + pending.len();
     progress(skipped.len(), all);
-    render_all(&pending, &|finished| {
-        progress(skipped.len() + finished, all)
-    })?;
+    // Checked once, before anything is dispatched: an expired `aws sso login`
+    // is one message, not one failure per chapter. No fallback to this Mac —
+    // a surprise local render is exactly what the box is there to prevent.
+    let cloud = plan.targets.cloud;
+    let on_done = |finished| progress(skipped.len() + finished, all);
+    match cloud {
+        true if !pending.is_empty() => {
+            status("Checking the AWS sign-in for GPU rendering…");
+            gpu::check_ready()?;
+            let board = Board::new(pending.len(), "on AWS GPU");
+            let tasks: Vec<gpu::Task> = pending
+                .iter()
+                .map(|task| gpu::Task {
+                    workspace: task.workspace,
+                    job: task.job,
+                    dest: &task.dest,
+                })
+                .collect();
+            gpu::render_all(&tasks, &board, status, &on_done)?;
+        }
+        _ => render_all(&pending, status, &on_done)?,
+    }
 
     // The one step after the renders with a wait worth naming: the cards are
     // conformed to the footage and everything is joined. Each longform only
@@ -250,7 +277,14 @@ fn conform_for_concat(plan: &Plan, h_out: &[PathBuf], h_dir: &Path) -> Result<Ve
 /// first. One broken chapter should not hide the state of the other nineteen.
 ///
 /// `on_done` hears how many have finished, success or failure, as each one does.
-fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
+/// `status` carries the same count as words, because a bar alone over a
+/// twenty-minute render reads as a hang. Render on AWS does not come through
+/// here — see [`gpu::render_all`].
+fn render_all(
+    tasks: &[Task],
+    status: &(dyn Fn(&str) + Sync),
+    on_done: &(dyn Fn(usize) + Sync),
+) -> Result<()> {
     if tasks.is_empty() {
         return Ok(());
     }
@@ -265,6 +299,8 @@ fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
 
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
+    let board = Board::new(total, "on this Mac");
+    status(&board.line());
     let alive = AtomicUsize::new(renders);
     let failures: Mutex<Vec<(String, anyhow::Error)>> = Mutex::new(Vec::new());
 
@@ -296,8 +332,12 @@ fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
                     alive.fetch_sub(1, Ordering::Relaxed);
                     break;
                 };
+                board.start(&task.job.id);
+                status(&board.line());
                 let outcome = render_job(task.workspace, task.job, &task.dest, pool.workers);
                 let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+                board.finish(&task.job.id, outcome.is_ok());
+                status(&board.line());
                 on_done(finished);
                 match outcome {
                     Ok(()) => eprintln!(
@@ -334,6 +374,105 @@ fn render_all(tasks: &[Task], on_done: &(dyn Fn(usize) + Sync)) -> Result<()> {
         message.push_str(&format!("\n  - {id}: {err:#}"));
     }
     bail!(message)
+}
+
+/// What the status line says while the pool runs: how many of how many are
+/// done, and each job in flight — with its percentage when the job reports one,
+/// which the GPU machines do from the render's own progress line.
+pub(super) struct Board {
+    total: usize,
+    /// "on this Mac", "on AWS GPU" — where the line says the renders are.
+    place: &'static str,
+    state: Mutex<BoardState>,
+}
+
+#[derive(Default)]
+struct BoardState {
+    done: usize,
+    failed: usize,
+    /// In start order, so the line does not shuffle as jobs report.
+    in_flight: Vec<(String, Option<u8>)>,
+    /// What the whole render is doing besides its jobs — the cloud path's
+    /// "3 GPU machine(s): 2 rendering, 1 installing".
+    note: Option<String>,
+}
+
+impl Board {
+    pub(super) fn new(total: usize, place: &'static str) -> Self {
+        Board {
+            total,
+            place,
+            state: Mutex::new(BoardState::default()),
+        }
+    }
+
+    pub(super) fn note(&self, note: &str) {
+        self.lock().note = Some(note.to_string());
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, BoardState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(super) fn start(&self, id: &str) {
+        self.lock().in_flight.push((id.to_string(), None));
+    }
+
+    /// Records a job's progress; true when the whole percent changed, so the
+    /// status line is only repainted when it would read differently.
+    pub(super) fn advance(&self, id: &str, fraction: f64) -> bool {
+        let percent = (fraction.clamp(0.0, 1.0) * 100.0).floor() as u8;
+        let mut state = self.lock();
+        match state.in_flight.iter_mut().find(|(job, _)| job == id) {
+            Some((_, seen)) if *seen != Some(percent) => {
+                *seen = Some(percent);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn finish(&self, id: &str, ok: bool) {
+        let mut state = self.lock();
+        state.in_flight.retain(|(job, _)| job != id);
+        state.done += 1;
+        if !ok {
+            state.failed += 1;
+        }
+    }
+
+    /// "Rendering on AWS GPU: 2/6 done, 4 left — chapter-02 41%, chapter-03 12%"
+    pub(super) fn line(&self) -> String {
+        let state = self.lock();
+        let mut line = format!(
+            "Rendering {}: {}/{} done, {} left",
+            self.place,
+            state.done,
+            self.total,
+            self.total - state.done
+        );
+        if state.failed > 0 {
+            line.push_str(&format!(" ({} failed)", state.failed));
+        }
+        if let Some(note) = &state.note {
+            line.push_str(&format!(" · {note}"));
+        }
+        if !state.in_flight.is_empty() {
+            let jobs: Vec<String> = state
+                .in_flight
+                .iter()
+                .map(|(id, percent)| match percent {
+                    Some(p) => format!("{id} {p}%"),
+                    None => id.clone(),
+                })
+                .collect();
+            line.push_str(" — ");
+            line.push_str(&jobs.join(", "));
+        }
+        line
+    }
 }
 
 /// Memory kept free for everything that is not the render — the app, the
@@ -613,23 +752,29 @@ fn render_job(workspace: &Path, job: &Job, dest: &Path, workers: usize) -> Resul
             log_tail(&log_path, 3)
         );
     }
+    publish_render(job, &tmp, dest, &log_path)
+}
+
+/// Moves a finished render from `tmp` to `dest`, refusing an empty one, and
+/// drops the log that is only kept for failures.
+fn publish_render(job: &Job, tmp: &Path, dest: &Path, log_path: &Path) -> Result<()> {
     if !tmp.is_file() || tmp.metadata()?.len() == 0 {
-        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(tmp);
         bail!(
             "hyperframes produced no output for {}; see {}{}",
             job.id,
             log_path.display(),
-            log_tail(&log_path, 3)
+            log_tail(log_path, 3)
         );
     }
-    std::fs::rename(&tmp, dest).with_context(|| format!("publishing {}", dest.display()))?;
-    let _ = std::fs::remove_file(&log_path);
+    std::fs::rename(tmp, dest).with_context(|| format!("publishing {}", dest.display()))?;
+    let _ = std::fs::remove_file(log_path);
     Ok(())
 }
 
 /// The last `n` lines of a render log with anything on them, ready to hang off
 /// an error: one indented line each, or nothing when the log is empty or gone.
-fn log_tail(log: &Path, n: usize) -> String {
+pub(super) fn log_tail(log: &Path, n: usize) -> String {
     let Ok(text) = std::fs::read_to_string(log) else {
         return String::new();
     };
@@ -656,22 +801,44 @@ fn tail_lines(text: &str, n: usize) -> Vec<&str> {
     lines
 }
 
-fn hyperframes_command() -> Result<Command> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let cached = PathBuf::from(home)
-            .join(".screencast/cache/hyperframes")
-            .join(HF_VERSION)
-            .join("cli/node_modules/.bin/hyperframes");
-        if cached.is_file() {
-            return Ok(Command::new(cached));
-        }
+/// The repo's `renderer/` package: the pinned HyperFrames CLI in its
+/// `node_modules`.
+///
+/// `CARGO_MANIFEST_DIR` for a checkout, the executable's own directory for an
+/// installed release — the same two places [`super::compose::components_root`]
+/// looks, for the same reason.
+pub fn renderer_root() -> PathBuf {
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("renderer");
+    if checkout.join("package.json").is_file() {
+        return checkout;
     }
-    let mut cmd = Command::new("npx");
-    cmd.args(["--yes", &format!("hyperframes@{HF_VERSION}")]);
-    Ok(cmd)
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("renderer")))
+        .filter(|dir| dir.join("package.json").is_file())
+        .unwrap_or(checkout)
 }
 
-fn command_line(cmd: &Command) -> String {
+/// The installed CLI, which `scripts/setup.sh` puts there with `npm ci`.
+pub fn hyperframes_bin() -> PathBuf {
+    renderer_root().join("node_modules/.bin/hyperframes")
+}
+
+/// No `npx` fallback: the renderer is a dependency of this repo, pinned by its
+/// lockfile, and a render that quietly fetched some other copy would be a
+/// render nobody can reproduce.
+fn hyperframes_command() -> Result<Command> {
+    let bin = hyperframes_bin();
+    if !bin.is_file() {
+        bail!(
+            "the HyperFrames renderer is not installed at {} — run scripts/setup.sh",
+            bin.display()
+        );
+    }
+    Ok(Command::new(bin))
+}
+
+pub(super) fn command_line(cmd: &Command) -> String {
     let mut out = cmd.get_program().to_string_lossy().into_owned();
     for arg in cmd.get_args() {
         out.push(' ');
@@ -684,6 +851,54 @@ fn command_line(cmd: &Command) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// The status line a long cloud render shows: the count, and each job in
+    /// flight with its percentage once it has one.
+    #[test]
+    fn board_line_counts_and_shows_jobs_in_flight() {
+        let board = Board::new(6, "on AWS GPU");
+        assert_eq!(board.line(), "Rendering on AWS GPU: 0/6 done, 6 left");
+        board.start("chapter-02");
+        board.start("chapter-03");
+        assert!(board.advance("chapter-02", 0.415));
+        assert!(
+            !board.advance("chapter-02", 0.419),
+            "same whole percent, no repaint"
+        );
+        assert_eq!(
+            board.line(),
+            "Rendering on AWS GPU: 0/6 done, 6 left — chapter-02 41%, chapter-03"
+        );
+        board.finish("chapter-02", true);
+        board.finish("chapter-03", false);
+        assert_eq!(
+            board.line(),
+            "Rendering on AWS GPU: 2/6 done, 4 left (1 failed)"
+        );
+        assert_eq!(
+            Board::new(1, "on this Mac").line(),
+            "Rendering on this Mac: 0/1 done, 1 left"
+        );
+    }
+
+    /// One version, stated twice: here for the encoder stamp and the doctor,
+    /// in `renderer/package.json` for npm. A bump that moves one and not the
+    /// other would render on a version the stamp does not name.
+    #[test]
+    fn hf_version_matches_the_renderer_package() {
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("renderer/package.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["dependencies"]["hyperframes"].as_str(),
+            Some(HF_VERSION),
+            "hyperframes in renderer/package.json"
+        );
+    }
 
     fn temp(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

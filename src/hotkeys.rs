@@ -24,7 +24,15 @@ pub enum Action {
     /// but the minute. ⌃⌥P, because it is pressed mid-take with the eyes on
     /// whatever is being demonstrated, not on this window.
     TogglePause,
+    /// Close out the open chapter and record a short beside the video — its
+    /// own project, always vertical, see [`crate::shorts`]. From inside a
+    /// short, it goes back to the video instead. ⌃⌥S, because like New Chapter
+    /// it is pressed mid-take with the eyes on the camera.
+    StartShort,
     Notes,
+    /// Suggest shorts from the finished take — see [`crate::agent::shorts`].
+    /// No hotkey: it is pressed after the take, reading the notes pane.
+    SuggestShorts,
     /// Put every transcribed chapter on the pasteboard. No hotkey: it is a
     /// reach for something outside this app, always with a hand already on the
     /// mouse, and a global chord that overwrites the pasteboard is a bad
@@ -140,6 +148,7 @@ impl Hotkeys {
             (BASE, Code::KeyC, Action::NewChapter),
             (BASE, Code::KeyT, Action::Retake),
             (BASE, Code::KeyP, Action::TogglePause),
+            (BASE, Code::KeyS, Action::StartShort),
             (SNIP, Code::KeyS, Action::CaptureFigure),
         ];
         let mut by_id = HashMap::new();

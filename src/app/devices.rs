@@ -148,7 +148,12 @@ impl App {
             );
             return;
         };
-        match screen_stream::ScreenConnection::start_capture(&uid, Some(capture), self.show_app) {
+        match screen_stream::ScreenConnection::start_capture(
+            &uid,
+            Some(capture),
+            self.show_app,
+            !self.hide_mouse,
+        ) {
             Ok(connection) => {
                 // Not fatal: an idle display legitimately sends nothing, and
                 // the stream is still live and will deliver once something on
@@ -197,6 +202,36 @@ impl App {
         cfg.show_app_in_capture = on;
         if let Err(e) = crate::config::save(&cfg) {
             eprintln!("stream-recorder: could not save the show-app setting: {e:#}");
+        }
+    }
+
+    /// The Hide Mouse checkbox moved: stop drawing the pointer into the screen
+    /// recording, or start again.
+    ///
+    /// Handled like [`set_show_app`](App::set_show_app): applied to the running
+    /// stream on the spot, mid-chapter included, and remembered for the next
+    /// launch and the next `open_screen`.
+    pub(super) fn set_hide_mouse(&mut self, on: bool) {
+        if self.hide_mouse == on {
+            return;
+        }
+        self.hide_mouse = on;
+        if let Some(screen) = self.screen.as_mut() {
+            if let Err(e) = screen.set_show_cursor(!on) {
+                eprintln!(
+                    "stream-recorder: could not {} the pointer in the screen capture: {e:#}",
+                    if on { "hide" } else { "show" }
+                );
+            }
+        }
+        println!(
+            "stream-recorder: the pointer is {} the screen recording",
+            if on { "out of" } else { "in" }
+        );
+        let mut cfg = crate::config::load();
+        cfg.hide_cursor_in_capture = on;
+        if let Err(e) = crate::config::save(&cfg) {
+            eprintln!("stream-recorder: could not save the hide-mouse setting: {e:#}");
         }
     }
 

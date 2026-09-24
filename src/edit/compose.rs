@@ -17,7 +17,6 @@ pub const CARD_SECONDS: f64 = 3.0;
 /// on disk stayed at the old setting for as long as the project lived.
 pub const QUALITY_FILE: &str = "render-quality.txt";
 pub const OPENER_SECONDS: f64 = 2.6;
-const HF_VERSION: &str = "0.7.107";
 
 const HYPERFRAMES_JSON: &str = r#"{
   "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
@@ -200,14 +199,17 @@ pub fn prepare_targets(
             "compositions/chapter-title-card.html",
             "compositions/outline-horizontal.html",
             "assets/pattern-rings.svg",
-            // The mark in the middle of the card's separator. Missing, the card
-            // renders a broken image and says nothing about it.
-            "assets/badge.svg",
+            // The chapter card's two peach arcs. Missing, the card renders
+            // broken images and says nothing about it.
+            "assets/chapter-arc-outer.svg",
+            "assets/chapter-arc-inner.svg",
             "assets/silence.mp3",
             "assets/fonts/Booton-Regular.woff2",
             "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
+            // The chapter number. Missing, it falls back to Bold silently.
+            "assets/fonts/Booton-Heavy.woff2",
         ],
     )?;
     copy_library(
@@ -216,11 +218,11 @@ pub fn prepare_targets(
         &[
             "compositions/talking-head-vertical.html",
             "compositions/outline-vertical.html",
-            "assets/badge.svg",
             "assets/fonts/Booton-Regular.woff2",
             "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
+            "assets/fonts/Booton-Heavy.woff2",
         ],
     )?;
 
@@ -310,7 +312,8 @@ fn write_workspace(root: &Path, width: u32, height: u32) -> Result<()> {
     std::fs::write(root.join("hyperframes.json"), HYPERFRAMES_JSON)
         .with_context(|| format!("writing {}", root.join("hyperframes.json").display()))?;
     let package = format!(
-        "{{\n  \"name\": \"stream-recorder-compose\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"render\": \"npx --yes hyperframes@{HF_VERSION} render\"\n  }}\n}}\n"
+        "{{\n  \"name\": \"stream-recorder-compose\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"render\": \"npx --yes hyperframes@{} render\"\n  }}\n}}\n",
+        super::render::HF_VERSION
     );
     std::fs::write(root.join("package.json"), package)?;
     std::fs::write(root.join("index.html"), blank_index(width, height))?;
@@ -434,13 +437,14 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
         id: id.to_string(),
         kind: Kind::Card,
         composition: format!("compositions/{id}.html"),
-        // The badge is declared a source as well as the markup: it is drawn on
-        // every card, so a new one has to re-render them rather than leaving the
-        // old logo on disk looking current.
+        // The arcs are declared sources as well as the markup: they are drawn
+        // on every card, so new ones have to re-render them rather than leaving
+        // the old artwork on disk looking current.
         sources: vec![
             wrapper,
             baked,
-            workspace.join("assets/badge.svg"),
+            workspace.join("assets/chapter-arc-outer.svg"),
+            workspace.join("assets/chapter-arc-inner.svg"),
             workspace.join(QUALITY_FILE),
         ],
     })
@@ -575,7 +579,6 @@ fn write_footage_chapter(
             baked,
             workspace.join(camera),
             workspace.join(&audio),
-            workspace.join("assets/badge.svg"),
             workspace.join(QUALITY_FILE),
         ],
     })
@@ -795,7 +798,9 @@ mod tests {
         )
         .unwrap();
         std::fs::create_dir_all(library.join("assets")).unwrap();
-        std::fs::write(library.join("assets/badge.svg"), b"<svg/>").unwrap();
+        for arc in ["chapter-arc-outer", "chapter-arc-inner"] {
+            std::fs::write(library.join(format!("assets/{arc}.svg")), b"<svg/>").unwrap();
+        }
         for n in 1..=2 {
             let chapter = edit.join(format!("chapter-{n:02}"));
             std::fs::create_dir_all(&chapter).unwrap();
@@ -905,6 +910,7 @@ mod tests {
             horizontal: true,
             vertical: false,
             shorts: false,
+            cloud: false,
         });
         match horizontal_only {
             Ok(plan) => {
@@ -922,6 +928,7 @@ mod tests {
             horizontal: false,
             vertical: false,
             shorts: false,
+            cloud: false,
         };
         let plan = plan(no_horizontal).unwrap();
         assert!(plan.h_segments.is_empty());
@@ -966,17 +973,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
-    /// The card's separator mark is an `<img src="assets/badge.svg">`, so the
-    /// asset has to travel with it. Left behind, the card still renders — with a
-    /// broken image where the logo should be, and nothing in the log to say so.
+    /// The card's arcs are `<img>`s, so the assets have to travel with it.
+    /// Left behind, the card still renders — with broken images where the
+    /// arcs should be, and nothing in the log to say so.
     #[test]
-    fn the_badge_the_card_draws_travels_into_the_workspace() {
-        let (library, edit, compose) = fixture("badge");
+    fn the_arcs_the_card_draws_travel_into_the_workspace() {
+        let (library, edit, compose) = fixture("arcs");
         prepare(&edit, &compose, &library, &[(1u32, "Only".into())]).unwrap();
-        assert!(
-            compose.join("horizontal/assets/badge.svg").is_file(),
-            "the separator mark is missing from the workspace"
-        );
+        for arc in ["chapter-arc-outer", "chapter-arc-inner"] {
+            assert!(
+                compose
+                    .join(format!("horizontal/assets/{arc}.svg"))
+                    .is_file(),
+                "{arc} is missing from the workspace"
+            );
+        }
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
@@ -1031,12 +1042,14 @@ mod library_tests {
             "compositions/outline-horizontal.html",
             "compositions/outline-vertical.html",
             "assets/pattern-rings.svg",
-            "assets/badge.svg",
+            "assets/chapter-arc-outer.svg",
+            "assets/chapter-arc-inner.svg",
             "assets/silence.mp3",
             "assets/fonts/Booton-Regular.woff2",
             "assets/fonts/Booton-Medium.woff2",
             "assets/fonts/Booton-Semibold.woff2",
             "assets/fonts/Booton-Bold.woff2",
+            "assets/fonts/Booton-Heavy.woff2",
         ] {
             assert!(
                 library.join(rel).is_file(),
@@ -1128,15 +1141,17 @@ mod library_tests {
         // destination is what proves the library actually carried them.
         for rel in [
             "horizontal/compositions/chapter-title-card.html",
-            "horizontal/assets/badge.svg",
+            "horizontal/assets/chapter-arc-outer.svg",
+            "horizontal/assets/chapter-arc-inner.svg",
             "horizontal/assets/pattern-rings.svg",
             "horizontal/assets/silence.mp3",
             "horizontal/assets/fonts/Booton-Regular.woff2",
             "horizontal/assets/fonts/Booton-Medium.woff2",
+            "horizontal/assets/fonts/Booton-Heavy.woff2",
             "vertical/compositions/talking-head-vertical.html",
-            "vertical/assets/badge.svg",
             "vertical/assets/fonts/Booton-Medium.woff2",
             "vertical/assets/fonts/Booton-Bold.woff2",
+            "vertical/assets/fonts/Booton-Heavy.woff2",
         ] {
             assert!(
                 compose.join(rel).is_file(),

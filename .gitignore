@@ -38,3 +38,13 @@ debug/
 *.decrypted.env
 dev.env
 prd.env
+
+# Node dependencies of renderer/ — installed by scripts/setup.sh (npm ci)
+node_modules/
+
+# Terraform: providers and plans are local; .terraform.lock.hcl is committed.
+.terraform/
+tfplan
+
+# Python bytecode from checking infra/gpu-render/worker locally.
+__pycache__/

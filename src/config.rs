@@ -130,6 +130,15 @@ pub struct Config {
     /// regions for that take.
     #[serde(default)]
     pub show_app_in_capture: bool,
+    /// Whether the pointer is left out of the screen recording.
+    ///
+    /// Off by default: on a screencast the pointer is usually where the
+    /// operator is pointing, and Track Mouse frames on it. On is for a take
+    /// where it is only in the way — a slide deck, a video playing. Tracking
+    /// still works with it hidden; it reads the pointer's position, not the
+    /// pixels.
+    #[serde(default)]
+    pub hide_cursor_in_capture: bool,
     /// YouTube category for queued posts, as YouTube's own numeric id.
     ///
     /// Buffer rejects a YouTube post that has none — "YouTube posts require a
@@ -736,6 +745,21 @@ fn path() -> Result<PathBuf> {
         .join("config.json"))
 }
 
+/// The Render outputs for `session`: the saved boxes, or a short's fixed set —
+/// see [`RenderTargets::for_session`]. What every stage that renders, uploads
+/// or gates on a render reads.
+pub fn render_targets(session: &crate::session::Session) -> RenderTargets {
+    let mut targets = load().render.for_session(session);
+    // `stream-recorder render --cloud`: one run on AWS without touching the box.
+    if std::env::var_os(CLOUD_OVERRIDE).is_some() {
+        targets.cloud = true;
+    }
+    targets
+}
+
+/// Set by `stream-recorder render --cloud` for its own process only.
+pub const CLOUD_OVERRIDE: &str = "SAAGA_RENDER_CLOUD";
+
 pub fn load() -> Config {
     let mut config: Config = path()
         .ok()
@@ -1017,6 +1041,12 @@ pub struct RenderTargets {
     pub vertical: bool,
     #[serde(default = "enabled_by_default")]
     pub shorts: bool,
+    /// Not an output but where the outputs are drawn: on GPU machines in AWS
+    /// (see `edit::gpu`) rather than this Mac. Off unless ticked — the cloud needs a deployed stack and a live
+    /// `aws sso login`, and a render that silently fell back to local would be
+    /// the very memory spike this box exists to avoid.
+    #[serde(default)]
+    pub cloud: bool,
 }
 
 impl Default for RenderTargets {
@@ -1025,11 +1055,31 @@ impl Default for RenderTargets {
             horizontal: true,
             vertical: true,
             shorts: true,
+            cloud: false,
         }
     }
 }
 
 impl RenderTargets {
+    /// What a render of `session` produces: the boxes, unless it is a short.
+    ///
+    /// A short is always vertical — that is what it is for — so its outputs are
+    /// fixed rather than read from boxes set for the video around it: the
+    /// vertical longform, which is what goes up to YouTube as the Short, and
+    /// its chapter clip, which is what S3 and Buffer carry. Only where it is
+    /// drawn follows the box.
+    pub fn for_session(self, session: &crate::session::Session) -> RenderTargets {
+        if !session.is_short() {
+            return self;
+        }
+        RenderTargets {
+            horizontal: false,
+            vertical: true,
+            shorts: true,
+            cloud: self.cloud,
+        }
+    }
+
     /// Whether Render has anything to do at all.
     pub fn any(self) -> bool {
         self.horizontal || self.vertical || self.shorts
@@ -1048,6 +1098,7 @@ impl RenderTargets {
             "horizontal" => self.horizontal = on,
             "vertical" => self.vertical = on,
             "shorts" => self.shorts = on,
+            "cloud" => self.cloud = on,
             _ => return false,
         }
         true
@@ -1058,7 +1109,8 @@ impl RenderTargets {
         match name {
             "horizontal" => "the horizontal longform",
             "vertical" => "the vertical longform",
-            "shorts" => "the shorts",
+            "shorts" => "the chapter clips",
+            "cloud" => "rendering on AWS GPU machines",
             other => other,
         }
     }
@@ -1067,6 +1119,35 @@ impl RenderTargets {
 #[cfg(test)]
 mod render_target_tests {
     use super::*;
+
+    /// A short is vertical whatever the boxes say, and still draws where the
+    /// cloud box says.
+    #[test]
+    fn a_short_renders_vertical_whatever_the_boxes_say() {
+        let session = |root: &str| crate::session::Session {
+            root: std::path::PathBuf::from(root),
+            dir: std::path::PathBuf::from(root).join("drafts/v1"),
+            version: Some(1),
+        };
+        let boxes = RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: false,
+            cloud: true,
+        };
+        let video = session("/x/sessions/2026-09-22_10-00-00");
+        assert_eq!(boxes.for_session(&video), boxes);
+        let short = session("/x/sessions/2026-09-22_10-00-00/shorts/short-01");
+        assert_eq!(
+            boxes.for_session(&short),
+            RenderTargets {
+                horizontal: false,
+                vertical: true,
+                shorts: true,
+                cloud: true,
+            }
+        );
+    }
 
     /// A config written before the boxes existed reads as all three on, which
     /// is what every render did until now.
@@ -1081,7 +1162,8 @@ mod render_target_tests {
             RenderTargets {
                 horizontal: true,
                 vertical: true,
-                shorts: false
+                shorts: false,
+                cloud: false,
             }
         );
     }
@@ -1099,7 +1181,7 @@ mod render_target_tests {
         assert!(targets.set("horizontal", false));
         assert!(!targets.any());
         assert!(!targets.set("audio", true));
-        assert_eq!(RenderTargets::label("shorts"), "the shorts");
+        assert_eq!(RenderTargets::label("shorts"), "the chapter clips");
     }
 }
 

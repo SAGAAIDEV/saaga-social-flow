@@ -18,8 +18,8 @@ mod picker;
 mod transcribe;
 mod view;
 
-pub(crate) use deck::Chapter;
 pub use deck::{load as load_notes, NotesData};
+pub(crate) use deck::{render_as as render_deck, write_as as write_deck, Chapter};
 pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
 pub use picker::Picker;
 pub(crate) use transcribe::record_failure as record_transcript_failure;
@@ -39,6 +39,8 @@ pub enum NotesEvent {
     Ready(PathBuf),
     /// Notes failed because nothing was said — see [`NoSpeech`].
     NoSpeech(NoSpeech),
+    /// The suggest-shorts pass wrote its deck — see [`spawn_suggest_shorts`].
+    Shorts(PathBuf),
 }
 
 /// Every closed chapter finished transcribing and none produced a word.
@@ -431,6 +433,71 @@ pub fn spawn_notes(
     {
         eprintln!("stream-recorder: could not start notes job: {err}");
     }
+}
+
+/// Suggest shorts from this take on a background thread: every closed
+/// chapter's transcript, once each has landed, into [`crate::agent::shorts`].
+/// Sends status on the notes channel, then the suggestions deck.
+///
+/// The finished take rather than the rehearsal the notes read: what is worth a
+/// Short of its own is clearest once the video has actually been said.
+pub fn spawn_suggest_shorts(
+    session: Session,
+    title: String,
+    model: String,
+    provider: Option<String>,
+    tx: Sender<NotesEvent>,
+) {
+    if let Err(err) = thread::Builder::new()
+        .name("suggest-shorts".into())
+        .spawn(
+            move || match suggest_shorts(&session, &title, &model, provider.as_deref(), &tx) {
+                Ok(html) => {
+                    eprintln!("stream-recorder: shorts suggested → {}", html.display());
+                    let _ = tx.send(NotesEvent::Shorts(html));
+                }
+                Err(err) => {
+                    eprintln!("stream-recorder: suggest shorts failed: {err:#}");
+                    let event = match err.downcast::<NoSpeech>() {
+                        Ok(why) => NotesEvent::NoSpeech(why),
+                        Err(err) => NotesEvent::Status(format!("Suggest Shorts failed: {err:#}")),
+                    };
+                    let _ = tx.send(event);
+                }
+            },
+        )
+    {
+        eprintln!("stream-recorder: could not start the suggest-shorts job: {err}");
+    }
+}
+
+fn suggest_shorts(
+    session: &Session,
+    title: &str,
+    model: &str,
+    provider: Option<&str>,
+    tx: &Sender<NotesEvent>,
+) -> Result<PathBuf> {
+    let _ = tx.send(NotesEvent::Status(
+        "Waiting for chapter transcripts…".into(),
+    ));
+    prepare_transcripts(&session.dir, &[])?;
+    let chapters = wait_for_closed_transcripts(&session.dir, tx)?;
+    let _ = tx.send(NotesEvent::Status(format!(
+        "Suggesting shorts from {} chapter(s)…",
+        chapters.len()
+    )));
+    let (suggestions, step) = crate::agent::shorts::suggest_shorts(
+        &chapters,
+        title,
+        session.version,
+        model,
+        provider,
+        Some(&session.root),
+    )?;
+    let dir = session.root.join(crate::shorts::SHORTS_DIR);
+    crate::agent::trace::write_step(&dir, &session.root, &step)?;
+    crate::shorts::save_suggestions(&session.root, title, &suggestions)
 }
 
 fn build_notes(

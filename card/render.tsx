@@ -32,8 +32,8 @@ Reads a JSON object on stdin:
   focus        optional, 0..1, where across the still the subject sits (centred in the box)
   focusY       optional, 0..1, where down the still the subject sits
   photoSize    optional, [width, height] of the still in pixels — needed to centre the point
-  theme        optional, "dark" (default) or "light"
-  kicker       optional, small orange word above the title
+  theme        optional, "light" (default, the chapter card's look) or "dark"
+  kicker       optional, small muted word above the rule and title
   format       optional, "horizontal" (default) or "vertical"
   width/height optional, output pixels (default ${BASE_W}x${BASE_H})`);
   process.exit(2);

@@ -168,6 +168,7 @@ mod tests {
             horizontal: true,
             vertical: true,
             shorts: true,
+            cloud: false,
         }
     }
 

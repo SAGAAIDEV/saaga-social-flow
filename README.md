@@ -20,6 +20,9 @@ A native macOS screen, camera, and microphone recorder built for social content 
 - **macOS 12+** (uses ScreenCaptureKit, AVFoundation)
 - **Xcode Command Line Tools** (for building)
 - **Rust 1.70+** (install via [rustup](https://rustup.rs/))
+- **ffmpeg** (`brew install ffmpeg`). Every chapter goes through it before it can be
+  transcribed or rendered. `scripts/setup.sh` installs it, and the app installs it
+  through Homebrew at launch if it is missing, with a banner while it runs.
 
 ## Installation
 
@@ -119,6 +122,27 @@ The S3 upload is native (`distribute::s3`): `S3_BUCKET` comes from the team
 file, the optional `S3_REGION`, `S3_PREFIX`, `S3_PUBLIC_BASE_URL`,
 `S3_ENDPOINT_URL` and `S3_PUBLIC_ACL` from `.env`, and credentials from your
 AWS profile — `AWS_PROFILE=dev` in `.env` plus `aws sso login --profile dev`.
+Every AWS call falls back to the `dev` profile when `AWS_PROFILE` is unset.
+
+### Render on AWS GPU
+
+Tick **Render on AWS GPU** above the Render button to draw the renders on GPU
+machines in AWS instead of this Mac. Anyone with the team's `dev` SSO sign-in can
+use it — nothing else to configure:
+
+1. `aws sso login --profile dev` (Render says so if the session has expired).
+2. Tick the box and press Render.
+
+Render uploads the footage S3 does not already have, starts one NVIDIA T4
+machine per chapter (up to eight), downloads each chapter as it finishes and
+joins the longforms here as before — about as long as the longest chapter plus
+two to three minutes to start. Every machine is terminated when the render ends
+and powers itself off after 90 minutes regardless.
+
+The AWS side is `infra/gpu-render` (Terraform; `terraform apply` there after
+changing the worker scripts or the renderer version). `terraform output
+running` lists machines up now; `terraform output stop_all` stops them all.
+`cargo run -- render <project folder> --cloud` runs a render without the window.
 
 YouTube is the one credential that stays personal in all cases — the OAuth
 client is shared, but each person signs in as themselves with **Connect** on the

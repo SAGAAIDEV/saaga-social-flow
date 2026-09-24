@@ -290,7 +290,7 @@ fn run(session: &Session, tx: &Sender<DistributeEvent>) -> Result<(PathBuf, Dist
     let status = |msg: &str| {
         let _ = tx.send(DistributeEvent::Status(msg.to_string()));
     };
-    let targets = crate::config::load().render;
+    let targets = crate::config::render_targets(session);
     let wanted = wanted_videos(session);
     let assets = collect_assets(
         &session.render_dir(),
@@ -302,7 +302,7 @@ fn run(session: &Session, tx: &Sender<DistributeEvent>) -> Result<(PathBuf, Dist
     if assets.is_empty() {
         if !targets.horizontal && !targets.shorts {
             bail!(
-                "the horizontal longform and the shorts are both switched off above the Render \
+                "the horizontal longform and the chapter clips are both switched off above the Render \
                  button — nothing to upload"
             );
         }
@@ -507,6 +507,7 @@ mod tests {
             horizontal: true,
             vertical: true,
             shorts: false,
+            cloud: false,
         };
         let ids: Vec<String> = collect_assets(&render, &drafts, &root, no_shorts, &[])
             .unwrap()
@@ -520,6 +521,7 @@ mod tests {
             horizontal: false,
             vertical: true,
             shorts: true,
+            cloud: false,
         };
         let ids: Vec<String> = collect_assets(&render, &drafts, &root, no_longform, &[])
             .unwrap()
@@ -737,6 +739,7 @@ mod check_tests {
             horizontal: true,
             vertical: true,
             shorts: true,
+            cloud: false,
         }
     }
 
@@ -926,6 +929,7 @@ mod check_tests {
             horizontal: false,
             vertical: false,
             shorts: false,
+            cloud: false,
         };
         let got = check(&session, none);
         assert!(got.rows.is_empty());

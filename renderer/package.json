@@ -1,0 +1,12 @@
+{
+  "name": "stream-recorder-renderer",
+  "private": true,
+  "type": "module",
+  "description": "The HyperFrames CLI this app drives for local renders. Pinned exactly; must match HF_VERSION in src/edit/render.rs. Render on AWS installs the same version on its GPU machines (infra/gpu-render/worker/setup.sh).",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "hyperframes": "0.8.62"
+  }
+}

@@ -38,6 +38,7 @@ mod capture;
 mod card;
 mod cli;
 mod config;
+mod deps;
 mod distribute;
 mod edit;
 mod face;
@@ -63,6 +64,7 @@ mod schedule;
 mod session;
 mod sessions;
 mod settings;
+mod shorts;
 mod stage;
 mod substack;
 mod thumbnail;
@@ -124,6 +126,9 @@ pub(crate) fn load_dotenv() {
 }
 
 fn main() -> Result<()> {
+    // First, before any thread: a Finder or Dock launch has no Homebrew on
+    // PATH, and ffmpeg, sops and npx all live there.
+    deps::extend_path();
     let args = Args::parse();
     // The recorder only, and first, so the team-credentials line below lands
     // in the file too. A subcommand prints for the terminal it was run from.
@@ -152,6 +157,11 @@ fn main() -> Result<()> {
         match command {
             Command::Credentials => return settings::report(&mut std::io::stdout()),
             Command::Doctor => return preflight::report(&mut std::io::stdout()),
+            Command::Render {
+                project,
+                version,
+                cloud,
+            } => return edit::render_headless(project, *version, *cloud),
             Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,

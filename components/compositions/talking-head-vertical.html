@@ -31,10 +31,27 @@
             src: url('assets/fonts/Booton-Semibold.woff2') format('woff2');
             font-weight: 600; font-style: normal; font-display: block;
           }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Bold.woff2') format('woff2');
+            font-weight: 700; font-style: normal; font-display: block;
+          }
+          @font-face {
+            font-family: 'Booton';
+            src: url('assets/fonts/Booton-Heavy.woff2') format('woff2');
+            font-weight: 800; font-style: normal; font-display: block;
+          }
           #root {
-            --chapter-width: 888px;
-            --chapter-padding: 104px 80px;
-            --chapter-title-size: 112px;
+            /* Figma "Chapter Card", VerticalDemo (node 67:1011), drawn at 375
+               wide: every size here is its value x2.88. */
+            --chapter-width: 902px;
+            --chapter-padding: 0 89px;
+            --chapter-gap: 40px;
+            --chapter-meta-gap: 26px;
+            --chapter-label-size: 64px;
+            --chapter-number-size: 292px;
+            --chapter-rule-width: 648px;
+            --chapter-title-size: 104px;
             --chapter-accent: var(--saaga-orange);
             --chapter-text: var(--saaga-ink);
             /* SAAGA video theme — see components/design.md.
@@ -94,86 +111,103 @@
              with the existing plate motion. */
           /* chapter-style:start */
           /* Shared chapter typography. Embedded into each template by sync-chapters.mjs;
-             no stylesheet fetch is required in generated render workspaces. */
+             no stylesheet fetch is required in generated render workspaces.
+             Figma: "Video Layouts and Thumbnails", Chapter Card section (node 67:987).
+             Defaults are the landscape card; portrait templates override the sizes. */
           .chapter-heading {
             box-sizing: border-box;
             width: 100%;
-            max-width: var(--chapter-width, 1440px);
+            max-width: var(--chapter-width, 1000px);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: var(--chapter-gap, 33px);
             text-align: left;
             color: var(--chapter-text, var(--saaga-ink));
           }
+          /* CHAPTER over the number, centred on it, the pair left-aligned as a block. */
           .chapter-meta {
             display: flex;
+            flex-direction: column;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-bottom: 32px;
-            color: var(--chapter-accent, var(--saaga-orange));
+            gap: var(--chapter-meta-gap, 16px);
           }
           .chapter-label {
-            font-size: 40px;
+            color: var(--chapter-muted, #555554);
+            font-size: var(--chapter-label-size, 41px);
             font-weight: 500;
-            line-height: 1.2;
-            letter-spacing: 0.08em;
+            line-height: normal;
             text-transform: uppercase;
             overflow-wrap: anywhere;
           }
           .chapter-number {
-            flex: none;
-            box-sizing: border-box;
-            min-width: 84px;
-            padding: 10px 18px;
-            border: 1px solid currentColor;
-            border-radius: 10px;
-            font-size: 40px;
-            font-weight: 500;
+            color: var(--chapter-accent, var(--saaga-orange));
+            font-size: var(--chapter-number-size, 188px);
+            font-weight: 800;
             font-variant-numeric: tabular-nums;
-            line-height: 1;
-            letter-spacing: -0.02em;
-            text-align: center;
+            line-height: 1.11;
+            white-space: nowrap;
+          }
+          .chapter-signature {
+            display: block;
+            width: var(--chapter-rule-width, 392px);
+            max-width: 100%;
+          }
+          .chapter-rule {
+            display: block;
+            width: 100%;
+            height: var(--chapter-rule-weight, 2px);
+            background: var(--chapter-accent, var(--saaga-orange));
+            transform-origin: left center;
           }
           .chapter-topic {
             margin: 0;
             max-width: 100%;
             color: var(--chapter-text, var(--saaga-ink));
-            font-size: var(--chapter-title-size, 144px);
-            font-weight: 600;
-            line-height: 1.1;
-            letter-spacing: -0.035em;
+            font-size: var(--chapter-title-size, 107px);
+            font-weight: 700;
+            line-height: 1.11;
             overflow-wrap: anywhere;
             text-wrap: balance;
           }
           .chapter-topic:empty { display: none; }
-          .chapter-signature {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            width: 100%;
-            margin-top: 32px;
-          }
-          .chapter-rule {
-            display: block;
-            width: 120px;
-            height: 4px;
-            background: var(--chapter-accent, var(--saaga-orange));
-            transform-origin: left center;
-          }
-          .chapter-mark {
-            display: block;
-            width: 48px;
-            height: 48px;
-            flex: none;
-          }
-          /* A paper chapter surface, shared by the footage openers. The existing plate
-             exit carries the surface and its type away together. */
+          /* The chapter surface shared by the footage openers: the card's own layout,
+             on the orientation's surface. The existing plate exit carries the surface
+             and its type away together. */
           .chapter-heading.chapter-opener {
             max-width: none;
             height: 100%;
-            padding: var(--chapter-padding, 96px 144px);
-            display: flex;
-            flex-direction: column;
+            padding: var(--chapter-padding, 0 0 154px 122px);
             justify-content: center;
-            background: var(--saaga-paper);
+            background: var(--chapter-surface, #fdeee6);
+          }
+          .chapter-heading.chapter-opener > * { max-width: var(--chapter-width, 1000px); }
+          /* The outline card's heading (Figma "Topic Card", option 2): the number and
+             label in one orange-outlined pill, then the title with a short rule under
+             it. Flex order puts the rule after the title without a second markup. */
+          .chapter-heading.chapter-pill { gap: 0; }
+          .chapter-pill .chapter-meta {
+            flex-direction: row-reverse;
+            gap: var(--chapter-pill-gap, 16px);
+            padding: 0 var(--chapter-pill-pad, 28px);
+            border: var(--chapter-pill-border, 1px) solid var(--chapter-accent, var(--saaga-orange));
+            border-radius: 999px;
+            margin-bottom: var(--chapter-pill-after, 58px);
+          }
+          .chapter-pill .chapter-label {
+            font-size: var(--chapter-label-size, 45px);
+            font-weight: 600;
+          }
+          .chapter-pill .chapter-number {
+            font-size: var(--chapter-number-size, 65px);
+            font-weight: 600;
+            line-height: normal;
+          }
+          .chapter-pill .chapter-topic { order: 1; }
+          .chapter-pill .chapter-signature {
+            order: 2;
+            width: var(--chapter-rule-width, 215px);
+            margin-top: var(--chapter-rule-before, 22px);
           }
           /* chapter-style:end */
         </style>
@@ -194,11 +228,10 @@
               <div data-hf-id="hf-thoplb" id="th-opener-label" class="chapter-label" data-var-text="chapterLabel">Chapter</div>
               <div data-hf-id="hf-thopnm" id="th-opener-number" class="chapter-number" data-var-text="chapterNumber">01</div>
             </div>
-            <div data-hf-id="hf-thoptp" id="th-opener-topic" class="chapter-topic" data-var-text="chapterTopic">The New Workflow</div>
             <div data-hf-id="hf-thoprl" id="th-opener-rule" class="chapter-signature" aria-hidden="true">
               <span data-hf-id="hf-thoprll" id="th-opener-rule-left" class="chapter-rule"></span>
-              <img data-hf-id="hf-thoprm" id="th-opener-rule-mark" class="chapter-mark" src="assets/badge.svg" alt="">
             </div>
+            <div data-hf-id="hf-thoptp" id="th-opener-topic" class="chapter-topic" data-var-text="chapterTopic">The New Workflow</div>
           </div>
         </div>
 
@@ -218,18 +251,20 @@
                   { autoAlpha: 0, y: 14 },
                   { autoAlpha: 1, y: 0, duration: 0.36 * beat, ease: 'power3.out' },
                   0.04 * beat);
-                tl.fromTo(options.title,
-                  { autoAlpha: 0, y: 28 },
-                  { autoAlpha: 1, y: 0, duration: 0.5 * beat, ease: 'power3.out' },
-                  0.12 * beat);
+                // The rule sits between the number and the title, so it draws first and
+                // the title rises in beneath it.
                 tl.fromTo(options.signature,
                   { autoAlpha: 0, y: 0 },
                   { autoAlpha: 1, y: 0, duration: 0.3 * beat, ease: 'power2.out' },
-                  0.22 * beat);
+                  0.12 * beat);
                 tl.fromTo(options.rule,
                   { scaleX: 0 },
                   { scaleX: 1, duration: 0.48 * beat, ease: 'power3.out' },
-                  0.22 * beat);
+                  0.12 * beat);
+                tl.fromTo(options.title,
+                  { autoAlpha: 0, y: 28 },
+                  { autoAlpha: 1, y: 0, duration: 0.5 * beat, ease: 'power3.out' },
+                  0.2 * beat);
               } else {
                 // Footage openers and holdFromStart cards remain readable in frame zero.
                 tl.set(elements, { autoAlpha: 1, y: 0 }, 0);

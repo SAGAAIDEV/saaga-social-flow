@@ -84,6 +84,10 @@ pub struct ScreenConnection {
     /// overlay appearing mid-take rebuilds the filter the way the operator
     /// left the switch rather than the way the stream was started.
     show_self: bool,
+    /// Whether the pointer is drawn into the frames. Restated on every
+    /// configuration rebuild — [`set_capture`](ScreenConnection::set_capture)
+    /// included — so a reframe cannot quietly bring a hidden pointer back.
+    show_cursor: bool,
     /// The display this is capturing, so a caller can size a new region
     /// without re-deriving the backing scale.
     pub geometry: DisplayGeometry,
@@ -114,10 +118,13 @@ impl ScreenConnection {
     ///
     /// `show_self` puts this process's own windows in the shot instead of
     /// keeping them out — see [`super::screen_filter`] for when that is wanted.
+    /// `show_cursor` draws the pointer into the frames; off is the Hide Mouse
+    /// switch.
     pub fn start_capture(
         display_uid: &str,
         capture: Option<Capture>,
         show_self: bool,
+        show_cursor: bool,
     ) -> Result<ScreenConnection> {
         let target: u32 = display_uid
             .parse()
@@ -132,22 +139,8 @@ impl ScreenConnection {
             own_windows
         };
         let filter = content_filter(&display, &excluded);
-        let config = unsafe { SCStreamConfiguration::new() };
-        let (width, height) = apply_capture(&config, capture, (full_width, full_height));
-        unsafe {
-            // CMTime(1, FPS) is an interval, i.e. the *fastest* rate allowed.
-            config.setMinimumFrameInterval(objc2_core_media::CMTime {
-                value: 1,
-                timescale: FPS,
-                flags: objc2_core_media::CMTimeFlags::Valid,
-                epoch: 0,
-            });
-            config.setShowsCursor(true);
-            // Match the camera path's pixel layout: 4:2:0 bi-planar video
-            // range is what the hardware H.264 encoder consumes natively, so
-            // the encoder does not pay for a BGRA conversion on every frame.
-            config.setPixelFormat(u32::from_be_bytes(*b"420v"));
-        }
+        let (config, width, height) =
+            stream_configuration(capture, (full_width, full_height), show_cursor);
 
         // Writerless, and graphless with it: the op graph arrives per chapter
         // inside the `ScreenState` the Router installs.
@@ -180,6 +173,7 @@ impl ScreenConnection {
             _queue: queue,
             display,
             show_self,
+            show_cursor,
             geometry,
             capture,
             width,
@@ -207,18 +201,7 @@ impl ScreenConnection {
     /// keeps this from drifting away from `start_capture`.
     pub fn set_capture(&mut self, capture: Option<Capture>) -> Result<()> {
         let full = display_pixel_size(&self.display, &self.geometry);
-        let config = unsafe { SCStreamConfiguration::new() };
-        let (width, height) = apply_capture(&config, capture, full);
-        unsafe {
-            config.setMinimumFrameInterval(objc2_core_media::CMTime {
-                value: 1,
-                timescale: FPS,
-                flags: objc2_core_media::CMTimeFlags::Valid,
-                epoch: 0,
-            });
-            config.setShowsCursor(true);
-            config.setPixelFormat(u32::from_be_bytes(*b"420v"));
-        }
+        let (config, width, height) = stream_configuration(capture, full, self.show_cursor);
 
         await_completion(
             |handler| unsafe {
@@ -267,6 +250,20 @@ impl ScreenConnection {
         self.refresh_exclusions()
     }
 
+    /// Draw the pointer into the recording, or stop drawing it, on the running
+    /// stream.
+    ///
+    /// Safe mid-chapter for the same reason a move is: it goes through
+    /// [`set_capture`](ScreenConnection::set_capture) with the capture
+    /// unchanged, so the output size — all the writer cares about — stays put.
+    /// The flag is set first, as in
+    /// [`set_show_self`](ScreenConnection::set_show_self), so a stream that
+    /// refuses the update still gets it at the next reframe.
+    pub fn set_show_cursor(&mut self, show: bool) -> Result<()> {
+        self.show_cursor = show;
+        self.set_capture(self.capture)
+    }
+
     /// The clock ScreenCaptureKit timestamps this stream's buffers against.
     pub fn sync_clock(&self) -> Option<Retained<CMClock>> {
         unsafe { self.stream.synchronizationClock() }
@@ -304,6 +301,34 @@ impl ScreenConnection {
             "stopping screen capture",
         )
     }
+}
+
+/// The whole stream configuration, built in one place for
+/// [`ScreenConnection::start_capture`] and [`ScreenConnection::set_capture`]:
+/// `configuration` is not readable back off an `SCStream`, so every rebuild
+/// restates every field, and two copies would drift.
+fn stream_configuration(
+    capture: Option<Capture>,
+    full: (usize, usize),
+    show_cursor: bool,
+) -> (Retained<SCStreamConfiguration>, usize, usize) {
+    let config = unsafe { SCStreamConfiguration::new() };
+    let (width, height) = apply_capture(&config, capture, full);
+    unsafe {
+        // CMTime(1, FPS) is an interval, i.e. the *fastest* rate allowed.
+        config.setMinimumFrameInterval(objc2_core_media::CMTime {
+            value: 1,
+            timescale: FPS,
+            flags: objc2_core_media::CMTimeFlags::Valid,
+            epoch: 0,
+        });
+        config.setShowsCursor(show_cursor);
+        // Match the camera path's pixel layout: 4:2:0 bi-planar video
+        // range is what the hardware H.264 encoder consumes natively, so
+        // the encoder does not pay for a BGRA conversion on every frame.
+        config.setPixelFormat(u32::from_be_bytes(*b"420v"));
+    }
+    (config, width, height)
 }
 
 /// Set `config`'s crop and output size, and report the output chosen.
@@ -433,7 +458,7 @@ mod tests {
             .expect("av warmup");
         // No region: this measures clocks, and the whole display is the
         // simplest thing to get frames out of.
-        let screen = ScreenConnection::start_capture(&display_uid, None, false)
+        let screen = ScreenConnection::start_capture(&display_uid, None, false, true)
             .expect("start screen capture");
         screen
             .wait_for_warmup(Duration::from_secs(10))

@@ -87,12 +87,14 @@ fn library() -> Finding {
         "compositions/chapter-title-card.html",
         "compositions/talking-head-vertical.html",
         "assets/pattern-rings.svg",
-        "assets/badge.svg",
+        "assets/chapter-arc-outer.svg",
+        "assets/chapter-arc-inner.svg",
         "assets/silence.mp3",
         "assets/fonts/Booton-Regular.woff2",
         "assets/fonts/Booton-Medium.woff2",
         "assets/fonts/Booton-Semibold.woff2",
         "assets/fonts/Booton-Bold.woff2",
+        "assets/fonts/Booton-Heavy.woff2",
     ];
     let missing: Vec<&str> = required
         .iter()
@@ -127,49 +129,74 @@ fn library() -> Finding {
     )
 }
 
-/// The renderer itself, which is a Node CLI.
-///
-/// Present in the shared cache is best; `npx` alone still works but pays a
-/// ~360 MB download on the first render, which is worth warning about *before*
-/// someone is waiting on it rather than during.
+/// The renderer itself, a Node CLI installed into the repo's `renderer/`
+/// package. There is no fallback: without it nothing renders locally.
 fn renderer() -> Finding {
-    let cached = std::env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".screencast/cache/hyperframes")
-            .join(crate::edit::render::HF_VERSION)
-            .join("cli/node_modules/.bin/hyperframes")
-    });
-    if let Some(cached) = cached {
-        if cached.is_file() {
-            return Finding::ok(
-                "HyperFrames renderer",
-                format!("cached, v{}", crate::edit::render::HF_VERSION),
-            );
-        }
-    }
-    match on_path("npx") {
-        Some(_) => Finding::bad(
+    let bin = crate::edit::render::hyperframes_bin();
+    if bin.is_file() {
+        return Finding::ok(
             "HyperFrames renderer",
-            Impact::Degrades,
-            format!(
-                "not cached — the first render fetches hyperframes@{} (~360 MB) through npx. \
-                 Run `scripts/setup.sh` to pull it now instead.",
-                crate::edit::render::HF_VERSION
-            ),
-        ),
-        None => Finding::bad(
-            "HyperFrames renderer",
-            Impact::Breaks,
-            "no npx on PATH and nothing cached — install Node (brew install node), \
-             then run `scripts/setup.sh`."
-                .to_string(),
-        ),
+            format!("installed, v{}", crate::edit::render::HF_VERSION),
+        );
     }
+    let fix = if on_path("npm").is_some() {
+        "run `scripts/setup.sh` (npm ci in renderer/)"
+    } else {
+        "install Node (brew install node), then run `scripts/setup.sh`"
+    };
+    Finding::bad(
+        "HyperFrames renderer",
+        Impact::Breaks,
+        format!("not installed at {} — {fix}", bin.display()),
+    )
+}
+
+/// Cloud rendering, only when its box is ticked. Offline on purpose — this
+/// runs at every launch, so the AWS sign-in is checked when Render is pressed.
+/// The GPU machines install their own renderer, so there is nothing local to
+/// check beyond saying where renders will go.
+fn cloud() -> Option<Finding> {
+    if !crate::config::load().render.cloud {
+        return None;
+    }
+    Some(Finding::ok(
+        "GPU rendering",
+        format!("on, stack {}", crate::edit::gpu::stack()),
+    ))
+}
+
+/// ffmpeg and ffprobe, which every closed chapter goes through before it can
+/// be transcribed, cut or rendered.
+fn ffmpeg() -> Finding {
+    let missing = crate::deps::missing();
+    if missing.is_empty() {
+        return Finding::ok("ffmpeg", "ffmpeg and ffprobe on PATH");
+    }
+    let fix = match crate::deps::homebrew() {
+        Some(_) => format!(
+            "the app installs it at launch; or run `{}` now",
+            crate::deps::INSTALL_COMMAND
+        ),
+        None => format!(
+            "install Homebrew (https://brew.sh), then run `{}`",
+            crate::deps::INSTALL_COMMAND
+        ),
+    };
+    Finding::bad(
+        "ffmpeg",
+        Impact::Breaks,
+        format!(
+            "{} missing — chapters will not transcribe or render; {fix}",
+            missing.join(" and ")
+        ),
+    )
 }
 
 /// Everything worth knowing before a render, cheapest first.
 pub fn check() -> Vec<Finding> {
-    vec![library(), renderer()]
+    let mut findings = vec![ffmpeg(), library(), renderer()];
+    findings.extend(cloud());
+    findings
 }
 
 /// The startup line, or nothing at all when the machine is ready.

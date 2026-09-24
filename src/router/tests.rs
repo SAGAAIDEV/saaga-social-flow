@@ -220,7 +220,7 @@ fn chapter_flow_with_screen_produces_aligned_pairs() {
         region: resolved.rect,
         output,
     };
-    let screen = ScreenConnection::start_capture(&display_uid, Some(capture), false)
+    let screen = ScreenConnection::start_capture(&display_uid, Some(capture), false, true)
         .expect("screen capture");
     println!(
         "screen region {:?} on a {:?}pt / {:?}px display -> {}×{}",
@@ -390,6 +390,7 @@ fn region_reaches_the_file_at_the_configured_origin() {
             output: expected,
         }),
         false,
+        true,
     )
     .expect("screen capture");
     let _ = screen.wait_for_warmup(std::time::Duration::from_secs(5));
@@ -444,6 +445,7 @@ fn region_reaches_the_file_at_the_configured_origin() {
             output: expected,
         }),
         false,
+        true,
     )
     .expect("right-half capture");
     assert_eq!(
