@@ -12,6 +12,12 @@
 //! and [`super::token_store`] keeps the result. That store is the same sqlite
 //! file the Python side reads, so the connection is still shared even though no
 //! part of this path shells out to it.
+//!
+//! A team can skip Connect altogether: the brand channel's owner connects once,
+//! and their refresh token goes into `dev.sops.env` as `YOUTUBE_REFRESH_TOKEN`.
+//! Google has no API-key upload — `videos.insert` needs a user's grant — so a
+//! shared refresh token is the nearest thing, and [`current_token`] prefers it
+//! over whatever this machine has stored.
 
 use std::path::Path;
 
@@ -182,13 +188,56 @@ fn expected_channel(token: &token_store::Token) -> Result<()> {
     )
 }
 
+/// The team's shared grant, `YOUTUBE_REFRESH_TOKEN` from `dev.sops.env`.
+fn shared_refresh_token() -> Option<String> {
+    std::env::var("YOUTUBE_REFRESH_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The token uploads go out on, without touching the network.
+///
+/// The shared refresh token wins over a stored grant when the two differ: a
+/// team that put one in sops meant "upload as the brand channel", and the
+/// stored grant is most often a teammate's own consent that landed on their
+/// personal channel. When they match, the stored row is kept, since it carries
+/// the live access token and the channel already confirmed for it.
+///
+/// A shared token not yet used on this machine comes back with no access token
+/// and no channel, which [`access_token`] fills in on its first refresh.
+pub(super) fn current_token() -> Result<Option<token_store::Token>> {
+    let stored = token_store::load()?;
+    let Some(shared) = shared_refresh_token() else {
+        return Ok(stored);
+    };
+    Ok(Some(pick_token(stored, shared)))
+}
+
+/// The pure half of [`current_token`].
+fn pick_token(stored: Option<token_store::Token>, shared: String) -> token_store::Token {
+    match stored {
+        Some(token) if token.refresh_token.as_deref() == Some(shared.as_str()) => token,
+        _ => token_store::Token {
+            refresh_token: Some(shared),
+            ..Default::default()
+        },
+    }
+}
+
+/// Whether `token` is the shared grant before its first refresh — present, but
+/// with no channel confirmed yet.
+pub(super) fn is_unverified_shared(token: &token_store::Token) -> bool {
+    token.access_token.is_empty() && token.channel_id.is_none()
+}
+
 /// A valid access token for the stored YouTube account.
 ///
 /// Refreshes on read and persists what it refreshed, so callers never deal with
 /// expiry. Sixty seconds of slack because the token is about to be used for an
 /// upload that takes longer than the round trip that fetched it.
 pub fn access_token() -> Result<String> {
-    let Some(mut token) = token_store::load()? else {
+    let Some(mut token) = current_token()? else {
         bail!("YouTube is not connected — run Connect first");
     };
     if !token.is_stale(60) {
@@ -218,6 +267,15 @@ pub fn access_token() -> Result<String> {
     // Carry the minter forward for a token first stored by the Python side,
     // which does not record one.
     token.client_id = Some(creds.id.clone());
+    // A shared token arrives as a bare refresh token, so which channel it
+    // grants is first knowable here — and must be checked before anything is
+    // uploaded on it, exactly as Connect checks a fresh consent.
+    if token.channel_id.is_none() {
+        let (channel_id, channel_title) = oauth::channel(&token.access_token)?;
+        token.channel_id = Some(channel_id);
+        token.channel_title = channel_title;
+        expected_channel(&token)?;
+    }
     let scope = token
         .extra
         .get("scope")
@@ -315,7 +373,7 @@ pub fn upload_video(token: &str, path: &Path, meta: &VideoMeta) -> Result<String
 /// trip; more to the point it lets the message name the fix before anything
 /// is tried.
 pub fn grant_allows_update() -> Option<bool> {
-    let token = token_store::load().ok().flatten()?;
+    let token = current_token().ok().flatten()?;
     let granted = token.extra.get("scope")?.as_str()?;
     Some(scope_allows_update(granted))
 }
@@ -461,6 +519,37 @@ pub fn set_thumbnail(token: &str, video_id: &str, jpeg: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stored(refresh: &str) -> token_store::Token {
+        token_store::Token {
+            access_token: "ya29.live".into(),
+            refresh_token: Some(refresh.into()),
+            channel_id: Some("UCpersonal".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_shared_token_replaces_a_different_stored_grant() {
+        let picked = pick_token(Some(stored("1//laura")), "1//martin".into());
+        assert_eq!(picked.refresh_token.as_deref(), Some("1//martin"));
+        // The personal grant's channel must not ride along onto the shared one.
+        assert!(is_unverified_shared(&picked));
+    }
+
+    #[test]
+    fn a_stored_row_for_the_shared_token_is_kept() {
+        let picked = pick_token(Some(stored("1//martin")), "1//martin".into());
+        assert_eq!(picked.access_token, "ya29.live");
+        assert!(!is_unverified_shared(&picked));
+    }
+
+    #[test]
+    fn a_shared_token_needs_nothing_stored() {
+        let picked = pick_token(None, "1//martin".into());
+        assert!(picked.is_stale(60));
+        assert!(is_unverified_shared(&picked));
+    }
 
     /// The upload body is the one thing here that can be checked without a
     /// network: everything else is a round trip to Google.
