@@ -200,6 +200,11 @@ pub enum WebEvent {
     PhotoCountdown {
         value: String,
     },
+    /// Settings → YouTube: run Google's consent in a browser.
+    ConnectYoutube,
+    /// Settings → YouTube: copy the stored refresh token. The page never holds
+    /// the token itself, so it asks for it to be copied rather than sending it.
+    CopyYoutubeRefreshToken,
 }
 
 impl WebEvent {
@@ -254,6 +259,8 @@ impl WebEvent {
             WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
             WebEvent::TestSettings { service } => UiEvent::TestSettings(service),
             WebEvent::PhotoCountdown { value } => UiEvent::PhotoCountdown(value),
+            WebEvent::ConnectYoutube => UiEvent::Action(crate::hotkeys::Action::ConnectYoutube),
+            WebEvent::CopyYoutubeRefreshToken => UiEvent::CopyYoutubeRefreshToken,
         }
     }
 }
@@ -538,6 +545,18 @@ mod tests {
             WebEvent::CopyText {
                 text: "one\ntwo".into()
             }
+        );
+    }
+
+    #[test]
+    fn the_youtube_account_messages_parse() {
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"connectYoutube"}"#).unwrap(),
+            WebEvent::ConnectYoutube
+        );
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"copyYoutubeRefreshToken"}"#).unwrap(),
+            WebEvent::CopyYoutubeRefreshToken
         );
     }
 

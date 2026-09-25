@@ -919,6 +919,7 @@ impl App {
             UiEvent::RemoveReference(name) => self.remove_reference(&name),
             UiEvent::ProjectNameChanged(name) => self.rename_project(&name),
             UiEvent::CopyText(text) => self.copy_text(&text),
+            UiEvent::CopyYoutubeRefreshToken => self.copy_youtube_refresh_token(),
             UiEvent::OpenChapter(chapter) => self.open_edit_chapter(chapter),
             UiEvent::SaveEdit { chapter, spans } => self.save_edit_spans(chapter, &spans),
             UiEvent::ApplyEdit(chapter) => self.apply_edit(chapter),
@@ -1403,7 +1404,7 @@ impl App {
             );
         }
         if crate::publish::connected_channel().is_none() {
-            return "YouTube is not connected — press Connect… on the YouTube tab, then Upload."
+            return "YouTube is not connected — press Connect… in Settings → YouTube, then Upload."
                 .to_string();
         }
         match self.stages().publish {
@@ -1991,10 +1992,18 @@ impl App {
     fn run_youtube_connect(&mut self) {
         if self.publish_busy {
             self.set_publish_status("A YouTube job is already running…");
+            self.set_youtube_account_status(
+                "A YouTube job is already running — try again when it ends.",
+                false,
+            );
             return;
         }
         self.publish_busy = true;
         self.set_publish_status("Opening a browser to connect YouTube…");
+        self.set_youtube_account_status(
+            "Opening a browser — finish Google's sign-in within five minutes…",
+            true,
+        );
         let tx = self.publish_tx.clone();
         if let Err(err) = std::thread::Builder::new()
             .name("youtube-connect".into())
@@ -2009,7 +2018,7 @@ impl App {
                     // or timed out left the terminal silent and the operator
                     // pressing Upload against a store that never got a token.
                     eprintln!("stream-recorder: youtube connect failed: {err:#}");
-                    let _ = tx.send(crate::publish::PublishEvent::Failed(format!(
+                    let _ = tx.send(crate::publish::PublishEvent::ConnectFailed(format!(
                         "Connect failed: {err:#}"
                     )));
                 }
@@ -2474,6 +2483,36 @@ impl App {
             ));
         }
         self.update_video_view();
+    }
+
+    /// Settings → YouTube: copy the stored refresh token, for `dev.sops.env`.
+    ///
+    /// Copied natively rather than through `copyText`, so the token never has
+    /// to be put into the page — the Settings pane is not handed secrets.
+    fn copy_youtube_refresh_token(&self) {
+        let note = match crate::publish::stored_refresh_token() {
+            None => "No stored grant on this machine — press Connect… first.".to_string(),
+            Some(token) if crate::ui::copy_to_pasteboard(&token) => {
+                "Copied. Paste it as YOUTUBE_REFRESH_TOKEN in dev.sops.env \
+                 (AWS_PROFILE=dev sops dev.sops.env) and commit it."
+                    .to_string()
+            }
+            Some(_) => "Could not reach the pasteboard.".to_string(),
+        };
+        self.set_youtube_account_status(&note, true);
+    }
+
+    /// The line under Settings → YouTube's buttons, set in place so a redraw
+    /// does not throw away keys typed further down the pane.
+    fn set_youtube_account_status(&self, msg: &str, ok: bool) {
+        if let Some(live) = self.live.as_ref() {
+            let text = serde_json::to_string(msg).unwrap_or_default();
+            let class = if ok { "result ok" } else { "result bad" };
+            live.settings_pane.eval(&format!(
+                "(function(){{var e=document.getElementById('youtube-account-result');\
+                 if(e){{e.className='{class}';e.textContent={text};}}}})();"
+            ));
+        }
     }
 
     fn redraw_settings(&self, note: Option<&str>) {
@@ -3234,6 +3273,15 @@ impl App {
                         crate::stage::Gate::Busy => "YouTube connected.".to_string(),
                     };
                     self.set_publish_status(&status);
+                    // Redrawn rather than annotated: the card's buttons and its
+                    // channel line both change with a new grant.
+                    self.redraw_settings(None);
+                }
+                crate::publish::PublishEvent::ConnectFailed(msg) => {
+                    self.publish_busy = false;
+                    self.set_publish_status(&msg);
+                    self.set_youtube_account_status(&msg, false);
+                    self.sync_controls();
                 }
                 crate::publish::PublishEvent::Failed(msg) => {
                     self.publish_busy = false;
@@ -3526,7 +3574,7 @@ impl App {
         match crate::publish::connected_channel() {
             Some(channel) => info.push_str(&format!("- Connected to {channel}\n\n")),
             None => info.push_str(
-                "- NOT CONNECTED — press Connect… and finish Google's flow within \
+                "- NOT CONNECTED — press Connect… in Settings → YouTube and finish Google's flow within \
                  five minutes. To land on the SAAGA channel, switch to it on \
                  youtube.com *first*: the grant binds to whichever channel is active \
                  there.\n\n",

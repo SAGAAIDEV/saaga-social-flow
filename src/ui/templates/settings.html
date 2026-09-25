@@ -90,6 +90,43 @@
   </div>
 </div>
 
+<div class="card">
+  <div class="sec-head">
+    <h2>YouTube account</h2>
+    {% if youtube.channel %}
+      <span class="tag ok">connected</span>
+    {% else %}
+      <span class="tag warn">not connected</span>
+    {% endif %}
+    <span class="grow"></span>
+    <button type="button" data-send='{"type":"connectYoutube"}'>Connect…</button>
+    {% if youtube.can_copy %}
+      <button type="button" data-send='{"type":"copyYoutubeRefreshToken"}'>Copy refresh token</button>
+    {% endif %}
+  </div>
+  <p class="help">
+    {% if youtube.channel %}Uploads go to {{ youtube.channel }}.{% else %}Nothing to upload with yet.{% endif %}
+    {% if youtube.shared %}
+      They use the team's shared grant, <span class="path">YOUTUBE_REFRESH_TOKEN</span> in
+      <span class="path">dev.sops.env</span>, so nobody needs to connect here.
+    {% endif %}
+  </p>
+  {% if youtube.local_differs %}
+    <p class="help">
+      This machine also holds a grant of its own, which the shared one overrides. If it is a
+      new one for the team, Copy refresh token and replace
+      <span class="path">YOUTUBE_REFRESH_TOKEN</span> with it.
+    </p>
+  {% endif %}
+  <p class="help">
+    Connect… signs a Google account in and stores its grant on this machine. To share it — or
+    replace the team's when Google expires it — the brand channel's owner connects, picks the
+    brand channel, presses Copy refresh token, and pastes it as
+    <span class="path">YOUTUBE_REFRESH_TOKEN</span> into <span class="path">dev.sops.env</span>.
+  </p>
+  <p class="result" id="youtube-account-result"></p>
+</div>
+
 <form id="settings">
 {% for section in sections %}
   <div class="card">

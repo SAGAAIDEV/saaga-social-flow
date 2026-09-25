@@ -249,8 +249,8 @@ pub const FIELDS: &[Field] = &[
         need: Need::Optional,
         secret: true,
         help: "The brand channel owner's grant, shared so nobody else has to Connect. \
-               The owner presses Connect once, then copies refresh_token out of \
-               ~/.saaga/auth.db. It starts with 1//.",
+               The owner presses Connect… under YouTube account, then Copy refresh \
+               token, and pastes it into dev.sops.env. It starts with 1//.",
         url: None,
     },
     Field {

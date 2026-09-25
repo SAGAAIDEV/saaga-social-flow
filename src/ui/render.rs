@@ -152,6 +152,44 @@ mod tests {
         }
     }
 
+    fn settings_with(youtube: crate::publish::Account) -> String {
+        page(
+            "settings.html",
+            context! {
+                sections => Vec::<()>::new(), missing => Vec::<String>::new(),
+                env_path => "/tmp/.env", team_count => 0, models => Vec::<()>::new(),
+                photo_countdown => 3, max_photo_countdown => 10, saved => "", youtube => youtube,
+            },
+        )
+    }
+
+    /// Connect lives on Settings now; Copy only appears once there is a grant
+    /// to copy, and the page is never handed the token itself.
+    #[test]
+    fn the_settings_pane_carries_the_youtube_account_card() {
+        let bare = settings_with(crate::publish::Account {
+            channel: None,
+            shared: false,
+            local_differs: false,
+            can_copy: false,
+        });
+        assert!(!bare.contains("template error"), "{bare}");
+        assert!(bare.contains(r#"{"type":"connectYoutube"}"#));
+        assert!(!bare.contains("copyYoutubeRefreshToken"));
+        assert!(bare.contains("not connected"));
+
+        let shared = settings_with(crate::publish::Account {
+            channel: Some("SAAGA Solve (UCLhaTNJktUZeDjge3tOv11Q)".into()),
+            shared: true,
+            local_differs: true,
+            can_copy: true,
+        });
+        assert!(shared.contains("copyYoutubeRefreshToken"));
+        assert!(shared.contains("Uploads go to SAAGA Solve"));
+        assert!(shared.contains("team's shared grant"));
+        assert!(shared.contains("overrides"));
+    }
+
     #[test]
     fn the_video_pane_preserves_and_escapes_author_notes() {
         let html = page(

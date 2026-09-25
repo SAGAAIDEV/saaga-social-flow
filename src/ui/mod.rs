@@ -253,6 +253,9 @@ pub enum UiEvent {
     ProjectNameChanged(String),
     /// Words a pane asked to be put on the system pasteboard.
     CopyText(String),
+    /// Settings → YouTube: put this machine's stored refresh token on the
+    /// pasteboard, for pasting into `dev.sops.env`.
+    CopyYoutubeRefreshToken,
     /// Which chapter the Edit tab is showing.
     OpenChapter(u32),
     /// A hand-edited keep-list, in `[start_ms, end_ms]` pairs.
@@ -790,11 +793,6 @@ define_class!(
         #[unsafe(method(onYoutubeUpload:))]
         fn on_youtube_upload(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::YoutubeUpload));
-        }
-
-        #[unsafe(method(onYoutubeConnect:))]
-        fn on_youtube_connect(&self, _sender: Option<&AnyObject>) {
-            let _ = self.ivars().tx.send(UiEvent::Action(Action::ConnectYoutube));
         }
 
         #[unsafe(method(onYoutubeThumbnail:))]
@@ -2041,6 +2039,7 @@ pub fn settings_page(note: Option<&str>) -> String {
             team_failure => crate::settings::sops::failure().map(|f| f.reason.clone()),
             models => crate::settings::models(),
             photo_countdown => crate::config::load().photo_countdown_secs(),
+            youtube => crate::publish::account(),
             max_photo_countdown => crate::config::MAX_PHOTO_COUNTDOWN_SECS,
             saved => note.unwrap_or(""),
         },
@@ -2937,24 +2936,6 @@ pub fn attach_controls(
     publish_view.addSubview(&publish_btn);
     *target.ivars().publish_button.borrow_mut() = Some(publish_btn.clone());
 
-    // Beside Upload rather than hidden behind a failure: the grant dies on a
-    // schedule Google controls, so reconnecting is routine maintenance, not an
-    // error path.
-    let connect_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Connect…"),
-            Some(&target),
-            Some(sel!(onYoutubeConnect:)),
-            mtm,
-        )
-    };
-    connect_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 172.0, bounds.size.height - 84.0),
-        NSSize::new(110.0, 28.0),
-    ));
-    pin_top_left(&connect_btn);
-    publish_view.addSubview(&connect_btn);
-
     // The thumbnail is the one part of a live video that keeps being redesigned
     // after the upload, and Upload only re-sets it while the render is
     // byte-identical to what went up. This pushes the selected artwork onto the
@@ -2968,7 +2949,7 @@ pub fn attach_controls(
         )
     };
     thumbnail_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 294.0, bounds.size.height - 84.0),
+        NSPoint::new(PAD * 2.0 + 172.0, bounds.size.height - 84.0),
         NSSize::new(150.0, 28.0),
     ));
     pin_top_left(&thumbnail_btn);
