@@ -65,11 +65,18 @@ pub fn recorded_as_outline(session_dir: &Path, numbers: &[u32]) -> Vec<u32> {
 /// chapter *with* words the model cannot be asked about — no key, no network —
 /// is an error, because rendering it without points would ship a layout that
 /// exists to show them.
+///
+/// `plan` is the approved plan, when there is one: a chapter being written
+/// gets plan chapter *n*'s points as a hint, so the card on screen reads like
+/// the plan it was recorded against. Only as a hint — the points and their
+/// anchors still come from the transcript, and a chapter already in the
+/// manifest is not rewritten because a plan appeared.
 pub fn prepare(
     session: &Session,
     edit_root: &Path,
     numbers: &[u32],
     titles: &[(u32, String)],
+    plan: Option<&crate::plan::schema::PlanBody>,
     status: &dyn Fn(&str),
 ) -> Result<Vec<ChapterOutline>> {
     if numbers.is_empty() {
@@ -86,7 +93,7 @@ pub fn prepare(
 
     // What still has to be written: chapters not in the manifest that have
     // words to write from.
-    let to_write: Vec<(u32, String, Option<String>)> = transcripts
+    let to_write: Vec<crate::agent::outline::Chapter> = transcripts
         .iter()
         .filter(|(n, _)| manifest.chapter(*n).is_none())
         .filter_map(|(n, transcript)| {
@@ -102,7 +109,16 @@ pub fn prepare(
                         .find(|(m, _)| m == n)
                         .map(|(_, t)| t.clone())
                         .filter(|t| !t.trim().is_empty());
-                    Some((*n, text, title))
+                    let planned = plan
+                        .and_then(|plan| plan.chapter(*n))
+                        .map(|chapter| chapter.points.clone())
+                        .unwrap_or_default();
+                    Some(crate::agent::outline::Chapter {
+                        n: *n,
+                        transcript: text,
+                        title,
+                        planned,
+                    })
                 }
                 None => {
                     eprintln!(
@@ -135,7 +151,7 @@ pub fn prepare(
                  points, so it cannot render without them",
                 to_write
                     .iter()
-                    .map(|(n, _, _)| format!("{n:02}"))
+                    .map(|chapter| format!("{:02}", chapter.n))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
@@ -296,7 +312,7 @@ mod tests {
         )
         .unwrap();
 
-        let placed = prepare(&session, &edit_root, &[2], &[], &|_| {}).unwrap();
+        let placed = prepare(&session, &edit_root, &[2], &[], None, &|_| {}).unwrap();
         assert_eq!(placed.len(), 1);
         // "the" at 1.0s raw, 0.5s into the cut — held back to where the card
         // has landed.
@@ -320,7 +336,7 @@ mod tests {
         chapter.face_y = Some(0.25);
         manifest.put(chapter);
         save(&session.outline_dir(), &manifest).unwrap();
-        let placed = prepare(&session, &edit_root, &[2], &[], &|_| {}).unwrap();
+        let placed = prepare(&session, &edit_root, &[2], &[], None, &|_| {}).unwrap();
         assert_eq!(placed[0].face_y, Some(0.25));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -342,7 +358,7 @@ mod tests {
             r#"{"slot":[1080.0,1920.0],"zoom":1.0,"tracking":false,"final_anchor":null}"#,
         )
         .unwrap();
-        let placed = prepare(&session, &session.edit_dir(), &[1], &[], &|_| {}).unwrap();
+        let placed = prepare(&session, &session.edit_dir(), &[1], &[], None, &|_| {}).unwrap();
         assert_eq!(placed[0].face_y, None);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -359,7 +375,7 @@ mod tests {
             r#"{"status":"skipped","text":"","error":"silent audio"}"#,
         )
         .unwrap();
-        let placed = prepare(&session, &session.edit_dir(), &[1], &[], &|_| {}).unwrap();
+        let placed = prepare(&session, &session.edit_dir(), &[1], &[], None, &|_| {}).unwrap();
         assert_eq!(placed.len(), 1);
         assert!(placed[0].points.is_empty());
         assert_eq!(placed[0].variable_json(), r#"{"points":[]}"#);
@@ -370,9 +386,11 @@ mod tests {
     fn nothing_asked_is_nothing_written() {
         let root = temp("nothing");
         let session = session(&root);
-        assert!(prepare(&session, &session.edit_dir(), &[], &[], &|_| {})
-            .unwrap()
-            .is_empty());
+        assert!(
+            prepare(&session, &session.edit_dir(), &[], &[], None, &|_| {})
+                .unwrap()
+                .is_empty()
+        );
         assert!(
             !session.outline_dir().exists(),
             "no manifest for no chapters"

@@ -425,8 +425,16 @@ impl App {
                 (false, true) => Some(ui::Hold::Paused),
                 (false, false) => None,
             };
+            let chapter = self.router.as_ref().map(|r| r.current_chapter_number());
+            // Only while a chapter is open, which is the only time the line
+            // shows it — and so the plan versions are read then, not on every
+            // sync of an idle window.
+            let plan = chapter.and_then(|n| {
+                crate::plan::approved(&crate::plan::dir(&self.session))
+                    .map(|plan| plan.body.position(n))
+            });
             live.control_target.set_recording(
-                self.router.as_ref().map(|r| r.current_chapter_number()),
+                chapter,
                 self.session.version,
                 crate::shorts::number(&self.session.root),
                 waiting.as_deref(),
@@ -435,6 +443,7 @@ impl App {
                     recorded: crate::notes::closed_chapter_numbers(&self.session.dir),
                     chapter: self.next_chapter,
                 },
+                plan.as_deref(),
             );
             live.control_target.set_stage_gates(&self.stages());
             live.control_target.set_render_targets(

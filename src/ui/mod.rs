@@ -1270,6 +1270,13 @@ impl ControlTarget {
     /// what the first button offers: a fresh chapter, or a retake of one that
     /// exists — see [`NextTake`]. Mid-take the menu is switched off, because
     /// the Router owns the number then.
+    ///
+    /// `plan` is where the open chapter sits in the approved plan — "Chapter 3
+    /// of 5 — The fix", or the warning that the take has gone past it (see
+    /// `plan::schema::PlanBody::position`). It leads the line while a chapter
+    /// is open, so a mismatch is read while it can still be fixed; `None`
+    /// without an approved plan leaves the line as it always was.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_recording(
         &self,
         chapter: Option<u32>,
@@ -1278,6 +1285,7 @@ impl ControlTarget {
         pending: Option<&str>,
         hold: Option<Hold>,
         next: &NextTake,
+        plan: Option<&str>,
     ) {
         if MainThreadMarker::new().is_none() {
             return;
@@ -1366,6 +1374,10 @@ impl ControlTarget {
                     None => {
                         format!("Recording {v}chapter {n:02} — press New Chapter or Stop{waiting}")
                     }
+                };
+                let line = match plan {
+                    Some(plan) => format!("{plan} · {line}"),
+                    None => line,
                 };
                 status.setStringValue(&NSString::from_str(&line));
             }

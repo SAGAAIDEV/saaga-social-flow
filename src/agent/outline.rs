@@ -118,16 +118,61 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// `(n, transcript, title)` per chapter — the title so the points do not
-/// restate it, and so a chapter the notes already named reads as that.
-pub fn user_prompt(chapters: &[(u32, String, Option<String>)], project: &str) -> String {
+/// One chapter to write points for.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Chapter {
+    pub n: u32,
+    pub transcript: String,
+    /// So the points do not restate it, and so a chapter the notes already
+    /// named reads as that.
+    pub title: Option<String>,
+    /// The approved plan's points for this chapter, empty without one. A hint,
+    /// so the card on screen reads like the plan the take was recorded
+    /// against; see [`user_prompt`] for why it is only that.
+    pub planned: Vec<String>,
+}
+
+/// Every chapter, with its title and — when the approved plan has them — its
+/// planned points.
+///
+/// The planned points are labelled as the plan and fenced off from the
+/// transcript, and the label says what they are for: wording and order. What
+/// was actually said can differ from what was planned, and an anchor is only
+/// worth anything as a verbatim quote of the recording — an anchor copied from
+/// the plan would match no word and leave the point untimed. So the transcript
+/// stays the source of every point and every anchor, and a planned point the
+/// speaker skipped is not put on screen.
+pub fn user_prompt(chapters: &[Chapter], project: &str) -> String {
     let mut user = format!("Video: {project}\n");
-    for (n, transcript, title) in chapters {
-        user.push_str(&format!("\n<Chapter {n}>\n"));
-        if let Some(title) = title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    for chapter in chapters {
+        user.push_str(&format!("\n<Chapter {}>\n", chapter.n));
+        if let Some(title) = chapter
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
             user.push_str(&format!("Title: {title}\n"));
         }
-        user.push_str(transcript.trim());
+        let planned: Vec<&str> = chapter
+            .planned
+            .iter()
+            .map(|point| point.trim())
+            .filter(|point| !point.is_empty())
+            .collect();
+        if !planned.is_empty() {
+            user.push_str(
+                "Planned points (from the plan made before recording — a hint for the \
+                 wording and order of the points, not a source: write only points the \
+                 transcript below actually covers, and copy every anchor from the \
+                 transcript, never from these):\n",
+            );
+            for point in planned {
+                user.push_str(&format!("- {point}\n"));
+            }
+            user.push_str("Transcript:\n");
+        }
+        user.push_str(chapter.transcript.trim());
         user.push('\n');
     }
     user
@@ -135,7 +180,7 @@ pub fn user_prompt(chapters: &[(u32, String, Option<String>)], project: &str) ->
 
 #[tracing::instrument(skip(chapters, prompt_root), fields(chapters = chapters.len(), model, provider))]
 pub fn extract_outline(
-    chapters: &[(u32, String, Option<String>)],
+    chapters: &[Chapter],
     project: &str,
     model: &str,
     provider: Option<&str>,
@@ -154,7 +199,7 @@ pub fn extract_outline(
         model,
         provider,
     )?;
-    let numbers: Vec<u32> = chapters.iter().map(|(n, _, _)| *n).collect();
+    let numbers: Vec<u32> = chapters.iter().map(|chapter| chapter.n).collect();
     Ok((extracted.into_outlines(&numbers), step))
 }
 
@@ -169,12 +214,21 @@ mod tests {
         }
     }
 
+    fn chapter(n: u32, transcript: &str, title: Option<&str>) -> Chapter {
+        Chapter {
+            n,
+            transcript: transcript.into(),
+            title: title.map(str::to_string),
+            planned: Vec::new(),
+        }
+    }
+
     #[test]
     fn user_prompt_carries_every_chapter_and_its_title() {
         let prompt = user_prompt(
             &[
-                (1, "hello there".into(), Some("The hook".into())),
-                (2, "the fix".into(), None),
+                chapter(1, "hello there", Some("The hook")),
+                chapter(2, "the fix", None),
             ],
             "Demo",
         );
@@ -182,6 +236,40 @@ mod tests {
         assert!(prompt.contains("<Chapter 1>\nTitle: The hook\nhello there"));
         assert!(prompt.contains("<Chapter 2>\nthe fix"));
         assert!(!prompt.contains("Title: \n"), "no title is no line");
+        assert!(
+            !prompt.contains("Planned points"),
+            "no plan, the prompt it always was"
+        );
+    }
+
+    /// The plan's points ride along as a labelled hint, between the title and
+    /// the transcript, and the label says the transcript still decides what is
+    /// on screen and where each anchor comes from.
+    #[test]
+    fn planned_points_are_a_labelled_hint_and_the_transcript_stays_the_source() {
+        let mut planned = chapter(2, "so the first thing we did", Some("The fix"));
+        planned.planned = vec!["Cache the build".into(), "  ".into(), "Ship it".into()];
+        let prompt = user_prompt(&[planned, chapter(3, "and then", None)], "Demo");
+        let two = prompt
+            .split("<Chapter 3>")
+            .next()
+            .unwrap()
+            .split("<Chapter 2>")
+            .nth(1)
+            .unwrap();
+        assert!(two.contains("Planned points (from the plan made before recording"));
+        assert!(two.contains("not a source"), "{two}");
+        assert!(
+            two.contains("copy every anchor from the transcript"),
+            "{two}"
+        );
+        assert!(two.contains("- Cache the build\n- Ship it\nTranscript:\nso the first"));
+        assert!(!two.contains("- \n"), "a blank planned point is dropped");
+        let three = prompt.split("<Chapter 3>").nth(1).unwrap();
+        assert!(
+            !three.contains("Planned points"),
+            "only the chapter with a plan gets the hint"
+        );
     }
 
     /// The block lays points out at a fixed size, so the caps are enforced

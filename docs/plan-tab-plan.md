@@ -264,6 +264,32 @@ the CTA chapter's is `cta.line`.
 - Remove the Notes button and `agent::notes` once Plan from rehearsal has
   replaced it.
 
+As built (phase 4), where it differs from the list above:
+- The CTA chapter is `plan::cta_chapter`: the last recorded chapter when the
+  approved plan ends with a CTA, but never chapter 1 — a plan is at least a
+  hook and a CTA, so a recording with one chapter has not reached the CTA.
+  `edit::compose_and_render` reads the approved plan once and hands the CTA
+  chapter to `compose::prepare_targets` and the plan to `outline::prepare`.
+- Leaving the CTA out of the vertical parts also leaves it out of the
+  vertical longform, which is those parts joined: it ends on the last body
+  chapter.
+- A short of the CTA chapter left on disk by an earlier render (before the
+  plan was approved, or before a later chapter made this one the last) is
+  removed at render, since the S3 upload sends whatever
+  `vertical/chapter-NN.mp4` it finds.
+- The posts stage skips the CTA chapter too. Without that it wrote copy for
+  it, and the schedule showed the post as "not on S3 yet — press Upload to
+  S3", which would never send one.
+- The Record tab's plan line leads the status line while a chapter is open
+  ("Chapter 3 of 5 — The fix · Recording v1 chapter 03 — …"). Past the plan
+  it reads "Chapter 6 is past the plan's 5", adding that the last chapter
+  recorded is treated as the call to action when the plan ends with one.
+- Video details also get the plan's working title, beside the promise,
+  audience, hook line and CTA line, labelled as intent the transcript
+  overrides.
+- Not built yet: preselecting a chapter's planned layout, and retiring the
+  Notes button and `agent::notes` (Plan from rehearsal is not proven yet).
+
 ## Verification
 
 `cargo test`, `cargo clippy`, `cargo fmt --check` each phase, plus the CLI in

@@ -119,6 +119,34 @@ pub fn approved(dir: &Path) -> Option<Plan> {
         .find(|plan| plan.approved)
 }
 
+/// The recording chapter that carries the approved plan's call to action, which
+/// gets no chapter card and no short: the **last recorded** chapter, whenever
+/// the plan ends with a CTA.
+///
+/// Not the chapter at the CTA's position in the plan. Plan and recording only
+/// line up by count, and one extra chapter break would otherwise take the card
+/// off a body chapter and leave it in front of the ask. Never chapter one
+/// either: a plan is at least a hook and a CTA, so a recording that has only
+/// its first chapter has not reached the CTA yet — and chapter one has no card
+/// to skip anyway.
+pub fn cta_chapter(plan: Option<&schema::PlanBody>, recorded: &[u32]) -> Option<u32> {
+    if !plan?.ends_with_cta() {
+        return None;
+    }
+    recorded.iter().copied().max().filter(|&n| n > 1)
+}
+
+/// [`cta_chapter`] for `session`'s current recording version, from its approved
+/// plan and its closed chapters. `None` without an approved plan — and so for
+/// every project older than plans, and for a short, whose folder has none.
+pub fn cta_chapter_of(session: &Session) -> Option<u32> {
+    let plan = approved(&dir(session))?;
+    cta_chapter(
+        Some(&plan.body),
+        &crate::notes::closed_chapter_numbers(&session.dir),
+    )
+}
+
 /// Writes `plan` as the next version and selects it. Never overwrites: the
 /// number is taken from what is on disk, and the file is created new.
 pub fn save_new(dir: &Path, mut plan: Plan) -> Result<Plan> {
@@ -662,6 +690,49 @@ mod tests {
         approve(&dir, 2, &notes).unwrap();
         let kept: crate::notes::NotesData = read_json(&notes.join(NOTES_BEFORE_PLAN)).unwrap();
         assert_eq!(kept.title, "Rehearsal");
+    }
+
+    /// The CTA is whatever was recorded last, not the plan's position for it:
+    /// a recording with one chapter more than the plan still loses the card in
+    /// front of its last chapter, not in front of chapter three.
+    #[test]
+    fn the_cta_chapter_is_the_last_recorded_one_when_the_plan_ends_with_a_cta() {
+        let planned = plan("Deploys");
+        assert_eq!(cta_chapter(None, &[1, 2, 3]), None, "no plan, no change");
+        assert_eq!(cta_chapter(Some(&planned.body), &[1, 2, 3]), Some(3));
+        assert_eq!(
+            cta_chapter(Some(&planned.body), &[1, 2, 3, 4]),
+            Some(4),
+            "an extra chapter moves the CTA to the end, with the recording"
+        );
+        assert_eq!(cta_chapter(Some(&planned.body), &[1, 2]), Some(2));
+        assert_eq!(
+            cta_chapter(Some(&planned.body), &[1]),
+            None,
+            "the hook alone has not reached the CTA"
+        );
+        assert_eq!(cta_chapter(Some(&planned.body), &[]), None);
+        let mut open_ended = planned.clone();
+        open_ended.body.chapters.pop();
+        assert_eq!(cta_chapter(Some(&open_ended.body), &[1, 2, 3]), None);
+    }
+
+    #[test]
+    fn the_cta_chapter_of_a_session_needs_an_approved_plan() {
+        let root = temp("cta-session");
+        let session = Session {
+            dir: root.join("drafts/v1"),
+            root: root.clone(),
+            version: Some(1),
+        };
+        std::fs::create_dir_all(&session.dir).unwrap();
+        for n in 1..=4 {
+            std::fs::write(session.dir.join(format!("chapter-{n:02}.mp3")), "").unwrap();
+        }
+        save_new(&dir(&session), plan("Deploys")).unwrap();
+        assert_eq!(cta_chapter_of(&session), None, "built, not approved");
+        approve(&dir(&session), 1, &root.join("notes")).unwrap();
+        assert_eq!(cta_chapter_of(&session), Some(4));
     }
 
     #[test]

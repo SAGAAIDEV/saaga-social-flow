@@ -160,6 +160,7 @@ pub fn prepare(
         library,
         titles,
         &[],
+        None,
         crate::config::RenderTargets::default(),
     )
 }
@@ -174,12 +175,21 @@ pub fn prepare(
 /// `outlines` names the chapters recorded in the outline layout, with their
 /// placed points. Those chapters render through the `outline-*` blocks in both
 /// orientations; every other chapter is laid out as it always was.
+///
+/// `cta` is the chapter that closes on the approved plan's call to action —
+/// see [`crate::plan::cta_chapter`]. It gets no card in front of it, since a
+/// card announcing "the ask" as a chapter reads as padding, and no vertical: a
+/// short that is nothing but "subscribe" is not a short. Passed in rather than
+/// read here, like the titles and outlines, so the layout stays a function of
+/// what it is handed. `None` — no approved plan, or one without a CTA — lays
+/// out every chapter exactly as before plans existed.
 pub fn prepare_targets(
     edit_root: &Path,
     compose_root: &Path,
     library: &Path,
     titles: &[(u32, String)],
     outlines: &[crate::outline::ChapterOutline],
+    cta: Option<u32>,
     targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
@@ -243,7 +253,10 @@ pub fn prepare_targets(
             // Cards display the source chapter number minus one: chapter one
             // has no card, so the first inter-chapter card is labeled "01".
             // Source paths and chapter IDs still use the original number.
-            if !h_segments.is_empty() {
+            //
+            // The CTA chapter has none either, and the numbering is unaffected:
+            // it is last, so no card after it has a number to shift.
+            if !h_segments.is_empty() && cta != Some(*n) {
                 h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
             }
             match outline {
@@ -268,7 +281,11 @@ pub fn prepare_targets(
                 None => h_segments.push(Segment::Passthrough(h_src)),
             }
         }
-        if targets.vertical_parts() && v_src.exists() {
+        // Every vertical part is also a chapter short on disk, which is what
+        // the S3 upload and the schedule enumerate — so leaving the CTA out
+        // here is all it takes for neither to see it. The vertical longform is
+        // these parts joined, so it ends on the last body chapter.
+        if targets.vertical_parts() && v_src.exists() && cta != Some(*n) {
             let seconds = cut::probe_duration_seconds(&v_src)?;
             copy_media(&vertical, *n, &v_src, audio.exists().then_some(&audio))?;
             v_jobs.push(match outline {
@@ -856,6 +873,76 @@ mod tests {
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
+    /// With an approved plan that ends on a call to action, the chapter
+    /// recorded last is the ask: no card in front of it and no short of it.
+    /// Every other card keeps its number, and without a CTA the same takes lay
+    /// out exactly as they always did.
+    #[test]
+    fn the_cta_chapter_has_no_card_and_no_short() {
+        use crate::config::RenderTargets;
+        let (library, edit, compose) = fixture("cta");
+        let three = edit.join("chapter-03");
+        std::fs::create_dir_all(&three).unwrap();
+        std::fs::write(three.join("chapter-03-horizontal.mp4"), b"v").unwrap();
+        // A vertical for the CTA only. The stub has no duration to probe, so
+        // planning it at all would fail — skipping it is what lets this pass.
+        std::fs::write(three.join("chapter-03-vertical.mp4"), b"v").unwrap();
+        let titles = vec![
+            (1u32, "Hook".to_string()),
+            (2u32, "Body".to_string()),
+            (3u32, "Subscribe".to_string()),
+        ];
+        let ids = |plan: &Plan| -> Vec<String> {
+            plan.h_segments
+                .iter()
+                .map(|segment| match segment {
+                    Segment::Render(job) => job.id.clone(),
+                    Segment::Passthrough(path) => path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                })
+                .collect()
+        };
+
+        let everything = RenderTargets::default();
+        assert!(everything.vertical_parts(), "the shorts are in play");
+        let plan =
+            prepare_targets(&edit, &compose, &library, &titles, &[], Some(3), everything).unwrap();
+        assert_eq!(
+            ids(&plan),
+            [
+                "chapter-01-horizontal",
+                "seg-02-card",
+                "chapter-02-horizontal",
+                "chapter-03-horizontal"
+            ],
+            "the ask follows the last body chapter with no card between"
+        );
+        assert!(plan.v_jobs.is_empty(), "no short of the CTA");
+
+        let horizontal = RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: false,
+            cloud: false,
+        };
+        let plan =
+            prepare_targets(&edit, &compose, &library, &titles, &[], None, horizontal).unwrap();
+        assert_eq!(
+            ids(&plan),
+            [
+                "chapter-01-horizontal",
+                "seg-02-card",
+                "chapter-02-horizontal",
+                "seg-03-card",
+                "chapter-03-horizontal"
+            ],
+            "no approved plan: a card in front of every chapter after the first"
+        );
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
     /// A render is made at one quality, and the quality is one of its inputs:
     /// every job names the workspace's quality file, and the file carries the
     /// current setting — so raising it re-renders once, and not again.
@@ -902,7 +989,7 @@ mod tests {
         }
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
         let plan = |targets: RenderTargets| {
-            prepare_targets(&edit, &compose, &library, &titles, &[], targets)
+            prepare_targets(&edit, &compose, &library, &titles, &[], None, targets)
         };
 
         // Only the horizontal: cards and bodies, no chapter compositions.
@@ -1215,6 +1302,7 @@ mod library_tests {
             &components_root(),
             &[(1, "First".into()), (2, "Second".into())],
             &[outline],
+            None,
             crate::config::RenderTargets::default(),
         )
         .expect("prepare with an outline chapter");

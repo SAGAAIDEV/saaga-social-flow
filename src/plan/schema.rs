@@ -87,6 +87,45 @@ pub struct PlanBody {
     pub instructions: Vec<String>,
 }
 
+impl PlanBody {
+    /// Plan chapter `n`, counted from 1 like recording chapters. Plan and
+    /// recording line up by position and nothing else, so this is the whole
+    /// of the mapping.
+    pub fn chapter(&self, n: u32) -> Option<&PlanChapter> {
+        let index = usize::try_from(n.checked_sub(1)?).ok()?;
+        self.chapters.get(index)
+    }
+
+    /// Whether the plan closes on its call to action. `clean` puts one there on
+    /// every build, but a hand-edited version can be any shape, so the render
+    /// asks rather than assumes.
+    pub fn ends_with_cta(&self) -> bool {
+        self.chapters
+            .last()
+            .is_some_and(|chapter| chapter.kind == ChapterKind::Cta)
+    }
+
+    /// What the Record tab says while chapter `n` is recording: "Chapter 3 of
+    /// 5 — The fix", or a warning once the take has gone past the plan.
+    ///
+    /// Past the plan is worth a warning rather than a shrug because of what the
+    /// render does with it: it takes the *last recorded* chapter as the call to
+    /// action, so an extra chapter break moves the CTA's missing card and
+    /// missing short onto whatever is recorded last.
+    pub fn position(&self, n: u32) -> String {
+        let of = self.chapters.len();
+        match self.chapter(n) {
+            Some(chapter) if chapter.title.trim().is_empty() => format!("Chapter {n} of {of}"),
+            Some(chapter) => format!("Chapter {n} of {of} — {}", chapter.title.trim()),
+            None if self.ends_with_cta() => format!(
+                "Chapter {n} is past the plan's {of} — the last chapter recorded is \
+                 treated as the call to action"
+            ),
+            None => format!("Chapter {n} is past the plan's {of}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Plan {
     /// The N of `vN.json`, shown as "Plan N" — never "vN", which is what
@@ -242,6 +281,25 @@ mod tests {
             notes.chapters[2].cues.is_empty(),
             "a talking head is no cue"
         );
+    }
+
+    /// The Record tab's line: chapter n against the plan's count and title,
+    /// and a warning — naming the CTA consequence only when there is a CTA —
+    /// once the take goes past it.
+    #[test]
+    fn the_position_names_the_planned_chapter_and_warns_past_the_plan() {
+        let mut plan = plan();
+        assert_eq!(plan.body.position(1), "Chapter 1 of 4 — The hour");
+        assert_eq!(plan.body.position(4), "Chapter 4 of 4 — Next time");
+        let past = plan.body.position(5);
+        assert!(past.starts_with("Chapter 5 is past the plan's 4"), "{past}");
+        assert!(past.contains("call to action"), "{past}");
+        plan.body.chapters[1].title = "  ".into();
+        assert_eq!(plan.body.position(2), "Chapter 2 of 4");
+        plan.body.chapters.pop();
+        assert!(!plan.body.ends_with_cta());
+        assert_eq!(plan.body.position(4), "Chapter 4 is past the plan's 3");
+        assert!(plan.body.chapter(0).is_none(), "chapters count from one");
     }
 
     #[test]
