@@ -1,9 +1,10 @@
 //! The Project and Plan tabs' web panes, drawn from what is on disk.
 //!
-//! Both are read-only summaries in this phase: the Project pane says where the
-//! open project stands — its plan, its recording versions, what is rendered and
-//! what is live — and the Plan pane shows the author's input, the idea takes
-//! and the selected plan version in full. Each is one function over a
+//! The Project pane is a read-only summary of where the open project stands —
+//! its plan, its recording versions, what is rendered and what is live. The
+//! Plan pane is where the work happens: idea takes, the author's input, the
+//! build buttons and the selected plan version as editable boxes, all posted
+//! back through `ui::web`. Each is one function over a
 //! [`Session`], so the first draw and every redraw after a project or version
 //! change agree, the way [`super::settings_page`] does for Settings.
 //!
@@ -11,6 +12,7 @@
 //! call site: the template is the only reader, and a field renamed on one side
 //! shows up as a failing test here instead of a blank cell on screen.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Serialize;
@@ -200,15 +202,98 @@ pub fn project_page(session: &Session) -> String {
     super::render::page("project.html", project_view(session))
 }
 
+/// What the Plan pane shows that is not on disk: the idea take being
+/// recorded, and whether a plan is being built. Both lock parts of the page —
+/// see [`PlanView::locked`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlanLive {
+    pub recording: Option<u32>,
+    pub building: bool,
+}
+
 /// One idea take on the Plan pane.
+///
+/// The tag, its tone and the buttons are decided here rather than in the
+/// template, because the pane's script repaints a single row with them when a
+/// transcript lands — see `App::poll_plan_takes` — and a row drawn by the page
+/// and a row patched by the script must not be able to disagree.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TakeRow {
+    pub n: u32,
     pub label: String,
-    /// `ready`, `transcribing` or `nothing`.
+    /// `recording`, `ready`, `transcribing`, `nothing` (finished with no
+    /// words: silent, skipped or failed) or `orphaned` (no job and no
+    /// transcript — nothing is going to finish it).
     pub state: &'static str,
+    pub tag: &'static str,
+    /// `ok`, `warn`, `bad` or empty — the tag's colour.
+    pub tone: &'static str,
     pub text: String,
     /// Why a finished take gave nothing — silent, skipped, failed.
     pub why: String,
+    /// A failed or orphaned take can be sent again. A silent one cannot: the
+    /// job would hear the same silence.
+    pub retry: bool,
+    /// Not while it records, and not while its transcript is being written —
+    /// see [`plan::delete_take`].
+    pub can_delete: bool,
+}
+
+pub fn take_row(take: &plan::Take, recording: Option<u32>) -> TakeRow {
+    let row = |state, tag, tone| TakeRow {
+        n: take.n,
+        label: format!("Take {:02}", take.n),
+        state,
+        tag,
+        tone,
+        text: String::new(),
+        why: String::new(),
+        retry: false,
+        can_delete: true,
+    };
+    if recording == Some(take.n) {
+        return TakeRow {
+            can_delete: false,
+            ..row("recording", "Recording…", "bad")
+        };
+    }
+    match plan::take_text(take) {
+        TakeText::Words(text) => TakeRow {
+            text,
+            ..row("ready", "Transcribed", "ok")
+        },
+        TakeText::Transcribing => match plan::take_job(take) {
+            plan::TakeJob::Running(_) => TakeRow {
+                can_delete: false,
+                ..row("transcribing", "Transcribing…", "")
+            },
+            plan::TakeJob::Finished | plan::TakeJob::Orphaned => TakeRow {
+                why: plan::ORPHANED.into(),
+                retry: true,
+                ..row("orphaned", "Not transcribed", "bad")
+            },
+        },
+        TakeText::Nothing(why) => {
+            let status = crate::notes::load_transcript_at(&take.audio).map(|t| t.status);
+            let (tag, tone, retry) = match status {
+                Some(crate::notes::TranscriptStatus::Completed) => ("No speech", "warn", false),
+                Some(crate::notes::TranscriptStatus::Skipped) => ("Skipped", "warn", true),
+                _ => ("Failed", "bad", true),
+            };
+            TakeRow {
+                why,
+                retry,
+                ..row("nothing", tag, tone)
+            }
+        }
+    }
+}
+
+pub fn take_rows(dir: &Path, recording: Option<u32>) -> Vec<TakeRow> {
+    plan::takes(dir)
+        .iter()
+        .map(|take| take_row(take, recording))
+        .collect()
 }
 
 /// An entry in the Plan pane's version list.
@@ -234,13 +319,24 @@ pub struct ChapterView {
     pub cues: Vec<String>,
     pub show: String,
     pub layout: Option<&'static str>,
+    /// The layout's wire name for the picker — `talking-head`, `split`,
+    /// `outline` — or empty for none suggested.
+    pub layout_key: String,
     /// "0:45", from the plan's estimate.
     pub est: Option<String>,
+}
+
+/// One entry in a chapter's layout picker.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LayoutOption {
+    pub key: String,
+    pub label: &'static str,
 }
 
 /// The selected plan version, flattened for the template.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlanShown {
+    pub n: u32,
     /// "Plan 2" or "Plan 2 (approved)".
     pub label: String,
     pub approved: bool,
@@ -265,18 +361,65 @@ pub struct PlanShown {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlanView {
+    /// The project the page is drawn for. Every message the page sends
+    /// carries it back, so the app can ignore one from a replaced page.
+    pub root: String,
     pub instructions: String,
     pub typed: String,
     pub takes: Vec<TakeRow>,
+    /// The take being recorded, by number, which turns Record idea into Stop.
+    pub recording: Option<u32>,
+    /// "Stop take 03" — the record button's label while a take is running.
+    pub recording_label: Option<String>,
+    pub building: bool,
     pub versions: Vec<PlanVersionItem>,
     pub plan: Option<PlanShown>,
     /// Why the selected version could not be shown, when it could not.
     pub unreadable: Option<String>,
+    /// Why Build, Refine and Plan from rehearsal are switched off, when they
+    /// are — said on the page beside them, since a greyed button explains
+    /// nothing.
+    pub locked: Option<String>,
+    /// Whether this recording version has chapters to plan from.
+    pub can_rehearse: bool,
+    pub layouts: Vec<LayoutOption>,
 }
 
 /// `45` → `0:45`, `125` → `2:05`.
 fn mmss(seconds: u32) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// `0:45`, `2:05` or a bare `90` back to seconds; `None` for anything else,
+/// including a box half-way through being typed.
+fn parse_mmss(text: &str) -> Option<u32> {
+    let text = text.trim();
+    match text.split_once(':') {
+        Some((m, s)) if s.len() == 2 => {
+            let (m, s): (u32, u32) = (m.trim().parse().ok()?, s.parse().ok()?);
+            (s < 60).then_some(m * 60 + s)
+        }
+        Some(_) => None,
+        None => text.parse().ok(),
+    }
+}
+
+/// A pair's wire name, `talking-head`, as serde writes it into the plan.
+fn pair_key(pair: crate::layouts::Pair) -> String {
+    serde_json::to_value(pair)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+fn layout_options() -> Vec<LayoutOption> {
+    crate::layouts::Pair::ALL
+        .iter()
+        .map(|&pair| LayoutOption {
+            key: pair_key(pair),
+            label: pair.as_str(),
+        })
+        .collect()
 }
 
 fn chapter_view(n: usize, chapter: &crate::plan::schema::PlanChapter) -> ChapterView {
@@ -299,6 +442,7 @@ fn chapter_view(n: usize, chapter: &crate::plan::schema::PlanChapter) -> Chapter
         cues: chapter.cues.clone(),
         show: chapter.show.clone(),
         layout: chapter.layout.map(crate::layouts::Pair::as_str),
+        layout_key: chapter.layout.map(pair_key).unwrap_or_default(),
         est: chapter.est_seconds.map(mmss),
     }
 }
@@ -311,6 +455,7 @@ pub fn plan_shown(plan: &Plan) -> PlanShown {
         .filter_map(|chapter| chapter.est_seconds)
         .collect();
     PlanShown {
+        n: plan.number,
         label: plan.label(),
         approved: plan.approved,
         working_title: body.working_title.clone(),
@@ -336,35 +481,96 @@ pub fn plan_shown(plan: &Plan) -> PlanShown {
     }
 }
 
-pub fn plan_view(session: &Session) -> PlanView {
+/// A textarea of one item per line, with the blank lines dropped.
+fn lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The plan's boxes, as the page posts them, over the version they were
+/// drawn from.
+///
+/// Keys are the plan's own field names — `working_title`, `hook_line`,
+/// `outline` — and `ch{n}.title`, `ch{n}.points` and so on for chapter *n*.
+/// A key that is absent leaves that field as it was, so a page that draws
+/// fewer boxes cannot blank what it did not show. Lists are one item per line.
+/// A chapter's kind and the plan's number, approval and sources are never
+/// taken from the page: the shape is the model's and `clean`'s, and the lock
+/// is [`plan::update`]'s.
+pub fn plan_from_fields(base: &Plan, fields: &BTreeMap<String, String>) -> Plan {
+    let mut plan = base.clone();
+    let text = |key: &str, into: &mut String| {
+        if let Some(value) = fields.get(key) {
+            *into = value.trim().to_string();
+        }
+    };
+    let list = |key: &str, into: &mut Vec<String>| {
+        if let Some(value) = fields.get(key) {
+            *into = lines(value);
+        }
+    };
+    let body = &mut plan.body;
+    text("working_title", &mut body.working_title);
+    text("audience", &mut body.audience);
+    text("promise", &mut body.promise);
+    text("hook_line", &mut body.hook.line);
+    text("hook_angle", &mut body.hook.angle);
+    list("outline", &mut body.outline);
+    text("cta_line", &mut body.cta.line);
+    text("cta_placement", &mut body.cta.placement);
+    list("instructions", &mut body.instructions);
+    for (i, chapter) in body.chapters.iter_mut().enumerate() {
+        let key = |name: &str| format!("ch{}.{name}", i + 1);
+        text(&key("title"), &mut chapter.title);
+        text(&key("goal"), &mut chapter.goal);
+        list(&key("points"), &mut chapter.points);
+        list(&key("cues"), &mut chapter.cues);
+        text(&key("show"), &mut chapter.show);
+        if let Some(value) = fields.get(&key("verbatim")) {
+            let value = value.trim();
+            chapter.verbatim = (!value.is_empty()).then(|| value.to_string());
+        }
+        if let Some(value) = fields.get(&key("layout")) {
+            chapter.layout = serde_json::from_value(serde_json::Value::String(value.clone())).ok();
+        }
+        if let Some(value) = fields.get(&key("est")) {
+            // Blank clears the estimate; anything unreadable — "1:" on the way
+            // to "1:30" — keeps the last one rather than dropping it.
+            if value.trim().is_empty() {
+                chapter.est_seconds = None;
+            } else if let Some(seconds) = parse_mmss(value) {
+                chapter.est_seconds = Some(seconds);
+            }
+        }
+    }
+    plan
+}
+
+/// Why the build buttons are off, or `None` when they are on. A running build
+/// comes first because it is the one that clears on its own.
+fn locked(live: PlanLive, selected: Option<&Plan>) -> Option<String> {
+    if live.building {
+        return Some("A plan is being built — progress is on the line above.".into());
+    }
+    if let Some(n) = live.recording {
+        return Some(format!(
+            "Take {n:02} is recording — stop it first, or it would be left out of the plan."
+        ));
+    }
+    selected.filter(|plan| plan.approved).map(|plan| {
+        format!(
+            "Plan {} is approved and locked — un-approve it to edit it, refine it or build again.",
+            plan.number
+        )
+    })
+}
+
+pub fn plan_view(session: &Session, live: PlanLive) -> PlanView {
     let dir = plan::dir(session);
     let input = plan::load_input(&dir);
-    let takes = plan::takes(&dir)
-        .iter()
-        .map(|take| {
-            let label = format!("Take {:02}", take.n);
-            match plan::take_text(take) {
-                TakeText::Words(text) => TakeRow {
-                    label,
-                    state: "ready",
-                    text,
-                    why: String::new(),
-                },
-                TakeText::Transcribing => TakeRow {
-                    label,
-                    state: "transcribing",
-                    text: String::new(),
-                    why: String::new(),
-                },
-                TakeText::Nothing(why) => TakeRow {
-                    label,
-                    state: "nothing",
-                    text: String::new(),
-                    why,
-                },
-            }
-        })
-        .collect();
     let selected = plan::selected(&dir);
     let loaded: Vec<(u32, Option<Plan>)> = plan::versions(&dir)
         .into_iter()
@@ -379,26 +585,34 @@ pub fn plan_view(session: &Session) -> PlanView {
             approved: plan.as_ref().is_some_and(|p| p.approved),
         })
         .collect();
-    let (plan, unreadable) = match selected {
+    let chosen = selected.map(|n| (n, plan::load(&dir, n)));
+    let (plan, unreadable) = match &chosen {
         None => (None, None),
-        Some(n) => match plan::load(&dir, n) {
-            Ok(plan) => (Some(plan_shown(&plan)), None),
-            Err(err) => (None, Some(format!("Plan {n} could not be read: {err:#}"))),
-        },
+        Some((_, Ok(plan))) => (Some(plan_shown(plan)), None),
+        Some((n, Err(err))) => (None, Some(format!("Plan {n} could not be read: {err:#}"))),
     };
+    let chosen = chosen.and_then(|(_, plan)| plan.ok());
     PlanView {
+        root: session.root.display().to_string(),
         instructions: input.instructions,
         typed: input.typed,
-        takes,
+        takes: take_rows(&dir, live.recording),
+        recording: live.recording,
+        recording_label: live.recording.map(|n| format!("Stop take {n:02}")),
+        building: live.building,
         versions,
         plan,
         unreadable,
+        locked: locked(live, chosen.as_ref()),
+        can_rehearse: !crate::notes::closed_chapter_numbers(&session.dir).is_empty(),
+        layouts: layout_options(),
     }
 }
 
-/// The Plan tab's pane.
-pub fn plan_page(session: &Session) -> String {
-    super::render::page("plan.html", plan_view(session))
+/// The Plan tab's pane, from a view already read — the app keeps the take
+/// rows it was drawn with, to patch them as transcripts land.
+pub fn plan_page(view: &PlanView) -> String {
+    super::render::page("plan.html", view)
 }
 
 #[cfg(test)]
@@ -505,8 +719,10 @@ mod tests {
     fn the_plan_view_reads_takes_input_and_the_selected_version() {
         let session = project("plan-view");
         let dir = plan::dir(&session);
-        let empty = plan_view(&session);
+        let empty = plan_view(&session, PlanLive::default());
         assert!(empty.plan.is_none() && empty.versions.is_empty() && empty.takes.is_empty());
+        assert_eq!(empty.locked, None);
+        assert!(!empty.can_rehearse, "no chapters recorded yet");
 
         plan::save_input(
             &dir,
@@ -527,27 +743,221 @@ mod tests {
         plan::save_new(&dir, plan("Two")).unwrap();
         plan::approve(&dir, 2, &session.root.join("notes")).unwrap();
 
-        let view = plan_view(&session);
+        let view = plan_view(&session, PlanLive::default());
         assert_eq!(view.instructions, "Keep it under five minutes.");
+        assert_eq!(view.root, session.root.display().to_string());
         let takes: Vec<_> = view
             .takes
             .iter()
             .map(|t| (t.label.as_str(), t.state))
             .collect();
-        assert_eq!(takes, [("Take 01", "ready"), ("Take 02", "transcribing")]);
+        // Take 02 has no transcript and no job behind it: nothing will finish
+        // it, so it is offered for a retry rather than shown as in progress.
+        assert_eq!(takes, [("Take 01", "ready"), ("Take 02", "orphaned")]);
+        assert!(view.takes[1].retry && !view.takes[0].retry);
         let labels: Vec<_> = view.versions.iter().map(|v| v.label.as_str()).collect();
         assert_eq!(labels, ["Plan 1", "Plan 2"]);
         assert!(view.versions[1].approved && view.versions[1].selected);
         let shown = view.plan.expect("the selected plan");
         assert_eq!(shown.label, "Plan 2 (approved)");
+        assert_eq!(shown.n, 2);
         assert_eq!(shown.chapters[2].kind_label, "Call to action");
         assert_eq!(shown.chapters[0].est.as_deref(), Some("0:40"));
         assert_eq!(shown.est_total.as_deref(), Some("2:00"));
+        assert!(view
+            .locked
+            .expect("approved locks")
+            .contains("Plan 2 is approved"));
+    }
+
+    /// Each take state has its own tag and buttons, and they come from one
+    /// place, since the pane's script patches a row with the same fields.
+    #[test]
+    fn take_rows_say_what_can_be_done_with_each_take() {
+        let session = project("take-rows");
+        let dir = plan::dir(&session);
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in 1..=5 {
+            std::fs::write(plan::take_path(&dir, n), "").unwrap();
+        }
+        let transcript = |n: u32, body: &str| {
+            std::fs::write(dir.join(format!("take-{n:02}.transcript.json")), body).unwrap()
+        };
+        transcript(1, r#"{"status":"completed","text":""}"#);
+        transcript(2, r#"{"status":"error","error":"upload timed out"}"#);
+        transcript(3, r#"{"status":"processing"}"#);
+        let busy = crate::notes::hold_running_for_test(&dir.join("take-03.transcript.json"))
+            .expect("free");
+
+        let rows = take_rows(&dir, Some(5));
+        let summary: Vec<_> = rows
+            .iter()
+            .map(|r| (r.state, r.tag, r.retry, r.can_delete))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("nothing", "No speech", false, true),
+                ("nothing", "Failed", true, true),
+                ("transcribing", "Transcribing…", false, false),
+                ("orphaned", "Not transcribed", true, true),
+                ("recording", "Recording…", false, false),
+            ]
+        );
+        assert_eq!(rows[1].why, "upload timed out");
+        drop(busy);
+    }
+
+    /// The page's states: the record button follows the take, and every
+    /// reason the build buttons are off is said beside them.
+    #[test]
+    fn the_plan_page_draws_its_live_states() {
+        let session = project("plan-page");
+        let dir = plan::dir(&session);
+        std::fs::create_dir_all(&dir).unwrap();
+        let idle = plan_page(&plan_view(&session, PlanLive::default()));
+        assert!(!idle.contains("template error"), "{idle}");
+        assert!(idle.contains("Record idea"));
+        assert!(idle.contains(r#""type":"planRecordToggle""#));
+        assert!(idle.contains("Build plan"));
+
+        std::fs::write(dir.join("take-01.m4a"), "").unwrap();
+        let recording = plan_page(&plan_view(
+            &session,
+            PlanLive {
+                recording: Some(1),
+                building: false,
+            },
+        ));
+        assert!(recording.contains("Stop take 01"), "{recording}");
+        assert!(recording.contains("stop it first"));
+
+        plan::save_new(&dir, plan("One")).unwrap();
+        let draft = plan_page(&plan_view(&session, PlanLive::default()));
+        assert!(draft.contains("Refine Plan 1"));
+        assert!(draft.contains(r#"data-field="ch2.title""#));
+        assert!(!draft.contains("readonly"), "a draft is editable");
+        assert!(draft.contains("Go to recording"));
+
+        let building = plan_page(&plan_view(
+            &session,
+            PlanLive {
+                recording: None,
+                building: true,
+            },
+        ));
+        assert!(building.contains("A plan is being built"));
+
+        plan::approve(&dir, 1, &session.root.join("notes")).unwrap();
+        let approved = plan_page(&plan_view(&session, PlanLive::default()));
+        assert!(approved.contains("readonly"), "an approved plan is locked");
+        assert!(approved.contains("Un-approve"));
+        assert!(approved.contains("un-approve it to edit it"));
+        assert!(!approved.contains(">v1<"), "plans are never called vN");
+    }
+
+    #[test]
+    fn hand_edits_land_on_their_fields_and_leave_the_rest_alone() {
+        let base = plan("One");
+        let mut fields = BTreeMap::new();
+        for (key, value) in [
+            ("working_title", "  Faster deploys "),
+            ("outline", "Slow\n\n  Cache  \nFast\n"),
+            ("ch2.title", "The cache"),
+            ("ch2.points", "Hit rate\nEviction"),
+            ("ch2.verbatim", "   "),
+            ("ch2.layout", "split"),
+            ("ch2.est", "1:30"),
+            ("ch3.est", "1:"),
+            ("ch1.est", ""),
+            // Never taken from the page.
+            ("number", "9"),
+            ("approved", "true"),
+        ] {
+            fields.insert(key.to_string(), value.to_string());
+        }
+        let edited = plan_from_fields(&base, &fields);
+        assert_eq!(edited.body.working_title, "Faster deploys");
+        assert_eq!(edited.body.outline, ["Slow", "Cache", "Fast"]);
+        let two = &edited.body.chapters[1];
+        assert_eq!(two.points, ["Hit rate", "Eviction"]);
+        assert_eq!(two.verbatim, None);
+        assert_eq!(two.layout, Some(crate::layouts::Pair::Split));
+        assert_eq!(two.est_seconds, Some(90));
+        assert_eq!(two.kind, ChapterKind::Body);
+        // Half-typed keeps the last estimate; blank clears it.
+        assert_eq!(edited.body.chapters[2].est_seconds, Some(40));
+        assert_eq!(edited.body.chapters[0].est_seconds, None);
+        // Absent keys are untouched.
+        assert_eq!(edited.body.audience, base.body.audience);
+        assert_eq!(edited.body.hook, base.body.hook);
+        assert_eq!(
+            (edited.number, edited.approved),
+            (base.number, base.approved)
+        );
+    }
+
+    /// The lock as the pane meets it: an edit posted to an approved version
+    /// is refused and changes nothing, un-approving lets the same edit land,
+    /// and the deck the approval wrote stays as it was.
+    #[test]
+    fn a_page_edit_to_an_approved_plan_is_refused_until_it_is_unapproved() {
+        let session = project("edit-lock");
+        let dir = plan::dir(&session);
+        let notes = session.root.join("notes");
+        plan::save_new(&dir, plan("One")).unwrap();
+        plan::approve(&dir, 1, &notes).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("working_title".to_string(), "Renamed".to_string());
+        let stored = plan::load(&dir, 1).unwrap();
+        let edited = plan_from_fields(&stored, &fields);
+        assert!(edited.approved, "the page cannot lift the lock");
+        let refused = plan::update(&dir, &edited).unwrap_err().to_string();
+        assert!(refused.contains("un-approve it to edit it"), "{refused}");
+        assert_eq!(plan::load(&dir, 1).unwrap().body.working_title, "One");
+
+        plan::unapprove(&dir, 1).unwrap();
+        let stored = plan::load(&dir, 1).unwrap();
+        plan::update(&dir, &plan_from_fields(&stored, &fields)).unwrap();
+        assert_eq!(plan::load(&dir, 1).unwrap().body.working_title, "Renamed");
+        assert_eq!(
+            crate::notes::load_notes(&notes).unwrap().title,
+            "One",
+            "un-approving and editing leave the approved deck alone"
+        );
+        let view = plan_view(&session, PlanLive::default());
+        assert_eq!(view.locked, None);
+        assert!(!view.plan.unwrap().approved);
+    }
+
+    #[test]
+    fn layout_keys_round_trip_through_the_picker() {
+        let options = layout_options();
+        let keys: Vec<_> = options.iter().map(|o| o.key.as_str()).collect();
+        assert_eq!(keys, ["talking-head", "split", "outline"]);
+        let mut fields = BTreeMap::new();
+        fields.insert("ch1.layout".to_string(), "talking-head".to_string());
+        let edited = plan_from_fields(&plan("One"), &fields);
+        assert_eq!(
+            edited.body.chapters[0].layout,
+            Some(crate::layouts::Pair::TalkingHead)
+        );
+        fields.insert("ch1.layout".to_string(), String::new());
+        assert_eq!(
+            plan_from_fields(&edited, &fields).body.chapters[0].layout,
+            None
+        );
     }
 
     #[test]
     fn estimates_read_as_minutes_and_seconds() {
         assert_eq!(mmss(45), "0:45");
         assert_eq!(mmss(125), "2:05");
+        assert_eq!(parse_mmss("2:05"), Some(125));
+        assert_eq!(parse_mmss(" 90 "), Some(90));
+        assert_eq!(parse_mmss("1:"), None);
+        assert_eq!(parse_mmss("1:5"), None);
+        assert_eq!(parse_mmss("1:75"), None);
     }
 }

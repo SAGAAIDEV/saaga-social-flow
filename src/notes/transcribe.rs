@@ -71,6 +71,14 @@ pub(crate) fn running(out: &Path) -> Option<Stage> {
     in_flight().get(out).cloned()
 }
 
+/// Holds `out` as running for as long as the guard lives — for tests of the
+/// waiters elsewhere, which could otherwise only see a running job by
+/// uploading real audio.
+#[cfg(test)]
+pub(crate) fn hold_running_for_test(out: &Path) -> Option<impl Drop> {
+    Registered::claim(out)
+}
+
 fn set_step(out: &Path, step: impl Into<String>) {
     if let Some(stage) = in_flight().get_mut(out) {
         stage.step = step.into();

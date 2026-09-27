@@ -2,26 +2,61 @@
 {% import "components.html" as ui %}
 {#
   The Plan tab: the author's idea, their instructions, and the plan built from
-  them. Read-only for now — the buttons are drawn where they will live and
-  stay disabled until the tab can record takes and call the model. Progress
-  goes on the native line above this pane, never into it, so a job's narration
-  will not repaint the page under someone typing.
+  them.
+
+  Progress — the idea take's timer, a build waiting on transcripts, the model
+  call — goes on the native line above this pane, never into it. A repaint
+  reloads the whole document, which would take the focus and the caret out of
+  whichever box is being typed in, so the page is only redrawn when the author
+  has just pressed one of its buttons (and so is not typing) or a plan lands.
+  A transcript arriving patches its one take row through `planTake` below
+  instead of redrawing.
+
+  Every box saves as it is typed, as the video details pane's notes do: the
+  instructions and typed idea to `plan/input.json`, the plan's boxes to the
+  version on screen. An approved version draws its boxes locked, and the app
+  refuses an edit to it regardless.
+
+  Every message carries `root`, the project the page was drawn for, so a click
+  on a page that is being replaced by another project's cannot act on the new
+  one.
 #}
 {% block content %}
 <style>
   .card { max-width: 900px; }
   .said { white-space: pre-wrap; }
-  .verbatim { border-left: 3px solid var(--accent); padding: 2px 10px; margin: 6px 0;
-              white-space: pre-wrap; }
   .versions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
-  .versions .tag.selected { color: #fff; border-color: var(--accent); }
+  .versions button { padding: 2px 10px; font-size: 12px; border-radius: 999px; }
+  .versions button.on { color: #fff; border-color: var(--accent); }
+  .versions button.approved { border-color: var(--ok); }
   .chapter h3 { font-size: 13px; margin: 0; font-weight: 600; }
-  .chapter .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  dl { margin: 6px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
-  dt { color: var(--dim); }
-  dd { margin: 0; }
   .locked { border-left: 3px solid var(--ok); }
+  .lockline { color: var(--warn); }
+  label.field { display: block; margin: 8px 0 0; }
+  label.field > span { display: block; color: var(--dim); font-size: 11px; margin-bottom: 2px; }
+  textarea, input.text, select {
+    width: 100%; font: inherit; color: var(--text); background: #0e1116;
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  textarea { resize: vertical; min-height: 30px; overflow: hidden; }
+  textarea:focus, input.text:focus, select:focus { outline: 1px solid var(--accent); }
+  .frozen textarea, .frozen input.text, .frozen select {
+    background: transparent; border-color: transparent; padding-left: 0;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 110px; gap: 0 10px; }
+  .take .row button { padding: 2px 10px; font-size: 12px; }
+  [hidden] { display: none !important; }
 </style>
+
+{% macro field(label, key, value, lock, multiline=false, rows=1, hint="") %}
+<label class="field"><span>{{ label }}</span>
+{% if multiline %}
+<textarea data-field="{{ key }}" rows="{{ rows }}" placeholder="{{ hint }}" {% if lock %}readonly{% endif %}>{{ value }}</textarea>
+{% else %}
+<input class="text" data-field="{{ key }}" value="{{ value }}" placeholder="{{ hint }}" {% if lock %}readonly{% endif %}>
+{% endif %}
+</label>
+{% endmacro %}
 
 <h1>Plan</h1>
 <p class="sub">Talk the idea through, add instructions, and build a plan: hook, chapters,
@@ -29,48 +64,69 @@
 
 <h2>Your idea</h2>
 <div class="bar">
-  {{ ui.action("Record idea", {"type": "planRecordToggle"}, primary=true, disabled=true) }}
+  {% if recording_label %}
+  {{ ui.action(recording_label, {"type": "planRecordToggle", "root": root}, primary=true) }}
+  {% else %}
+  {{ ui.action("Record idea", {"type": "planRecordToggle", "root": root}, primary=true, disabled=building) }}
+  {% endif %}
 </div>
-{% if takes %}
-  {% for take in takes %}
-  <div class="card">
-    <div class="row">
-      <strong class="grow">{{ take.label }}</strong>
-      {% if take.state == "ready" %}{{ ui.tag("Transcribed", "ok") }}
-      {% elif take.state == "transcribing" %}{{ ui.tag("Transcribing…") }}
-      {% else %}{{ ui.tag("Nothing usable", "warn") }}{% endif %}
-    </div>
-    {% if take.text %}<p class="why said">{{ take.text }}</p>{% endif %}
-    {% if take.why %}<p class="why">{{ take.why }}</p>{% endif %}
+<p class="muted">Mic only — no camera, nothing on screen. Talk it through as loosely as you
+  like; each take is transcribed when you stop, and every take with words goes into the plan.</p>
+{% for take in takes %}
+<div class="card take" data-take="{{ take.n }}">
+  <div class="row">
+    <strong class="grow">{{ take.label }}</strong>
+    <span class="tag {{ take.tone }}" data-role="tag">{{ take.tag }}</span>
+    <button data-role="retry" {% if not take.retry %}hidden{% endif %}
+      data-send='{{ {"type": "planRetryTake", "root": root, "n": take.n} | tojson }}'>Retry</button>
+    <button class="confirm" data-role="delete" {% if not take.can_delete %}disabled{% endif %}
+      data-send='{{ {"type": "planDeleteTake", "root": root, "n": take.n} | tojson }}'>Delete</button>
   </div>
-  {% endfor %}
-{% else %}
-  <p class="empty">No idea takes yet.</p>
-{% endif %}
-{% if typed %}
-<div class="card"><div class="muted">Typed</div><p class="why said">{{ typed }}</p></div>
-{% endif %}
-
-<h2>Your instructions</h2>
-{% if instructions %}
-<div class="card"><p class="why said">{{ instructions }}</p></div>
-{% else %}
-<p class="empty">No instructions yet — audience, tone, length, anything that must be said.</p>
-{% endif %}
-
-<div class="bar">
-  {{ ui.action("Build plan", {"type": "buildPlan", "refine": false}, primary=true, disabled=true) }}
-  {{ ui.action("Refine", {"type": "buildPlan", "refine": true}, disabled=true) }}
-  {{ ui.action("Plan from rehearsal", {"type": "planFromRehearsal"}, disabled=true) }}
+  <p class="why said" data-role="text" {% if not take.text %}hidden{% endif %}>{{ take.text }}</p>
+  <p class="why" data-role="why" {% if not take.why %}hidden{% endif %}>{{ take.why }}</p>
 </div>
-<p class="muted">These buttons are not wired up yet. Until they are,
-  <code>cargo run -- plan &lt;project folder&gt;</code> builds, refines and approves a plan.</p>
+{% else %}
+<p class="empty">No idea takes yet.</p>
+{% endfor %}
+<div data-input-form>
+  <label class="field"><span>Or type it — whatever is easier written than said</span>
+    <textarea data-input="typed" rows="3"
+      placeholder="The idea, a rough outline, links you want mentioned…">{{ typed }}</textarea>
+  </label>
+
+  <h2>Your instructions</h2>
+  <textarea data-input="instructions" rows="3"
+    placeholder="Audience, tone, length, anything that must be said.">{{ instructions }}</textarea>
+</div>
+
+<h2>Build</h2>
+{% if locked %}<p class="why lockline">{{ locked }}</p>{% endif %}
+{% if plan %}
+<label class="field"><span>Refine note — what should change in {{ "Plan " ~ plan.n }} (optional)</span>
+  <textarea id="refine-note" rows="2" placeholder="Shorter hook; split the second chapter in two…"
+    {% if locked %}disabled{% endif %}></textarea>
+</label>
+<div class="bar">
+  {{ ui.action("Refine Plan " ~ plan.n, {"type": "buildPlan", "root": root, "refine": true}, primary=true, disabled=locked) }}
+  {{ ui.action("Build a fresh plan", {"type": "buildPlan", "root": root, "refine": false}, disabled=locked) }}
+  {{ ui.action("Plan from rehearsal", {"type": "planFromRehearsal", "root": root}, disabled=(locked or not can_rehearse)) }}
+</div>
+{% else %}
+<div class="bar">
+  {{ ui.action("Build plan", {"type": "buildPlan", "root": root, "refine": false}, primary=true, disabled=locked) }}
+  {{ ui.action("Plan from rehearsal", {"type": "planFromRehearsal", "root": root}, disabled=(locked or not can_rehearse)) }}
+</div>
+{% endif %}
+<p class="muted">Every build is a new version; nothing is overwritten.
+  {% if not can_rehearse %}Plan from rehearsal needs chapters recorded in this version.
+  {% else %}Plan from rehearsal builds from this version's recorded chapters, beside any takes.{% endif %}</p>
 
 <h2>The plan</h2>
 {% if versions %}
 <div class="versions">
   {% for version in versions %}
-  <span class="tag {{ 'selected' if version.selected else '' }} {{ 'ok' if version.approved else '' }}">{{ version.label }}{% if version.approved %} · approved{% endif %}</span>
+  <button class="{{ 'on' if version.selected else '' }} {{ 'approved' if version.approved else '' }}"
+    data-send='{{ {"type": "selectPlanVersion", "root": root, "n": version.n} | tojson }}'>{{ version.label }}{% if version.approved %} · approved{% endif %}</button>
   {% endfor %}
 </div>
 {% endif %}
@@ -80,52 +136,65 @@
 {% elif not plan %}
 <p class="empty">No plan yet. Record or type the idea, then build one.</p>
 {% else %}
-<div class="card {{ 'locked' if plan.approved else '' }}">
+{% set lock = plan.approved %}
+<div data-plan data-n="{{ plan.n }}" class="{{ 'frozen' if lock else '' }}">
+<div class="card {{ 'locked' if lock else '' }}">
   <div class="row">
     <strong class="grow">{{ plan.label }}</strong>
-    {% if plan.approved %}{{ ui.tag("Approved — locked", "ok") }}{% else %}{{ ui.tag("Not approved", "warn") }}{% endif %}
-    {{ ui.action("Un-approve" if plan.approved else "Approve", {"type": "approvePlan", "value": not plan.approved}, disabled=true) }}
-    {{ ui.action("Save", {"type": "savePlan"}, disabled=true) }}
+    {% if lock %}{{ ui.tag("Approved — locked", "ok") }}{% else %}{{ ui.tag("Not approved", "warn") }}{% endif %}
+    {{ ui.action("Un-approve" if lock else "Approve", {"type": "approvePlan", "root": root, "n": plan.n, "value": not lock}, primary=not lock) }}
+    {{ ui.action("Go to recording →", {"type": "goToRecording"}) }}
   </div>
   <p class="why">
+    {% if lock %}The speaking notes on the Record tab are this plan.{% else %}Approving writes this plan into the speaking notes on the Record tab and locks it.{% endif %}
     {% if plan.refined_from %}Refined from {{ plan.refined_from }}{% if plan.refine_note %}: “{{ plan.refine_note }}”{% endif %}.{% endif %}
     {% if plan.sources %}Built from {{ plan.sources | join(", ") }}.{% endif %}
     {% if plan.est_total %}About {{ plan.est_total }} long.{% endif %}
   </p>
-  <dl>
-    <dt>Working title</dt><dd>{{ plan.working_title }}</dd>
-    {% if plan.audience %}<dt>Audience</dt><dd>{{ plan.audience }}</dd>{% endif %}
-    {% if plan.promise %}<dt>Promise</dt><dd>{{ plan.promise }}</dd>{% endif %}
-  </dl>
+  {{ field("Working title", "working_title", plan.working_title, lock) }}
+  {{ field("Audience", "audience", plan.audience, lock) }}
+  {{ field("Promise — what the viewer walks away with", "promise", plan.promise, lock, multiline=true) }}
 </div>
 
 <h2>Hook</h2>
 <div class="card">
-  <div class="verbatim">{{ plan.hook_line }}</div>
-  {% if plan.hook_angle %}<p class="why">{{ plan.hook_angle }}</p>{% endif %}
+  {{ field("Opening line, as it should be said", "hook_line", plan.hook_line, lock, multiline=true, rows=2) }}
+  {{ field("Why it lands", "hook_angle", plan.hook_angle, lock, multiline=true) }}
 </div>
 
-{{ ui.bullets("Outline", plan.outline) }}
+<h2>Outline</h2>
+<div class="card">
+  {{ field("The arc, one beat per line", "outline", plan.outline | join("\n"), lock, multiline=true, rows=4) }}
+</div>
 
 <h2>Chapters</h2>
 {% for chapter in plan.chapters %}
+{% set ch = "ch" ~ chapter.n ~ "." %}
 <div class="card chapter">
   <div class="row">
-    <h3 class="grow">{{ chapter.n }}. {{ chapter.title }}</h3>
+    <h3 class="grow">Chapter {{ chapter.n }}</h3>
     {{ ui.tag(chapter.kind_label, "ok" if chapter.kind != "body" else "") }}
   </div>
-  {% if chapter.goal %}<p class="why">{{ chapter.goal }}</p>{% endif %}
-  {% if chapter.verbatim %}<div class="verbatim">{{ chapter.verbatim }}</div>{% endif %}
-  {% if chapter.points %}
-  <ul>{% for point in chapter.points %}<li>{{ point }}</li>{% endfor %}</ul>
+  {{ field("Title — 2 to 5 words, the chapter card", ch ~ "title", chapter.title, lock) }}
+  {{ field("Goal — what the viewer understands by the end", ch ~ "goal", chapter.goal, lock) }}
+  {% if chapter.kind != "body" %}
+  {{ field("Said verbatim — empty uses the " ~ ("hook" if chapter.kind == "hook" else "call to action") ~ " line", ch ~ "verbatim", chapter.verbatim or "", lock, multiline=true) }}
+  {% else %}
+  {{ field("Said verbatim (optional)", ch ~ "verbatim", chapter.verbatim or "", lock, multiline=true) }}
   {% endif %}
-  {% if chapter.cues %}
-  <p class="why">Cues: {{ chapter.cues | join(" · ") }}</p>
-  {% endif %}
-  <div class="meta">
-    {% if chapter.show %}{{ ui.tag("On screen: " ~ chapter.show) }}{% endif %}
-    {% if chapter.layout %}{{ ui.tag("Layout: " ~ chapter.layout) }}{% endif %}
-    {% if chapter.est %}{{ ui.tag("≈ " ~ chapter.est) }}{% endif %}
+  {{ field("Points, one per line", ch ~ "points", chapter.points | join("\n"), lock, multiline=true, rows=3) }}
+  {{ field("Cues, one per line", ch ~ "cues", chapter.cues | join("\n"), lock, multiline=true) }}
+  <div class="grid">
+    {{ field("On screen", ch ~ "show", chapter.show, lock) }}
+    <label class="field"><span>Layout</span>
+      <select data-field="{{ ch }}layout" {% if lock %}disabled{% endif %}>
+        <option value="" {% if not chapter.layout_key %}selected{% endif %}>No suggestion</option>
+        {% for option in layouts %}
+        <option value="{{ option.key }}" {% if option.key == chapter.layout_key %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {{ field("Length", ch ~ "est", chapter.est or "", lock, hint="0:45") }}
   </div>
 </div>
 {% else %}
@@ -134,10 +203,117 @@
 
 <h2>Call to action</h2>
 <div class="card">
-  <div class="verbatim">{{ plan.cta_line }}</div>
-  {% if plan.cta_placement %}<p class="why">{{ plan.cta_placement }}</p>{% endif %}
+  {{ field("The ask, as it should be said", "cta_line", plan.cta_line, lock, multiline=true, rows=2) }}
+  {{ field("Where it lands and what earns it", "cta_placement", plan.cta_placement, lock, multiline=true) }}
 </div>
 
-{{ ui.bullets("Recording instructions", plan.instructions) }}
+<h2>Recording instructions</h2>
+<div class="card">
+  {{ field("Setup, what to have open, delivery — one per line", "instructions", plan.instructions | join("\n"), lock, multiline=true, rows=3) }}
+</div>
+</div>
 {% endif %}
+
+<script>
+  const ROOT = {{ root | tojson }};
+
+  // Boxes grow with what is in them, so a plan reads as a page rather than a
+  // stack of little scrolling windows.
+  function fit(box) {
+    box.style.height = 'auto';
+    box.style.height = box.scrollHeight + 2 + 'px';
+  }
+  document.querySelectorAll('textarea').forEach(fit);
+  document.addEventListener('input', function (event) {
+    if (event.target.tagName === 'TEXTAREA') fit(event.target);
+  });
+
+  // The author's own words, whole, on every keystroke — no Save button, and no
+  // repaint, so the caret stays where it is.
+  const inputForm = document.querySelector('[data-input-form]');
+  inputForm.addEventListener('input', function () {
+    const fields = { root: ROOT };
+    inputForm.querySelectorAll('[data-input]').forEach(function (box) {
+      fields[box.dataset.input] = box.value;
+    });
+    send({ type: 'savePlanInput', fields: fields });
+  });
+
+  // The plan's boxes, whole, into the version they were drawn from. A locked
+  // version sends nothing: the app would refuse it anyway, and saying so on
+  // every keystroke would be noise.
+  const planForm = document.querySelector('[data-plan]');
+  function savePlan() {
+    if (!planForm || planForm.classList.contains('frozen')) return;
+    const fields = { root: ROOT, number: planForm.dataset.n };
+    planForm.querySelectorAll('[data-field]').forEach(function (box) {
+      fields[box.dataset.field] = box.value;
+    });
+    send({ type: 'savePlan', fields: fields });
+  }
+  if (planForm) {
+    planForm.addEventListener('input', savePlan);
+    planForm.addEventListener('change', function (event) {
+      if (event.target.tagName === 'SELECT') savePlan();
+    });
+  }
+
+  // Buttons that need more than their payload, handled before base.html's
+  // generic sender: Refine carries the note box, and Delete asks twice —
+  // the webview has no confirm dialog to lean on, and a take is not undoable.
+  document.addEventListener('click', function (event) {
+    const el = event.target.closest('[data-send]');
+    if (!el || el.disabled) return;
+    const payload = JSON.parse(el.dataset.send);
+    if (payload.type === 'buildPlan' && payload.refine) {
+      const note = document.getElementById('refine-note');
+      payload.note = note ? note.value : '';
+      send(payload);
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (el.classList.contains('confirm') && !el.dataset.armed) {
+      el.dataset.armed = '1';
+      el.textContent = 'Delete — sure?';
+      setTimeout(function () { delete el.dataset.armed; el.textContent = 'Delete'; }, 4000);
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  // One take row, patched in place when its transcript lands. The fields are
+  // `ui::planning::TakeRow`'s, the same ones the row above was drawn from.
+  window.planTake = function (row) {
+    const card = document.querySelector('[data-take="' + row.n + '"]');
+    if (!card) return;
+    const tag = card.querySelector('[data-role=tag]');
+    tag.className = 'tag ' + row.tone;
+    tag.textContent = row.tag;
+    card.querySelector('[data-role=retry]').hidden = !row.retry;
+    card.querySelector('[data-role=delete]').disabled = !row.can_delete;
+    const text = card.querySelector('[data-role=text]');
+    text.textContent = row.text;
+    text.hidden = !row.text;
+    const why = card.querySelector('[data-role=why]');
+    why.textContent = row.why;
+    why.hidden = !row.why;
+  };
+
+  // A repaint reloads the document and would land at the top every time a
+  // version is picked or a plan approved at the bottom. `window.name` outlives
+  // the reload within this webview, so the scroll position rides on it.
+  (function () {
+    const KEY = 'plan-scroll:';
+    if (window.name.indexOf(KEY) === 0) {
+      const saved = window.name.slice(KEY.length).split('|');
+      if (saved[0] === ROOT) window.scrollTo(0, parseInt(saved[1], 10) || 0);
+    }
+    let pending = null;
+    window.addEventListener('scroll', function () {
+      clearTimeout(pending);
+      pending = setTimeout(function () {
+        window.name = KEY + ROOT + '|' + Math.round(window.scrollY);
+      }, 100);
+    });
+  })();
+</script>
 {% endblock %}

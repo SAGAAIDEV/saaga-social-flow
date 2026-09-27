@@ -22,8 +22,15 @@ pub use deck::{load as load_notes, NotesData, NOTES_JSON};
 pub(crate) use deck::{render_as as render_deck, write_as as write_deck, Chapter};
 pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
 pub use picker::Picker;
+#[cfg(test)]
+pub(crate) use transcribe::hold_running_for_test;
 pub(crate) use transcribe::record_failure as record_transcript_failure;
 pub use transcribe::spawn_chapter_transcript;
+// Path-based, for audio that is not a numbered chapter: the Plan tab's idea
+// takes wait on their transcripts with these, as the chapter waiters below do.
+pub(crate) use transcribe::{
+    running as transcript_running, transcript_path, Stage as TranscriptStage,
+};
 pub use view::NotesPane;
 
 use crate::session::Session;

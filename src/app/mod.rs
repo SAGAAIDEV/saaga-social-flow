@@ -17,6 +17,7 @@ mod devices;
 pub(crate) mod face;
 mod figures;
 pub(crate) mod framing;
+mod plan;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
@@ -157,6 +158,9 @@ pub struct App {
     /// `figures::Break`. Any open chapter is paused for as long as this is
     /// `Some`, and every path that finishes a chapter ends it first.
     aside: Option<figures::Break>,
+    /// The Plan tab's idea take, if one is recording, and its build job —
+    /// see [`plan`].
+    plan: plan::PlanState,
     thumbnail_tx: mpsc::Sender<crate::thumbnail::ThumbnailEvent>,
     thumbnail_rx: Receiver<crate::thumbnail::ThumbnailEvent>,
     thumbnail_busy: bool,
@@ -510,8 +514,10 @@ impl App {
         match action {
             Action::Quit => {
                 // The aside's writer hangs off the capture session; it has to
-                // be finished before that session stops delivering.
+                // be finished before that session stops delivering. An idea
+                // take is an aside too.
                 self.end_break(false);
+                self.finish_plan_take();
                 // Stop capture first so no more sample buffers race the
                 // writers while the router finishes the final chapter.
                 if let Some(ref conn) = self.connection {
@@ -700,6 +706,10 @@ impl App {
     }
 
     fn start_or_cut(&mut self) {
+        // An idea take and a chapter do not overlap — see `app::plan`.
+        if self.plan_take_blocks_recording() {
+            return;
+        }
         // New Chapter on a break ends it and then cuts: the operator asked for
         // the next chapter, not for the take to stay paused.
         self.end_break(true);
@@ -927,6 +937,18 @@ impl App {
             UiEvent::RegionPlaced { orientation, rect } => self.region_placed(orientation, rect),
             UiEvent::FigureSnipped { rect } => self.figure_snipped(rect),
             UiEvent::FigureSnipCancelled => self.figure_snip_cancelled(),
+            UiEvent::PlanRecordToggle { root } => self.toggle_plan_take(&root),
+            UiEvent::PlanDeleteTake { root, n } => self.delete_plan_take(&root, n),
+            UiEvent::PlanRetryTake { root, n } => self.retry_plan_take(&root, n),
+            UiEvent::SavePlanInput(fields) => self.save_plan_input(&fields),
+            UiEvent::BuildPlan { root, refine, note } => {
+                self.build_plan(&root, refine, &note, false)
+            }
+            UiEvent::PlanFromRehearsal { root } => self.build_plan(&root, false, "", true),
+            UiEvent::SavePlan(fields) => self.save_plan(&fields),
+            UiEvent::SelectPlanVersion { root, n } => self.select_plan_version(&root, n),
+            UiEvent::ApprovePlan { root, n, value } => self.approve_plan(&root, n, value),
+            UiEvent::GoToRecording => self.go_to_recording(),
         }
     }
 
@@ -1011,15 +1033,6 @@ impl App {
         }
     }
 
-    /// The Plan tab's pane: the author's input, the idea takes and the
-    /// selected plan version. Per project, like the plan itself, so a version
-    /// switch leaves it alone and a project switch redraws it.
-    fn update_plan_view(&self) {
-        if let Some(live) = self.live.as_ref() {
-            live.plan_pane.show(&ui::planning::plan_page(&self.session));
-        }
-    }
-
     /// The Project tab's line, for what Clean Up freed. It used to share the
     /// render status line, which is on the Record tab — the one place a press
     /// on the Project tab would never be seen.
@@ -1062,20 +1075,8 @@ impl App {
     /// before it runs, then wrote that copy into the new version as though it had
     /// been generated there.
     fn refresh_version_views(&mut self) {
+        self.reload_deck();
         if let Some(live) = self.live.as_ref() {
-            // A video with no notes yet but suggested shorts shows those: it is
-            // the deck the Start Short menu is read against.
-            let deck = crate::notes::existing_html(&self.session).or_else(|| {
-                (!self.session.is_short())
-                    .then(|| crate::shorts::suggestions_html(&self.session.root))
-                    .flatten()
-            });
-            if let Some(html) = deck {
-                live.notes.load(&html);
-                live.notes.reset_slide();
-            } else {
-                live.notes.show_placeholder();
-            }
             live.window.set_title(&self.window_title());
             live.control_target
                 .set_versions(&self.session.list_versions(), self.session.version);
@@ -1099,6 +1100,28 @@ impl App {
         // The open version's row, and its deck, are on the Project tab.
         self.update_project_view();
         self.sync_controls();
+    }
+
+    /// Load the speaking-notes deck into the Record tab's teleprompter, from
+    /// disk. Its own step because approving a plan rewrites the deck without
+    /// anything else a version switch reloads having changed.
+    fn reload_deck(&self) {
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        // A video with no notes yet but suggested shorts shows those: it is
+        // the deck the Start Short menu is read against.
+        let deck = crate::notes::existing_html(&self.session).or_else(|| {
+            (!self.session.is_short())
+                .then(|| crate::shorts::suggestions_html(&self.session.root))
+                .flatten()
+        });
+        if let Some(html) = deck {
+            live.notes.load(&html);
+            live.notes.reset_slide();
+        } else {
+            live.notes.show_placeholder();
+        }
     }
 
     /// The chapter a recording would open next: one past the highest already
@@ -1133,6 +1156,8 @@ impl App {
     /// Points every tab at `next`. Anything missed here would keep showing the
     /// previous project's work.
     fn adopt_session(&mut self, next: crate::session::Session) {
+        // An idea take is filed in the project it was started in.
+        self.finish_plan_take();
         self.session = next;
         self.next_chapter = self.resume_chapter_number();
         self.refresh_version_views();
@@ -4216,6 +4241,8 @@ impl ApplicationHandler for App {
             live.preview.pump();
         }
         self.tick_timer();
+        self.tick_plan();
+        self.drain_plan();
         self.drain_notes();
         self.drain_render();
         self.drain_deps();

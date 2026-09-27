@@ -338,6 +338,7 @@ pub fn run_record_session(
         figure_rx,
         figure_busy: false,
         aside: None,
+        plan: Default::default(),
         card_tx,
         card_rx,
         card_raster: None,

@@ -205,6 +205,48 @@ pub enum WebEvent {
     /// Settings → YouTube: copy the stored refresh token. The page never holds
     /// the token itself, so it asks for it to be copied rather than sending it.
     CopyYoutubeRefreshToken,
+
+    /// The Plan tab. Each carries the project root the page was drawn for —
+    /// see [`UiEvent::PlanRecordToggle`].
+    PlanRecordToggle {
+        root: String,
+    },
+    PlanDeleteTake {
+        root: String,
+        n: u32,
+    },
+    PlanRetryTake {
+        root: String,
+        n: u32,
+    },
+    /// `root`, `instructions` and `typed`, as typed.
+    SavePlanInput {
+        fields: std::collections::BTreeMap<String, String>,
+    },
+    BuildPlan {
+        root: String,
+        refine: bool,
+        /// The refine box, read from the page when the button is pressed.
+        #[serde(default)]
+        note: String,
+    },
+    PlanFromRehearsal {
+        root: String,
+    },
+    /// Every box of the plan on screen, keyed as `ui::planning` names them.
+    SavePlan {
+        fields: std::collections::BTreeMap<String, String>,
+    },
+    SelectPlanVersion {
+        root: String,
+        n: u32,
+    },
+    ApprovePlan {
+        root: String,
+        n: u32,
+        value: bool,
+    },
+    GoToRecording,
 }
 
 impl WebEvent {
@@ -261,6 +303,16 @@ impl WebEvent {
             WebEvent::PhotoCountdown { value } => UiEvent::PhotoCountdown(value),
             WebEvent::ConnectYoutube => UiEvent::Action(crate::hotkeys::Action::ConnectYoutube),
             WebEvent::CopyYoutubeRefreshToken => UiEvent::CopyYoutubeRefreshToken,
+            WebEvent::PlanRecordToggle { root } => UiEvent::PlanRecordToggle { root },
+            WebEvent::PlanDeleteTake { root, n } => UiEvent::PlanDeleteTake { root, n },
+            WebEvent::PlanRetryTake { root, n } => UiEvent::PlanRetryTake { root, n },
+            WebEvent::SavePlanInput { fields } => UiEvent::SavePlanInput(fields),
+            WebEvent::BuildPlan { root, refine, note } => UiEvent::BuildPlan { root, refine, note },
+            WebEvent::PlanFromRehearsal { root } => UiEvent::PlanFromRehearsal { root },
+            WebEvent::SavePlan { fields } => UiEvent::SavePlan(fields),
+            WebEvent::SelectPlanVersion { root, n } => UiEvent::SelectPlanVersion { root, n },
+            WebEvent::ApprovePlan { root, n, value } => UiEvent::ApprovePlan { root, n, value },
+            WebEvent::GoToRecording => UiEvent::GoToRecording,
         }
     }
 }
@@ -717,6 +769,68 @@ mod tests {
             event.into_ui_event(),
             UiEvent::RenderTarget { name, value: false } if name == "shorts"
         ));
+    }
+
+    /// The Plan tab's messages, each scoped to the project its page was drawn
+    /// for. A refine note is optional on the wire — Build plan sends none.
+    #[test]
+    fn the_plan_messages_parse_with_their_project() {
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"planRecordToggle","root":"/p"}"#).unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::PlanRecordToggle { root } if root == "/p"
+        ));
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"planDeleteTake","root":"/p","n":2}"#).unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::PlanDeleteTake { n: 2, .. }
+        ));
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"buildPlan","root":"/p","refine":false}"#).unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::BuildPlan { refine: false, note, .. } if note.is_empty()
+        ));
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"buildPlan","root":"/p","refine":true,"note":"Shorter hook."}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::BuildPlan { refine: true, note, .. } if note == "Shorter hook."
+        ));
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"approvePlan","root":"/p","n":3,"value":false}"#)
+                .unwrap();
+        assert!(matches!(
+            event.into_ui_event(),
+            UiEvent::ApprovePlan {
+                n: 3,
+                value: false,
+                ..
+            }
+        ));
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"savePlan","fields":{"root":"/p","number":"2","ch1.title":"Open"}}"#,
+        )
+        .unwrap();
+        let UiEvent::SavePlan(fields) = event.into_ui_event() else {
+            panic!("wrong event")
+        };
+        assert_eq!(fields["ch1.title"], "Open");
+        assert!(matches!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"goToRecording"}"#)
+                .unwrap()
+                .into_ui_event(),
+            UiEvent::GoToRecording
+        ));
+        // An approval with no version named is refused, not guessed at.
+        assert!(serde_json::from_str::<WebEvent>(
+            r#"{"type":"approvePlan","root":"/p","value":true}"#
+        )
+        .is_err());
     }
 
     #[test]

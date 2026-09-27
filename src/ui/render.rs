@@ -1218,13 +1218,13 @@ mod tests {
         context! {
             n => n, kind => kind, kind_label => label, title => title, goal => "", points => vec!["a point"],
             verbatim => None::<String>, cues => Vec::<String>::new(), show => "", layout => None::<String>,
-            est => None::<String>,
+            layout_key => "", est => None::<String>,
         }
     }
 
     fn a_plan(approved: bool) -> minijinja::Value {
         context! {
-            label => if approved { "Plan 2 (approved)" } else { "Plan 2" }, approved => approved,
+            n => 2, label => if approved { "Plan 2 (approved)" } else { "Plan 2" }, approved => approved,
             working_title => "Ship it", audience => "Engineers", promise => "A faster deploy",
             hook_line => "Your deploy takes an hour.", hook_angle => "",
             outline => vec!["The hour", "The fix"],
@@ -1234,7 +1234,7 @@ mod tests {
                     n => 2, kind => "body", kind_label => "Body", title => "The cache",
                     goal => "Why it misses", points => vec!["keys change"],
                     verbatim => None::<String>, cues => vec!["pause"], show => "the build log",
-                    layout => "Split", est => "1:30",
+                    layout => "Split", layout_key => "split", est => "1:30",
                 },
                 plan_chapter(3, "cta", "Call to action", "Next time"),
             ],
@@ -1245,6 +1245,14 @@ mod tests {
         }
     }
 
+    fn layouts() -> Vec<minijinja::Value> {
+        vec![
+            context! { key => "talking-head", label => "Talking Head" },
+            context! { key => "split", label => "Split" },
+            context! { key => "outline", label => "Outline" },
+        ]
+    }
+
     fn plan_versions(approved: bool) -> Vec<minijinja::Value> {
         vec![
             context! { n => 1, label => "Plan 1", selected => false, approved => false },
@@ -1253,27 +1261,41 @@ mod tests {
     }
 
     /// Nothing recorded, typed or built: every section says what fills it,
-    /// and the buttons are drawn but cannot be pressed yet.
+    /// Record idea and Build plan are ready, and Plan from rehearsal is off
+    /// until this version has chapters to plan from.
     #[test]
     fn an_empty_plan_pane_says_what_to_do_first() {
         let html = page(
             "plan.html",
             context! {
-                instructions => "", typed => "", takes => Vec::<()>::new(),
+                root => "/tmp/project", instructions => "", typed => "", takes => Vec::<()>::new(),
+                recording => None::<u32>, recording_label => None::<String>, building => false,
                 versions => Vec::<()>::new(), plan => None::<()>, unreadable => None::<String>,
+                locked => None::<String>, can_rehearse => false, layouts => layouts(),
             },
         );
         assert!(!html.contains("template error"), "{html}");
         assert!(html.contains("No idea takes yet"));
-        assert!(html.contains("No instructions yet"));
+        assert!(
+            html.contains("Audience, tone, length"),
+            "the instructions box says what goes in it"
+        );
         assert!(html.contains("No plan yet"));
-        for label in ["Record idea", "Build plan", "Refine", "Plan from rehearsal"] {
+        assert!(!html.contains("Refine Plan"), "nothing to refine yet");
+        let button = |label: &str| {
             let at = html
                 .find(label)
                 .unwrap_or_else(|| panic!("{label} is drawn"));
-            let button = &html[html[..at].rfind("<button").unwrap()..at];
-            assert!(button.contains("disabled"), "{label} is inert: {button}");
-        }
+            html[html[..at].rfind("<button").unwrap()..at].to_string()
+        };
+        assert!(!button("Record idea").contains("disabled"));
+        assert!(!button("Build plan").contains("disabled"));
+        assert!(button("Plan from rehearsal").contains("disabled"));
+        assert!(html.contains("needs chapters recorded in this version"));
+        assert!(
+            html.contains(r#""root":"/tmp/project""#),
+            "messages carry the project"
+        );
     }
 
     /// The author's own words go into the page as text, never as markup.
@@ -1307,6 +1329,8 @@ mod tests {
                     context! { label => "Take 02", state => "nothing", text => "", why => "silent" },
                 ],
                 versions => plan_versions(true), plan => a_plan(true), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(),
+                locked => "Plan 2 is approved and locked — un-approve it to edit it, refine it or build again.",
             },
         );
         assert!(!html.contains("template error"), "{html}");
@@ -1323,9 +1347,9 @@ mod tests {
         for part in [
             "Why it misses",
             "keys change",
-            "On screen: the build log",
-            "Layout: Split",
-            "≈ 1:30",
+            r#"value="the build log""#,
+            r#"<option value="split" selected>Split</option>"#,
+            r#"value="1:30""#,
             "Call to action",
             "Have the dashboard open",
             "Refined from Plan 1",
@@ -1339,8 +1363,13 @@ mod tests {
             context! {
                 instructions => "", typed => "", takes => Vec::<()>::new(),
                 versions => plan_versions(false), plan => a_plan(false), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(), locked => None::<String>,
             },
         );
+        // Locked: every box read-only, and why the build buttons are off.
+        assert!(html.contains("readonly"));
+        assert!(html.contains("un-approve it to edit it"));
+        assert!(!draft.contains("readonly"), "a draft is editable");
         assert!(!draft.contains("Approved — locked"));
         assert!(draft.contains("Not approved") && draft.contains(">Approve<"));
     }
@@ -1355,6 +1384,7 @@ mod tests {
             context! {
                 instructions => "", typed => "", takes => Vec::<()>::new(),
                 versions => plan_versions(false), plan => a_plan(false), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(), locked => None::<String>,
             },
         );
         assert!(!html.contains("template error"), "{html}");

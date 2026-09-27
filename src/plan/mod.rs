@@ -140,8 +140,6 @@ pub fn save_new(dir: &Path, mut plan: Plan) -> Result<Plan> {
 
 /// A hand edit to an existing version. Refused on an approved one — that is
 /// what approving means — and it cannot approve or renumber through here.
-// The Plan tab's autosave (phase 3).
-#[allow(dead_code)]
 pub fn update(dir: &Path, plan: &Plan) -> Result<()> {
     let stored = load(dir, plan.number)?;
     if stored.approved {
@@ -236,12 +234,113 @@ pub fn takes(dir: &Path) -> Vec<Take> {
     out
 }
 
-/// Where the next idea take is recorded.
-// Record idea on the Plan tab (phase 3).
-#[allow(dead_code)]
-pub fn next_take_path(dir: &Path) -> PathBuf {
-    let n = takes(dir).last().map_or(1, |take| take.n + 1);
+/// The number the next idea take is recorded under: one past the highest on
+/// disk, so a deleted take in the middle leaves a gap rather than a reused
+/// name.
+pub fn next_take_number(dir: &Path) -> u32 {
+    takes(dir).last().map_or(1, |take| take.n + 1)
+}
+
+pub fn take_path(dir: &Path, n: u32) -> PathBuf {
     dir.join(format!("take-{n:02}.m4a"))
+}
+
+/// Delete an idea take: its audio and its transcript, so the plan is never
+/// built from words whose recording is gone. Refused while its transcript is
+/// still being written — the job would land its file after the delete, and if
+/// the next take reused the number, that stale transcript would sit where the
+/// new take's belongs and read as already done.
+pub fn delete_take(dir: &Path, n: u32) -> Result<()> {
+    let audio = take_path(dir, n);
+    let transcript = crate::notes::transcript_path(&audio);
+    if crate::notes::transcript_running(&transcript).is_some() {
+        bail!("take {n:02} is still transcribing — delete it once that finishes");
+    }
+    if !audio.is_file() && !transcript.is_file() {
+        bail!("there is no take {n:02}");
+    }
+    for path in [&audio, &transcript] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).with_context(|| format!("deleting {}", path.display())),
+        }
+    }
+    Ok(())
+}
+
+/// Where an idea take's transcript job stands, for a job about to wait on it.
+///
+/// The chapter waiters in `notes` build `chapter-NN` names inside a recording
+/// folder, so they cannot be pointed at `plan/take-NN`; this is the same three
+/// states over the take's own transcript path.
+#[derive(Debug, Clone)]
+pub enum TakeJob {
+    /// The transcript says the job is over: words, silence, a skip or an error.
+    Finished,
+    /// A job is running for it in this process right now, on this step.
+    Running(crate::notes::TranscriptStage),
+    /// Neither: no transcript, or a `processing` one with nothing behind it —
+    /// the app quit mid-upload, say. Nothing is going to finish it.
+    Orphaned,
+}
+
+pub fn take_job(take: &Take) -> TakeJob {
+    let out = crate::notes::transcript_path(&take.audio);
+    if let Some(stage) = crate::notes::transcript_running(&out) {
+        return TakeJob::Running(stage);
+    }
+    match crate::notes::load_transcript_at(&take.audio) {
+        Some(transcript) if crate::notes::is_terminal(&transcript) => TakeJob::Finished,
+        _ => TakeJob::Orphaned,
+    }
+}
+
+/// Why an orphaned take is marked failed, in the words the Plan tab shows.
+pub const ORPHANED: &str = "no transcript job is running for this take (the app may have quit \
+                            mid-transcript) — press Retry to send it again";
+
+/// The takes among `numbers` a transcript job is still running for, with its
+/// step. An orphaned take is marked failed on the way, with a reason, rather
+/// than waited on forever — the same rule as `notes::still_running`.
+pub fn takes_still_running(
+    dir: &Path,
+    numbers: &[u32],
+) -> Vec<(u32, crate::notes::TranscriptStage)> {
+    numbers
+        .iter()
+        .filter_map(|&n| {
+            let take = Take {
+                n,
+                audio: take_path(dir, n),
+            };
+            match take_job(&take) {
+                TakeJob::Running(stage) => Some((n, stage)),
+                TakeJob::Finished => None,
+                TakeJob::Orphaned => {
+                    // A take deleted since the job started has nothing to mark.
+                    if take.audio.is_file() {
+                        crate::notes::record_transcript_failure(&take.audio, ORPHANED);
+                    }
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// "Waiting for take 02 (uploading, 0m05s) transcript…" — the chapter
+/// waiter's wording, so a build and a render read alike.
+pub fn take_waiting_message(running: &[(u32, crate::notes::TranscriptStage)]) -> String {
+    let parts: Vec<String> = running
+        .iter()
+        .map(|(n, stage)| {
+            let secs = stage.since.elapsed().as_secs();
+            format!("{n:02} ({}, {}m{:02}s)", stage.step, secs / 60, secs % 60)
+        })
+        .collect();
+    let noun = if running.len() == 1 { "take" } else { "takes" };
+    format!("Waiting for {noun} {} transcript…", parts.join(", "))
 }
 
 /// Where a take's transcript stands, for saying so.
@@ -576,7 +675,10 @@ mod tests {
     #[test]
     fn takes_are_listed_in_order_and_the_next_one_follows_the_last() {
         let dir = temp("takes");
-        assert_eq!(next_take_path(&dir), dir.join("take-01.m4a"));
+        assert_eq!(
+            take_path(&dir, next_take_number(&dir)),
+            dir.join("take-01.m4a")
+        );
         for name in [
             "take-02.m4a",
             "take-01.m4a",
@@ -587,7 +689,10 @@ mod tests {
         }
         let listed: Vec<u32> = takes(&dir).iter().map(|t| t.n).collect();
         assert_eq!(listed, [1, 2]);
-        assert_eq!(next_take_path(&dir), dir.join("take-03.m4a"));
+        assert_eq!(
+            take_path(&dir, next_take_number(&dir)),
+            dir.join("take-03.m4a")
+        );
     }
 
     #[test]
@@ -610,6 +715,74 @@ mod tests {
         );
         std::fs::write(&transcript, r#"{"status":"skipped","error":"silent"}"#).unwrap();
         assert_eq!(take_text(&take), TakeText::Nothing("silent".into()));
+    }
+
+    /// The plan job waits on a take only while a job is actually running for
+    /// it. A take with neither a job nor a finished transcript is marked
+    /// failed with a reason and not waited on — a quit mid-upload must not
+    /// hold every later build for the waiter's full timeout.
+    #[test]
+    fn the_take_waiter_waits_only_on_running_jobs_and_fails_orphans() {
+        let dir = temp("waiter");
+        for n in 1..=3 {
+            std::fs::write(take_path(&dir, n), "").unwrap();
+        }
+        std::fs::write(
+            dir.join("take-01.transcript.json"),
+            r#"{"status":"completed","text":"Deploys are slow."}"#,
+        )
+        .unwrap();
+        let running = crate::notes::hold_running_for_test(&dir.join("take-02.transcript.json"))
+            .expect("free");
+
+        let waiting = takes_still_running(&dir, &[1, 2, 3]);
+        let numbers: Vec<u32> = waiting.iter().map(|(n, _)| *n).collect();
+        assert_eq!(numbers, [2], "only the take with a live job is waited on");
+        let line = take_waiting_message(&waiting);
+        assert!(line.starts_with("Waiting for take 02 (starting"), "{line}");
+
+        // Take 03 had nothing behind it: it now reads as finished, with why.
+        let three = Take {
+            n: 3,
+            audio: take_path(&dir, 3),
+        };
+        assert!(matches!(take_job(&three), TakeJob::Finished));
+        match take_text(&three) {
+            TakeText::Nothing(why) => assert!(why.contains("Retry"), "{why}"),
+            other => panic!("expected a failed take, got {other:?}"),
+        }
+
+        drop(running);
+        // Its job ended without writing a transcript: orphaned in turn.
+        assert!(takes_still_running(&dir, &[1, 2, 3]).is_empty());
+    }
+
+    #[test]
+    fn deleting_a_take_removes_its_transcript_and_refuses_while_transcribing() {
+        let dir = temp("delete-take");
+        std::fs::write(take_path(&dir, 1), "").unwrap();
+        std::fs::write(dir.join("take-01.transcript.json"), "{}").unwrap();
+        std::fs::write(take_path(&dir, 2), "").unwrap();
+
+        let busy = crate::notes::hold_running_for_test(&dir.join("take-02.transcript.json"))
+            .expect("free");
+        let refused = delete_take(&dir, 2).unwrap_err().to_string();
+        assert!(refused.contains("still transcribing"), "{refused}");
+        assert!(
+            take_path(&dir, 2).is_file(),
+            "a refused delete touches nothing"
+        );
+        drop(busy);
+
+        delete_take(&dir, 1).unwrap();
+        assert!(!take_path(&dir, 1).exists());
+        assert!(!dir.join("take-01.transcript.json").exists());
+        assert!(
+            delete_take(&dir, 1).is_err(),
+            "there is no take 01 any more"
+        );
+        // A gap is left, not refilled: the next take follows the highest.
+        assert_eq!(next_take_number(&dir), 3);
     }
 
     #[test]

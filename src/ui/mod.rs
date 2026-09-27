@@ -278,6 +278,52 @@ pub enum UiEvent {
     FigureSnipped {
         rect: PointRect,
     },
+    /// The Plan tab's Record idea / Stop button. Every Plan event carries the
+    /// project root its page was drawn for, so a click on a page replaced
+    /// mid-switch cannot record into, delete from or approve in another project.
+    PlanRecordToggle {
+        root: String,
+    },
+    /// Delete idea take `n`, its audio and its transcript.
+    PlanDeleteTake {
+        root: String,
+        n: u32,
+    },
+    /// Send idea take `n` to be transcribed again, after a failure.
+    PlanRetryTake {
+        root: String,
+        n: u32,
+    },
+    /// The instructions and typed-idea boxes, whole, on every keystroke.
+    SavePlanInput(std::collections::BTreeMap<String, String>),
+    /// Build a new plan version: fresh, or refined from the selected one with
+    /// the refine note.
+    BuildPlan {
+        root: String,
+        refine: bool,
+        note: String,
+    },
+    /// Build a new plan version from this recording version's chapters.
+    PlanFromRehearsal {
+        root: String,
+    },
+    /// Hand edits to one plan version, whole, on every keystroke — see
+    /// [`planning::plan_from_fields`].
+    SavePlan(std::collections::BTreeMap<String, String>),
+    /// Put plan version `n` on screen.
+    SelectPlanVersion {
+        root: String,
+        n: u32,
+    },
+    /// Approve plan version `n` (writing the deck), or lift its lock. Carries
+    /// the value rather than toggling, like [`UiEvent::WebApprove`].
+    ApprovePlan {
+        root: String,
+        n: u32,
+        value: bool,
+    },
+    /// "Go to recording →" on the Plan tab: select the Video recording tab.
+    GoToRecording,
     /// The snip was abandoned: a click that did not travel, or a right-click.
     /// Its own event rather than a `None` rect, because the App has a window to
     /// take down either way and silence would leave it up.
@@ -441,6 +487,10 @@ pub struct ControlTargetIvars {
     analytics_tab: RefCell<Option<Retained<NSTabViewItem>>>,
     analytics_status: RefCell<Option<Retained<NSTextField>>>,
     analytics_info: RefCell<Option<Retained<NSTextView>>>,
+
+    /// The window's row of workflow tabs, so a pane can send the author on to
+    /// the next step — the Plan tab's "Go to recording →".
+    root_tabs: RefCell<Option<Retained<NSTabView>>>,
 }
 
 define_class!(
@@ -899,6 +949,7 @@ impl ControlTarget {
             analytics_tab: RefCell::new(None),
             analytics_status: RefCell::new(None),
             analytics_info: RefCell::new(None),
+            root_tabs: RefCell::new(None),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -1392,6 +1443,15 @@ impl ControlTarget {
     pub fn set_plan_status(&self, text: &str) {
         if let Some(field) = self.ivars().plan_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// Select a workflow tab by its pane's identifier — `draft` for Video
+    /// recording. A single-pane step is added under the pane's own key (see
+    /// `workflow::attach`), so that key is what the root tab view knows.
+    pub fn select_tab(&self, id: &str) {
+        if let Some(tabs) = self.ivars().root_tabs.borrow().clone() {
+            unsafe { tabs.selectTabViewItemWithIdentifier(&NSString::from_str(id)) };
         }
     }
 
@@ -2192,6 +2252,7 @@ pub fn attach_controls(
     fill_parent(&tab_view);
     tab_view.setTabViewType(NSTabViewType::TopTabsBezelBorder);
     view.addSubview(&tab_view);
+    *target.ivars().root_tabs.borrow_mut() = Some(tab_view.clone());
 
     // ==========================================
     // TAB 0: DRAFT
