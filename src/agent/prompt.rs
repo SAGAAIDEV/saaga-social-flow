@@ -31,6 +31,10 @@ pub const OUTLINE: &str = "outline.talking_points";
 /// own id, not a section of [`NOTES`]: the notes tighten the take that ships,
 /// this picks what to record *beside* it.
 pub const SHORTS: &str = "shorts.suggestions";
+/// The plan a video is recorded from — see [`crate::plan`]. Its own id, not
+/// a section of [`NOTES`]: notes tighten a rehearsal that already happened,
+/// this plans a video before any of it is recorded.
+pub const PLAN: &str = "plan.video";
 pub const POSTS: &str = "posts.social";
 pub const SUBSTACK: &str = "substack.notes";
 pub const BLOG: &str = "blog.article";
@@ -103,6 +107,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
         NOTES => Some(super::notes::SYSTEM),
         TITLES => Some(super::titles::SYSTEM),
         OUTLINE => Some(super::outline::SYSTEM),
+        PLAN => Some(super::plan::SYSTEM),
         SHORTS => Some(super::shorts::SYSTEM),
         POSTS => Some(crate::posts::generate::SYSTEM_PROMPT),
         SUBSTACK => Some(crate::substack::generate::SYSTEM_PROMPT),

@@ -42,6 +42,36 @@ pub enum Command {
         #[arg(long)]
         cloud: bool,
     },
+    /// Build, refine or approve the video's plan from its idea takes, without
+    /// the window. Takes that are still transcribing are left out and named.
+    Plan {
+        /// The project folder under ~/.stream-recorder/sessions/.
+        project: std::path::PathBuf,
+        /// Refine a plan with this note instead of building a fresh one.
+        #[arg(long)]
+        refine: Option<String>,
+        /// The plan version to refine; the selected one by default.
+        #[arg(long, requires = "refine")]
+        from: Option<u32>,
+        /// Also plan from the current recording version's chapter transcripts.
+        #[arg(long)]
+        rehearsal: bool,
+        /// Approve this plan version and write the speaking-notes deck from it.
+        #[arg(long, conflicts_with_all = ["refine", "rehearsal", "unapprove"])]
+        approve: Option<u32>,
+        /// Lift the approval on this plan version so it can be edited or refined.
+        #[arg(long, conflicts_with_all = ["refine", "rehearsal"])]
+        unapprove: Option<u32>,
+        /// Save this as the typed idea before planning — an idea without a take.
+        #[arg(long)]
+        typed: Option<String>,
+        /// Save these as the author's instructions before planning.
+        #[arg(long)]
+        instructions: Option<String>,
+        /// The OpenRouter model; the Speaking notes model by default.
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// Report which API keys are set and where each one came from. No GUI window.
     ///
     /// The first thing to run on a new machine: it names the file it would

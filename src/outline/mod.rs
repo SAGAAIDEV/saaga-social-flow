@@ -207,7 +207,7 @@ fn load_edits(edit_root: &Path, n: u32) -> Vec<crate::edit::compute::Edit> {
 /// The model the Speaking notes picker is set to, which is what every other
 /// writing step in the render chain uses. Read from the saved config rather
 /// than passed down, because the render thread has no picker.
-fn model_choice() -> (String, Option<String>) {
+pub(crate) fn model_choice() -> (String, Option<String>) {
     let cfg = crate::config::load();
     let model = cfg
         .notes_model

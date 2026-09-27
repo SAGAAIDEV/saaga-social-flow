@@ -52,6 +52,7 @@ mod ops;
 mod outline;
 mod overlay;
 mod permissions;
+mod plan;
 mod pointer;
 mod posts;
 mod preflight;
@@ -162,6 +163,29 @@ fn main() -> Result<()> {
                 version,
                 cloud,
             } => return edit::render_headless(project, *version, *cloud),
+            Command::Plan {
+                project,
+                refine,
+                from,
+                rehearsal,
+                approve,
+                unapprove,
+                typed,
+                instructions,
+                model,
+            } => {
+                return plan::run_headless(plan::Headless {
+                    project,
+                    refine: refine.as_deref(),
+                    from: *from,
+                    rehearsal: *rehearsal,
+                    approve: *approve,
+                    unapprove: *unapprove,
+                    typed: typed.as_deref(),
+                    instructions: instructions.as_deref(),
+                    model: model.as_deref(),
+                })
+            }
             Command::BlogComponents(request) => return blog::components::run(request),
             Command::Card {
                 all_formats,

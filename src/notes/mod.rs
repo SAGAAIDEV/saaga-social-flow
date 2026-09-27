@@ -18,7 +18,7 @@ mod picker;
 mod transcribe;
 mod view;
 
-pub use deck::{load as load_notes, NotesData};
+pub use deck::{load as load_notes, NotesData, NOTES_JSON};
 pub(crate) use deck::{render_as as render_deck, write_as as write_deck, Chapter};
 pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
 pub use picker::Picker;
