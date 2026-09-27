@@ -68,6 +68,11 @@ impl App {
             self.set_figure_status("Figure cancelled.");
             return;
         }
+        // An idea take holds the one aside, so the figure could not be
+        // explained — refused before the overlay goes up, not after the shot.
+        if self.plan_take_blocks_figure() {
+            return;
+        }
         let geometry = match self.figure_display() {
             Ok(geometry) => geometry,
             Err(err) => {
@@ -183,7 +188,8 @@ impl App {
             self.resume_take(paused);
             return;
         };
-        match Aside::start(conn, &figure::audio_path_for(&self.session.root, n)) {
+        let audio = figure::audio_path_for(&self.session.root, n);
+        match Aside::start(conn, &audio) {
             Ok(aside) => {
                 self.aside = Some(Break {
                     aside,
@@ -198,6 +204,11 @@ impl App {
                 self.sync_controls();
             }
             Err(err) => {
+                // The writer makes its file before the delegate can refuse
+                // it (an idea take started while the overlay was up, say), and
+                // an empty, trailerless `.m4a` would sit beside the figure as
+                // an explanation that never plays.
+                let _ = std::fs::remove_file(&audio);
                 self.set_figure_status(&format!(
                     "Figure {n:02} captured, but its explanation is not recording: {err:#}"
                 ));

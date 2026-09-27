@@ -38,8 +38,9 @@ pub const INPUT_JSON: &str = "input.json";
 pub const CURRENT_JSON: &str = "current.json";
 /// Where a rehearsal-built deck is kept the first time a plan replaces it.
 pub const NOTES_BEFORE_PLAN: &str = "notes.before-plan.json";
-/// Present once a plan has written the deck, so the rehearsal backup is only
-/// ever taken of a deck a plan did not write.
+/// Present while the deck is one a plan wrote, so the rehearsal backup is only
+/// ever taken of a deck a plan did not write. A rehearsal deck written after it
+/// removes it again ([`rehearsal_wrote_deck`]).
 const WROTE_DECK: &str = ".wrote-deck";
 
 pub fn dir(session: &Session) -> PathBuf {
@@ -211,6 +212,36 @@ pub fn approve(dir: &Path, n: u32, notes_dir: &Path) -> Result<PathBuf> {
 /// speaking notes came from.
 pub fn deck_from_plan(dir: &Path) -> bool {
     dir.join(WROTE_DECK).exists()
+}
+
+/// Why the rehearsal's Notes button cannot write the deck now, or `None`.
+///
+/// Refused while a version is approved: decision 5 of
+/// `docs/plan-tab-plan.md` is that only the approved version writes
+/// `notes.json`. Asked when Notes is pressed, and again by the notes job just
+/// before it writes, since a plan can be approved while it waits on
+/// transcripts.
+pub fn rehearsal_notes_refusal(dir: &Path) -> Option<String> {
+    approved(dir).map(|plan| {
+        format!(
+            "Plan {} is approved, so it writes the speaking notes — un-approve it on the Plan tab \
+             to write notes from the rehearsal instead.",
+            plan.number
+        )
+    })
+}
+
+/// A rehearsal has written the deck: it is no longer a plan's, so the Project
+/// tab says where it came from, and the next approval keeps it as
+/// [`NOTES_BEFORE_PLAN`] before replacing it — rather than finding the marker
+/// from an earlier approval and overwriting it with no copy.
+pub fn rehearsal_wrote_deck(dir: &Path) -> Result<()> {
+    let marker = dir.join(WROTE_DECK);
+    match std::fs::remove_file(&marker) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("removing {}", marker.display())),
+    }
 }
 
 /// Lift the lock. The deck stays as it was: it was written from this plan,
@@ -690,6 +721,39 @@ mod tests {
         approve(&dir, 2, &notes).unwrap();
         let kept: crate::notes::NotesData = read_json(&notes.join(NOTES_BEFORE_PLAN)).unwrap();
         assert_eq!(kept.title, "Rehearsal");
+    }
+
+    /// Only the approved version writes the deck: the rehearsal's Notes is
+    /// refused while one is approved. Once a rehearsal deck is written after
+    /// an un-approve, the deck is the rehearsal's again — the Project tab says
+    /// so, and approving again keeps that deck before replacing it.
+    #[test]
+    fn a_rehearsal_deck_waits_for_the_plan_to_be_unapproved_and_is_kept_again() {
+        let dir = temp("rehearsal-after");
+        let notes = dir.join("notes");
+        save_new(&dir, plan("One")).unwrap();
+        assert_eq!(rehearsal_notes_refusal(&dir), None, "nothing approved yet");
+        approve(&dir, 1, &notes).unwrap();
+        let why = rehearsal_notes_refusal(&dir).unwrap();
+        assert!(why.contains("Plan 1 is approved"), "{why}");
+        assert!(deck_from_plan(&dir));
+
+        unapprove(&dir, 1).unwrap();
+        assert_eq!(rehearsal_notes_refusal(&dir), None);
+        let rehearsal = crate::notes::NotesData {
+            title: "Second rehearsal".into(),
+            version: None,
+            chapters: Vec::new(),
+        };
+        crate::notes::write_deck(&notes, &rehearsal, "Chapter").unwrap();
+        rehearsal_wrote_deck(&dir).unwrap();
+        assert!(!deck_from_plan(&dir), "the deck is the rehearsal's now");
+        rehearsal_wrote_deck(&dir).unwrap();
+
+        approve(&dir, 1, &notes).unwrap();
+        let kept: crate::notes::NotesData = read_json(&notes.join(NOTES_BEFORE_PLAN)).unwrap();
+        assert_eq!(kept.title, "Second rehearsal");
+        assert!(deck_from_plan(&dir));
     }
 
     /// The CTA is whatever was recorded last, not the plan's position for it:

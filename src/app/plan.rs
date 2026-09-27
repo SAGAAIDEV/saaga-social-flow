@@ -14,8 +14,11 @@
 //! rules that keep a figure's aside safe keep a take safe too:
 //!
 //! - The delegate holds one aside at a time. A take and a figure's break
-//!   cannot both record, and Record idea refuses during a break rather than
-//!   meet that refusal as an error.
+//!   cannot both record, so each refuses the other up front rather than meet
+//!   the delegate's refusal as an error: Record idea during a break, and the
+//!   figure chord during a take. The delegate's refusal comes after the
+//!   writer has already made its file, which would leave a figure with an
+//!   unplayable `.m4a` beside it.
 //! - A take and a chapter do not overlap. Record idea refuses while a chapter
 //!   is recording, and Start Recording refuses while a take is — each says
 //!   why on its own tab's status line. Both could technically run, but a take
@@ -97,6 +100,11 @@ pub(super) struct PlanState {
     /// patches that one row rather than repainting a page being typed in.
     shown: BTreeMap<u32, &'static str>,
     polled: Option<Instant>,
+    /// Whether the pane last drew "Plan from rehearsal" as usable. It reads
+    /// the open recording version's chapters, which change on the Record tab,
+    /// so a chapter closing or a version switch compares against this and
+    /// repaints only when the button would change.
+    rehearse_shown: Option<bool>,
 }
 
 /// Why Record idea cannot start now, or `None` when it can.
@@ -126,6 +134,16 @@ fn recording_refusal(take: Option<u32>) -> Option<String> {
     })
 }
 
+/// Why the figure chord cannot start a break now, or `None` when it can: the
+/// take holds the capture session's one aside.
+fn figure_refusal(take: Option<u32>) -> Option<String> {
+    take.map(|n| {
+        format!(
+            "Idea take {n:02} is recording on the Plan tab — stop it before capturing a figure."
+        )
+    })
+}
+
 /// Why Build, Refine or Plan from rehearsal cannot start, or `None`.
 ///
 /// `job` is whether a build is running, and whether it is this project's.
@@ -150,6 +168,18 @@ fn build_refusal(job: Option<bool>, take: Option<u32>, approved: Option<u32>) ->
         ));
     }
     approved.map(|n| format!("Plan {n} is approved — un-approve it to refine it or build again."))
+}
+
+/// A build's result, said on the line of a project other than the one it was
+/// built for — which is named, since the line is read as this project's.
+fn elsewhere_message(project: &str, result: &Result<Box<Plan>, String>) -> String {
+    match result {
+        Ok(plan) => format!(
+            "Plan {} for “{project}” is ready — open that project to read it.",
+            plan.number
+        ),
+        Err(err) => format!("The plan for “{project}” could not be built: {err}"),
+    }
 }
 
 /// `125` seconds as `2:05`.
@@ -198,8 +228,23 @@ impl App {
     pub(super) fn update_plan_view(&mut self) {
         let view = planning::plan_view(&self.session, self.plan_live());
         self.plan.shown = view.takes.iter().map(|row| (row.n, row.state)).collect();
+        self.plan.rehearse_shown = Some(view.can_rehearse);
         if let Some(live) = self.live.as_ref() {
             live.plan_pane.show(&planning::plan_page(&view));
+        }
+    }
+
+    /// Repaint the pane if "Plan from rehearsal" was drawn for a different set
+    /// of chapters: the first chapter of a version closing switches it on, and
+    /// a switch to a version with none (New Version, say) switches it off.
+    ///
+    /// Only on a change, since a repaint takes the caret out of a box being
+    /// typed in — and a change only follows a press on the Record tab (Stop, a
+    /// cut, a version switch) or the Notes button, so nobody is mid-sentence on
+    /// this page when it happens.
+    pub(super) fn sync_plan_rehearsal(&mut self) {
+        if self.plan.rehearse_shown != Some(planning::can_rehearse(&self.session)) {
+            self.update_plan_view();
         }
     }
 
@@ -209,6 +254,18 @@ impl App {
         match recording_refusal(self.plan.take.as_ref().map(|take| take.n)) {
             Some(why) => {
                 self.set_render_status(&why);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The figure chord's check: a break does not start over an idea take.
+    /// Says why on the figure line, which is where the chord reports.
+    pub(super) fn plan_take_blocks_figure(&self) -> bool {
+        match figure_refusal(self.plan.take.as_ref().map(|take| take.n)) {
+            Some(why) => {
+                self.set_figure_status(&why);
                 true
             }
             None => false,
@@ -506,8 +563,10 @@ impl App {
     }
 
     /// The build's progress and result. Progress for a project that is no
-    /// longer open is dropped, and so is its result — the version it wrote is
-    /// on disk there, and shows when that project is opened again.
+    /// longer open is dropped. Its result is not: a version it wrote is on disk
+    /// there and shows when that project is opened again, but a failure leaves
+    /// no trace anywhere, so both are said on this project's line, naming the
+    /// project they belong to — and a failure is logged either way.
     pub(super) fn drain_plan(&mut self) {
         let Some(job) = self.plan.job.as_ref() else {
             return;
@@ -535,8 +594,19 @@ impl App {
         let Some(result) = done else {
             return;
         };
-        self.plan.job = None;
+        let Some(job) = self.plan.job.take() else {
+            return;
+        };
+        if let Err(err) = &result {
+            eprintln!(
+                "stream-recorder: the plan for {} could not be built: {err}",
+                job.session.root.display()
+            );
+        }
         if !here {
+            self.set_plan_status(&elsewhere_message(&job.session.title(), &result));
+            // Build was switched off here while the other project's ran.
+            self.update_plan_view();
             return;
         }
         match result {
@@ -692,6 +762,30 @@ mod tests {
         assert!(idea_refusal(Some(1), true, true)
             .unwrap()
             .starts_with("Chapter 01"));
+    }
+
+    /// The figure chord's side of the one-aside rule: an idea take holds it.
+    #[test]
+    fn the_figure_chord_refuses_while_an_idea_take_records() {
+        assert_eq!(figure_refusal(None), None);
+        let why = figure_refusal(Some(3)).unwrap();
+        assert!(why.contains("Idea take 03"), "{why}");
+        assert!(why.contains("figure"), "{why}");
+    }
+
+    /// A build that lands after its project was left is still reported, and
+    /// says whose it was — a failure otherwise vanishes without a trace.
+    #[test]
+    fn a_build_for_another_project_is_reported_with_its_name() {
+        let failed = elsewhere_message("Deploys", &Err("timed out".into()));
+        assert!(failed.contains("“Deploys”"), "{failed}");
+        assert!(failed.contains("timed out"), "{failed}");
+        let plan = Plan {
+            number: 4,
+            ..Plan::default()
+        };
+        let ready = elsewhere_message("Deploys", &Ok(Box::new(plan)));
+        assert!(ready.contains("Plan 4 for “Deploys”"), "{ready}");
     }
 
     #[test]

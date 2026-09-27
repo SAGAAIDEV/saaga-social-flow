@@ -537,9 +537,16 @@ fn build_notes(
         extra_prompt,
         Some(&session.root),
     )?;
+    // Asked again here, not only at the press: the wait for transcripts can
+    // run for minutes, and a plan approved in that time owns the deck.
+    let plan_dir = crate::plan::dir(session);
+    if let Some(why) = crate::plan::rehearsal_notes_refusal(&plan_dir) {
+        bail!("{why}");
+    }
     let notes_dir = session.notes_dir()?;
     crate::agent::trace::write_step(&notes_dir, &session.root, &step)?;
     let html = deck::write(&notes_dir, &data)?;
+    crate::plan::rehearsal_wrote_deck(&plan_dir)?;
     Ok(html)
 }
 

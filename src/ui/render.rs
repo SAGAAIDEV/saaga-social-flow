@@ -1214,6 +1214,26 @@ mod tests {
         assert!(html.contains("watch?v=abc"));
     }
 
+    /// Un-approving leaves the plan's deck in place, and the summary must not
+    /// go on calling it the approved plan's.
+    #[test]
+    fn a_plan_deck_with_nothing_approved_does_not_claim_an_approved_plan() {
+        let html = page(
+            "project.html",
+            context! {
+                title => "Deploys", folder => "2026-09-26_10-00-00", root => "/tmp/project",
+                plan => context! { state => "draft", text => "Plan 2, not approved",
+                                   working_title => "Ship it", chapters => 4 },
+                versions => vec![context! { label => "v1", current => true, chapters => 0,
+                                            rendered => false, stages => Vec::<String>::new() }],
+                deck => 4, deck_from_plan => true, links => Vec::<()>::new(),
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(!html.contains("written by the approved plan"), "{html}");
+        assert!(html.contains("a plan that is no longer approved"), "{html}");
+    }
+
     fn plan_chapter(n: usize, kind: &str, label: &str, title: &str) -> minijinja::Value {
         context! {
             n => n, kind => kind, kind_label => label, title => title, goal => "", points => vec!["a point"],

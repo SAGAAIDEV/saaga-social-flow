@@ -604,9 +604,16 @@ pub fn plan_view(session: &Session, live: PlanLive) -> PlanView {
         plan,
         unreadable,
         locked: locked(live, chosen.as_ref()),
-        can_rehearse: !crate::notes::closed_chapter_numbers(&session.dir).is_empty(),
+        can_rehearse: can_rehearse(session),
         layouts: layout_options(),
     }
+}
+
+/// Whether "Plan from rehearsal" has anything to plan from: chapters closed in
+/// the open recording version. Its own function because the app compares it
+/// with what the pane last drew, to repaint when the Record tab changes it.
+pub fn can_rehearse(session: &Session) -> bool {
+    !crate::notes::closed_chapter_numbers(&session.dir).is_empty()
 }
 
 /// The Plan tab's pane, from a view already read — the app keeps the take

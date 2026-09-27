@@ -731,6 +731,7 @@ impl App {
                 if let Some(live) = self.live.as_ref() {
                     live.notes.next_slide();
                 }
+                self.chapters_changed();
                 return;
             }
             let router = self.router.as_mut().expect("checked above");
@@ -745,6 +746,7 @@ impl App {
                     if let Some(live) = self.live.as_ref() {
                         live.notes.next_slide();
                     }
+                    self.chapters_changed();
                 }
                 Err(e) => eprintln!("stream-recorder: error cutting chapter: {:#}", e),
             }
@@ -1076,7 +1078,8 @@ impl App {
     /// project-scoped views are deliberately absent: the picker, analytics,
     /// reflect, thumbnails and the plan do not move when the version does. The
     /// Project tab's summary is the exception, because it marks the open
-    /// version and a new one adds a row.
+    /// version and a new one adds a row — and so is the Plan pane's "Plan from
+    /// rehearsal", which plans from this version's chapters.
     ///
     /// One function because the three callers kept drifting apart. New Version
     /// was missing the titles and posts reloads, so a fresh version opened
@@ -1108,7 +1111,18 @@ impl App {
         self.update_schedule_summary();
         // The open version's row, and its deck, are on the Project tab.
         self.update_project_view();
+        self.sync_plan_rehearsal();
         self.sync_controls();
+    }
+
+    /// A chapter closed, so the views that count them are drawn again: the
+    /// Project tab's Recordings table, and the Plan pane's "Plan from
+    /// rehearsal", which the first closed chapter of a version switches on.
+    /// Neither is on the Record tab, where the chapter closed, so nothing else
+    /// would redraw them before the author looks.
+    fn chapters_changed(&mut self) {
+        self.update_project_view();
+        self.sync_plan_rehearsal();
     }
 
     /// Load the speaking-notes deck into the Record tab's teleprompter, from
@@ -1216,6 +1230,7 @@ impl App {
             }
             report_chapter(self.clock.close());
             self.sync_controls();
+            self.chapters_changed();
         }
         self.adopt_pending_layout();
     }
@@ -1235,7 +1250,18 @@ impl App {
         }
     }
 
+    /// The rehearsal's Notes button. Refused while a plan is approved: the
+    /// approved plan is what writes the deck (see [`crate::plan`]), and a
+    /// rehearsal deck over it would leave the plan reading as approved while
+    /// the cards, titles and posts came from somewhere else. Checked before the
+    /// open chapter is finished, so a refused press leaves the take rolling.
     fn build_notes(&mut self) {
+        if let Some(why) = crate::plan::rehearsal_notes_refusal(&crate::plan::dir(&self.session)) {
+            if let Some(live) = self.live.as_ref() {
+                live.control_target.set_plan_status(&why);
+            }
+            return;
+        }
         self.finish_open_chapter();
         let title = self
             .session
@@ -1280,6 +1306,12 @@ impl App {
                 }
                 Err(err) => eprintln!("stream-recorder: could not reopen the video: {err:#}"),
             }
+            return;
+        }
+        // The same refusal Start Recording gives, asked before anything moves:
+        // past this point `adopt_session` would finish the take without a word
+        // and the short would start rolling in its place.
+        if self.plan_take_blocks_recording() {
             return;
         }
         self.finish_open_chapter();

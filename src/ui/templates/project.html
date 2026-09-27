@@ -37,7 +37,7 @@
   {% endif %}
   <p class="why">
     {% if deck is none %}No speaking notes yet — an approved plan writes them.
-    {% elif deck_from_plan %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written by the approved plan.
+    {% elif deck_from_plan %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written by {% if plan.state == "approved" %}the approved plan{% else %}a plan that is no longer approved{% endif %}.
     {% else %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written from a rehearsal.{% endif %}
   </p>
 </div>
