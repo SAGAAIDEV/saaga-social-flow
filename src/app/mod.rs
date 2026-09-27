@@ -88,6 +88,10 @@ struct Live {
     /// and the rendered clips — see `update_video_view`.
     video_brief_pane: ui::WebPane,
     settings_pane: ui::WebPane,
+    /// The Project tab's summary — see `update_project_view`.
+    project_pane: ui::WebPane,
+    /// The Plan tab's pane — see `update_plan_view`.
+    plan_pane: ui::WebPane,
     layout: ui::Layout,
 }
 
@@ -336,7 +340,6 @@ impl App {
             self.notes_pick.menu_index(),
             &self.notes_providers,
             self.notes_pick.provider_index(&self.notes_providers),
-            &self.notes_prompt,
             &self.posts_prompt,
             &self.session.list_versions(),
             self.session.version,
@@ -370,6 +373,8 @@ impl App {
             publish_pane: attached.publish_pane,
             video_brief_pane: attached.video_brief_pane,
             settings_pane: attached.settings_pane,
+            project_pane: attached.project_pane,
+            plan_pane: attached.plan_pane,
             layout: attached.layout,
         })
     }
@@ -642,7 +647,7 @@ impl App {
         const WEEK: std::time::Duration = std::time::Duration::from_secs(7 * 86_400);
         let stale = crate::sessions::stale(WEEK, &self.session.root);
         if stale.is_empty() {
-            self.set_render_status(
+            self.set_project_status(
                 "Nothing to clean up — no project older than a week still has recordings.",
             );
             return;
@@ -652,7 +657,7 @@ impl App {
             .as_ref()
             .is_some_and(|live| live.control_target.confirm_cleanup(&stale));
         if !confirmed {
-            self.set_render_status("Clean up cancelled — nothing deleted.");
+            self.set_project_status("Clean up cancelled — nothing deleted.");
             return;
         }
         let cleaned = crate::sessions::clean(&stale);
@@ -660,7 +665,7 @@ impl App {
             0 => String::new(),
             n => format!(" — {n} file(s) would not delete; see the log"),
         };
-        self.set_render_status(&format!(
+        self.set_project_status(&format!(
             "Freed {} — removed {} recording(s) from {} project(s){failed}.",
             crate::sessions::human_bytes(cleaned.bytes),
             cleaned.files,
@@ -840,12 +845,6 @@ impl App {
             UiEvent::YoutubePrivacySelected(idx) => self.select_youtube_privacy(idx),
             UiEvent::ModelSelected(idx) => self.select_model(idx),
             UiEvent::ProviderSelected(idx) => self.select_provider(idx),
-            UiEvent::PromptChanged(text) => {
-                if text != self.notes_prompt {
-                    self.notes_prompt = text;
-                    self.save_notes_choice();
-                }
-            }
             UiEvent::PostsModelSelected(idx) => self.select_posts_model(idx),
             UiEvent::PostsProviderSelected(idx) => self.select_posts_provider(idx),
             UiEvent::PostsPromptChanged(text) => {
@@ -994,6 +993,40 @@ impl App {
         live.control_target
             .set_versions(&self.session.list_versions(), self.session.version);
         live.window.set_title(&self.window_title());
+        // The summary leads with the project's name, and lists the versions.
+        self.update_project_view();
+    }
+
+    /// The Project tab's summary, drawn again from disk: the plan's standing,
+    /// each recording version with its chapters and render, and what is live.
+    ///
+    /// Called wherever any of that can change — a project or version switch, a
+    /// rename, a clean up, a finished render, an upload, a blog post, a new
+    /// deck. It is only ever read, so a repaint costs nothing but a few small
+    /// file reads, and a stale summary is the one thing it must not be.
+    fn update_project_view(&self) {
+        if let Some(live) = self.live.as_ref() {
+            live.project_pane
+                .show(&ui::planning::project_page(&self.session));
+        }
+    }
+
+    /// The Plan tab's pane: the author's input, the idea takes and the
+    /// selected plan version. Per project, like the plan itself, so a version
+    /// switch leaves it alone and a project switch redraws it.
+    fn update_plan_view(&self) {
+        if let Some(live) = self.live.as_ref() {
+            live.plan_pane.show(&ui::planning::plan_page(&self.session));
+        }
+    }
+
+    /// The Project tab's line, for what Clean Up freed. It used to share the
+    /// render status line, which is on the Record tab — the one place a press
+    /// on the Project tab would never be seen.
+    fn set_project_status(&self, text: &str) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_project_status(text);
+        }
     }
 
     /// Both halves of where you are, always. The title used to say either the
@@ -1019,7 +1052,9 @@ impl App {
     /// Notes, both forms, all three summaries, the version popup and the title —
     /// everything that means something different in v2 than it did in v1. The
     /// project-scoped views are deliberately absent: the picker, analytics,
-    /// reflect and thumbnails do not move when the version does.
+    /// reflect, thumbnails and the plan do not move when the version does. The
+    /// Project tab's summary is the exception, because it marks the open
+    /// version and a new one adds a row.
     ///
     /// One function because the three callers kept drifting apart. New Version
     /// was missing the titles and posts reloads, so a fresh version opened
@@ -1061,6 +1096,8 @@ impl App {
         self.update_blog_view();
         self.update_publish_summary();
         self.update_schedule_summary();
+        // The open version's row, and its deck, are on the Project tab.
+        self.update_project_view();
         self.sync_controls();
     }
 
@@ -1100,6 +1137,7 @@ impl App {
         self.next_chapter = self.resume_chapter_number();
         self.refresh_version_views();
         self.refresh_project_controls();
+        self.update_plan_view();
         self.last_report = None;
         self.refresh_analytics_view();
         self.update_reflect_view();
@@ -1169,16 +1207,22 @@ impl App {
             .session
             .name()
             .unwrap_or_else(|| "Speaking notes".into());
+        // The button is on the Plan tab and the deck it fills is on the Record
+        // tab, so the Plan tab's line says where the result will land.
         if let Some(live) = self.live.as_ref() {
-            self.notes_prompt = live.control_target.prompt_text();
+            live.control_target.set_plan_status(
+                "Writing speaking notes from this version's recording — they replace the deck \
+                 on the Record tab.",
+            );
         }
+        let input = crate::plan::load_input(&crate::plan::dir(&self.session));
         println!("stream-recorder: building notes…");
         crate::notes::spawn_notes(
             self.session.clone(),
             title,
             self.notes_pick.model().to_string(),
             self.notes_pick.provider().map(str::to_string),
-            (!self.notes_prompt.trim().is_empty()).then(|| self.notes_prompt.clone()),
+            crate::plan::notes_steer(&input, &self.notes_prompt),
             self.notes_tx.clone(),
         );
     }
@@ -1921,6 +1965,7 @@ impl App {
                 crate::blog::BlogEvent::Ready(post) => {
                     self.blog_busy = false;
                     self.update_blog_view();
+                    self.update_project_view();
                     // The warning is surfaced rather than logged: a post that
                     // went up with no byline is live and wrong, and the status
                     // line is the only place anyone would notice.
@@ -3222,8 +3267,10 @@ impl App {
                         }
                     }
                     // The Video pane lists both links under the clips, so it has
-                    // to re-read the ledger after either row lands.
+                    // to re-read the ledger after either row lands; so does the
+                    // Project tab's Published card.
                     self.update_video_view();
+                    self.update_project_view();
                 }
                 crate::publish::PublishEvent::ThumbnailSet(upload) => {
                     // The summary re-reads the ledger and repaints the status
@@ -3794,12 +3841,18 @@ impl App {
             return;
         };
         let mut suggested = false;
+        let mut deck_changed = false;
         for event in events {
             match event {
                 crate::notes::NotesEvent::Status(msg) => live.notes.show_status(&msg),
                 crate::notes::NotesEvent::Ready(html) => {
                     live.notes.load(&html);
                     live.notes.reset_slide();
+                    live.control_target.set_plan_status(
+                        "Speaking notes written from the recording — they are the deck on the \
+                         Record tab.",
+                    );
+                    deck_changed = true;
                 }
                 crate::notes::NotesEvent::Shorts(html) => {
                     live.notes.load(&html);
@@ -3816,6 +3869,9 @@ impl App {
                          record again.",
                         self.mic_name()
                     ));
+                    live.control_target.set_plan_status(&format!(
+                        "Notes failed: {why}. More on the Record tab's deck."
+                    ));
                 }
             }
         }
@@ -3824,6 +3880,10 @@ impl App {
             // a pick into the old one would name a different short now.
             self.short_pick = 0;
             self.sync_controls();
+        }
+        if deck_changed {
+            // The Project tab counts the deck's chapters and says where it came from.
+            self.update_project_view();
         }
     }
 
@@ -3887,6 +3947,7 @@ impl App {
                     self.update_blog_view();
                     self.update_publish_summary();
                     self.update_schedule_summary();
+                    self.update_project_view();
                     self.sync_controls();
                 }
                 crate::edit::RenderEvent::Failed(msg) => {
@@ -4093,7 +4154,9 @@ impl ApplicationHandler for App {
                 }
                 // Nothing filled the project and version pickers before this, so
                 // a launch showed both empty however far along the project was.
+                // The Project tab's summary is drawn by the same call.
                 self.refresh_project_controls();
+                self.update_plan_view();
                 self.sync_controls();
                 self.sync_overlay();
                 // Before `install_preview`, so a session that launches with

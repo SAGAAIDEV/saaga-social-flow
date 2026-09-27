@@ -112,8 +112,6 @@ pub fn select(dir: &Path, n: u32) -> Result<()> {
 }
 
 /// The approved version, if there is one.
-// Read by the Plan tab and the chapter-card skip (phases 3 and 4).
-#[allow(dead_code)]
 pub fn approved(dir: &Path) -> Option<Plan> {
     versions(dir)
         .into_iter()
@@ -183,12 +181,29 @@ pub fn approve(dir: &Path, n: u32, notes_dir: &Path) -> Result<PathBuf> {
     Ok(html)
 }
 
+/// Whether a plan has written the deck — what the Project tab says the
+/// speaking notes came from.
+pub fn deck_from_plan(dir: &Path) -> bool {
+    dir.join(WROTE_DECK).exists()
+}
+
 /// Lift the lock. The deck stays as it was: it was written from this plan,
 /// and nothing has replaced it yet.
 pub fn unapprove(dir: &Path, n: u32) -> Result<()> {
     let mut plan = load(dir, n)?;
     plan.approved = false;
     write_json(&version_path(dir, n), &plan)
+}
+
+/// What steers a rehearsal's speaking notes, now the Record tab's Notes
+/// prompt field is gone: its job is the plan's instructions box, so the
+/// author's instructions come first. The prompt saved before the field went is
+/// the fallback, so a standing instruction is not dropped without a word.
+pub fn notes_steer(input: &Input, saved: &str) -> Option<String> {
+    [input.instructions.trim(), saved.trim()]
+        .into_iter()
+        .find(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 /// An idea take on disk.
@@ -595,6 +610,21 @@ mod tests {
         );
         std::fs::write(&transcript, r#"{"status":"skipped","error":"silent"}"#).unwrap();
         assert_eq!(take_text(&take), TakeText::Nothing("silent".into()));
+    }
+
+    #[test]
+    fn the_notes_are_steered_by_the_plan_instructions_before_the_old_prompt() {
+        let mut input = Input::default();
+        assert_eq!(notes_steer(&input, "  "), None);
+        assert_eq!(
+            notes_steer(&input, "keep the intro tight").as_deref(),
+            Some("keep the intro tight")
+        );
+        input.instructions = " For engineers. ".into();
+        assert_eq!(
+            notes_steer(&input, "keep the intro tight").as_deref(),
+            Some("For engineers.")
+        );
     }
 
     #[test]

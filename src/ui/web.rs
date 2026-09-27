@@ -345,6 +345,13 @@ impl WebPane {
         self.webview.setFrame(frame);
     }
 
+    /// The pane as a plain view, for a layout pass that frames it beside
+    /// native controls — see `ui::Layout`. The pane itself stays with its
+    /// owner; this is only another handle on the same view.
+    pub fn view(&self) -> Retained<NSView> {
+        Retained::into_super(self.webview.clone())
+    }
+
     /// Shows HTML that references files on disk.
     ///
     /// `loadHTMLString` has no base URL, so `file://` images never resolve — fine

@@ -155,8 +155,6 @@ impl Plan {
     }
 
     /// "Plan 3", or "Plan 3 (approved)".
-    // The Plan tab's version picker (phase 3).
-    #[allow(dead_code)]
     pub fn label(&self) -> String {
         if self.approved {
             format!("Plan {} (approved)", self.number)

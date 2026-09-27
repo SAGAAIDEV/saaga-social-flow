@@ -44,7 +44,10 @@ pub struct Config {
     /// OpenRouter provider name, or none for automatic routing.
     #[serde(default)]
     pub notes_provider: Option<String>,
-    /// Extra instructions appended when building notes.
+    /// Extra instructions appended when building notes. No longer edited in
+    /// the window — the Record tab's Notes prompt field gave way to the Plan
+    /// tab's instructions — but still read as the fallback when a project's
+    /// plan has no instructions; see `plan::notes_steer`.
     #[serde(default)]
     pub notes_prompt: Option<String>,
     /// The Post tab's own model and provider.

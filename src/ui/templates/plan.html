@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{#
+  The Plan tab: the author's idea, their instructions, and the plan built from
+  them. Read-only for now — the buttons are drawn where they will live and
+  stay disabled until the tab can record takes and call the model. Progress
+  goes on the native line above this pane, never into it, so a job's narration
+  will not repaint the page under someone typing.
+#}
+{% block content %}
+<style>
+  .card { max-width: 900px; }
+  .said { white-space: pre-wrap; }
+  .verbatim { border-left: 3px solid var(--accent); padding: 2px 10px; margin: 6px 0;
+              white-space: pre-wrap; }
+  .versions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .versions .tag.selected { color: #fff; border-color: var(--accent); }
+  .chapter h3 { font-size: 13px; margin: 0; font-weight: 600; }
+  .chapter .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  dl { margin: 6px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
+  dt { color: var(--dim); }
+  dd { margin: 0; }
+  .locked { border-left: 3px solid var(--ok); }
+</style>
+
+<h1>Plan</h1>
+<p class="sub">Talk the idea through, add instructions, and build a plan: hook, chapters,
+  call to action and how to record it. The approved plan becomes the speaking notes.</p>
+
+<h2>Your idea</h2>
+<div class="bar">
+  {{ ui.action("Record idea", {"type": "planRecordToggle"}, primary=true, disabled=true) }}
+</div>
+{% if takes %}
+  {% for take in takes %}
+  <div class="card">
+    <div class="row">
+      <strong class="grow">{{ take.label }}</strong>
+      {% if take.state == "ready" %}{{ ui.tag("Transcribed", "ok") }}
+      {% elif take.state == "transcribing" %}{{ ui.tag("Transcribing…") }}
+      {% else %}{{ ui.tag("Nothing usable", "warn") }}{% endif %}
+    </div>
+    {% if take.text %}<p class="why said">{{ take.text }}</p>{% endif %}
+    {% if take.why %}<p class="why">{{ take.why }}</p>{% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="empty">No idea takes yet.</p>
+{% endif %}
+{% if typed %}
+<div class="card"><div class="muted">Typed</div><p class="why said">{{ typed }}</p></div>
+{% endif %}
+
+<h2>Your instructions</h2>
+{% if instructions %}
+<div class="card"><p class="why said">{{ instructions }}</p></div>
+{% else %}
+<p class="empty">No instructions yet — audience, tone, length, anything that must be said.</p>
+{% endif %}
+
+<div class="bar">
+  {{ ui.action("Build plan", {"type": "buildPlan", "refine": false}, primary=true, disabled=true) }}
+  {{ ui.action("Refine", {"type": "buildPlan", "refine": true}, disabled=true) }}
+  {{ ui.action("Plan from rehearsal", {"type": "planFromRehearsal"}, disabled=true) }}
+</div>
+<p class="muted">These buttons are not wired up yet. Until they are,
+  <code>cargo run -- plan &lt;project folder&gt;</code> builds, refines and approves a plan.</p>
+
+<h2>The plan</h2>
+{% if versions %}
+<div class="versions">
+  {% for version in versions %}
+  <span class="tag {{ 'selected' if version.selected else '' }} {{ 'ok' if version.approved else '' }}">{{ version.label }}{% if version.approved %} · approved{% endif %}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if unreadable %}
+<p class="why" style="color: var(--bad)">{{ unreadable }}</p>
+{% elif not plan %}
+<p class="empty">No plan yet. Record or type the idea, then build one.</p>
+{% else %}
+<div class="card {{ 'locked' if plan.approved else '' }}">
+  <div class="row">
+    <strong class="grow">{{ plan.label }}</strong>
+    {% if plan.approved %}{{ ui.tag("Approved — locked", "ok") }}{% else %}{{ ui.tag("Not approved", "warn") }}{% endif %}
+    {{ ui.action("Un-approve" if plan.approved else "Approve", {"type": "approvePlan", "value": not plan.approved}, disabled=true) }}
+    {{ ui.action("Save", {"type": "savePlan"}, disabled=true) }}
+  </div>
+  <p class="why">
+    {% if plan.refined_from %}Refined from {{ plan.refined_from }}{% if plan.refine_note %}: “{{ plan.refine_note }}”{% endif %}.{% endif %}
+    {% if plan.sources %}Built from {{ plan.sources | join(", ") }}.{% endif %}
+    {% if plan.est_total %}About {{ plan.est_total }} long.{% endif %}
+  </p>
+  <dl>
+    <dt>Working title</dt><dd>{{ plan.working_title }}</dd>
+    {% if plan.audience %}<dt>Audience</dt><dd>{{ plan.audience }}</dd>{% endif %}
+    {% if plan.promise %}<dt>Promise</dt><dd>{{ plan.promise }}</dd>{% endif %}
+  </dl>
+</div>
+
+<h2>Hook</h2>
+<div class="card">
+  <div class="verbatim">{{ plan.hook_line }}</div>
+  {% if plan.hook_angle %}<p class="why">{{ plan.hook_angle }}</p>{% endif %}
+</div>
+
+{{ ui.bullets("Outline", plan.outline) }}
+
+<h2>Chapters</h2>
+{% for chapter in plan.chapters %}
+<div class="card chapter">
+  <div class="row">
+    <h3 class="grow">{{ chapter.n }}. {{ chapter.title }}</h3>
+    {{ ui.tag(chapter.kind_label, "ok" if chapter.kind != "body" else "") }}
+  </div>
+  {% if chapter.goal %}<p class="why">{{ chapter.goal }}</p>{% endif %}
+  {% if chapter.verbatim %}<div class="verbatim">{{ chapter.verbatim }}</div>{% endif %}
+  {% if chapter.points %}
+  <ul>{% for point in chapter.points %}<li>{{ point }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if chapter.cues %}
+  <p class="why">Cues: {{ chapter.cues | join(" · ") }}</p>
+  {% endif %}
+  <div class="meta">
+    {% if chapter.show %}{{ ui.tag("On screen: " ~ chapter.show) }}{% endif %}
+    {% if chapter.layout %}{{ ui.tag("Layout: " ~ chapter.layout) }}{% endif %}
+    {% if chapter.est %}{{ ui.tag("≈ " ~ chapter.est) }}{% endif %}
+  </div>
+</div>
+{% else %}
+<p class="empty">This plan has no chapters.</p>
+{% endfor %}
+
+<h2>Call to action</h2>
+<div class="card">
+  <div class="verbatim">{{ plan.cta_line }}</div>
+  {% if plan.cta_placement %}<p class="why">{{ plan.cta_placement }}</p>{% endif %}
+</div>
+
+{{ ui.bullets("Recording instructions", plan.instructions) }}
+{% endif %}
+{% endblock %}
