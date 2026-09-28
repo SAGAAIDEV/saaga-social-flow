@@ -366,6 +366,7 @@ pub fn run_record_session(
         screen,
         pair: layout.pair,
         pending_pair: None,
+        hand_layout: None,
         orientation: layout.orientation,
         geometry: None,
         placements: BTreeMap::new(),

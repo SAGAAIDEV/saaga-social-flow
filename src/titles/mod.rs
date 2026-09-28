@@ -60,10 +60,17 @@ fn run(
                 .into_iter()
                 .find(|(id, _)| *id == n)
                 .map(|(_, t)| t)?;
-            let hint = notes
-                .as_ref()
-                .and_then(|d| d.chapters.get(n.saturating_sub(1) as usize))
-                .map(|c| c.title.clone());
+            // The plan chapter the take was recorded for names it best; the
+            // deck is the fallback for a take recorded without one.
+            let hint = crate::plan::bound_chapter(session, n)
+                .map(|c| c.title)
+                .filter(|t| !t.trim().is_empty())
+                .or_else(|| {
+                    notes
+                        .as_ref()
+                        .and_then(|d| d.chapters.get(n.saturating_sub(1) as usize))
+                        .map(|c| c.title.clone())
+                });
             Some((n, text, hint))
         })
         .collect();

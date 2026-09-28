@@ -290,6 +290,48 @@ As built (phase 4), where it differs from the list above:
 - Not built yet: preselecting a chapter's planned layout, and retiring the
   Notes button and `agent::notes` (Plan from rehearsal is not proven yet).
 
+## Recording with the plan
+
+Added after phase 4, because the plan has to drive the recording itself, not
+only the render.
+
+- **The recording plan** is the approved version, else the newest
+  (`plan::recording_plan`). A draft drives the recording too, since you record
+  from the plan you have. Only an approved plan writes `notes.json`, so a draft
+  never reaches the titles, blog headings or posts.
+- **The teleprompter.** The Record tab's Speaking notes shows the recording
+  plan (`templates/teleprompter.html`), one slide per chapter: its kind, title,
+  goal, the line to say (hook and CTA lines included), points, what is on
+  screen, layout and length, plus a "Before you record" panel with the
+  audience, promise and instructions. Idle, it shows the chapter the next press
+  records, marked "Up next"; while recording, the open chapter, marked
+  "Recording". Past the plan's end, a slide says the take has no plan chapter.
+  Without a plan, the deck or the placeholder shows as before.
+- **Layout per chapter.** Idle, the next chapter's planned layout becomes the
+  current one, so the preview shows what will record: at launch, on Stop, from
+  the chapter menu, on a version switch, and when the plan changes. New
+  Chapter opens the next chapter in its planned layout, through the same
+  reopen a mid-take layout pick already used. A layout picked by hand for that
+  chapter wins. A planned Split with no screen selected is not forced; the
+  Record tab's line says so. The Layout popup now follows what the App picked.
+- **Chapters are bound to plan chapters.** When recording chapter *n* opens,
+  `chapter-NN.plan.json` is written beside it (`plan::binding`): the plan
+  version, whether it was approved, and plan chapter *n*'s kind, title, points
+  and layout. It travels with its take into `.discarded/` on a retake. The
+  render reads it back, looking the chapter up in `plan/vN.json` first so a
+  later fix to a draft's title still reaches the card, and falling back to the
+  snapshot:
+  - **Chapter card titles** come from the bound plan chapter first, then the
+    titles manifest, then the deck. The titles stage uses the bound title as
+    the chapter's hint.
+  - **The CTA** (no card, no short) is the recorded chapter bound to the plan's
+    CTA. A recording that has not reached it has none, and a chapter past the
+    plan is never taken for it. This replaces phase 4's "last recorded
+    chapter" rule for bound recordings; a recording with no bindings, made
+    before this, keeps that rule.
+  - **The video details and the outline hints** come from the plan the takes
+    were recorded against (`plan::plan_for_recording`), else the approved one.
+
 ## Verification
 
 `cargo test`, `cargo clippy`, `cargo fmt --check` each phase, plus the CLI in

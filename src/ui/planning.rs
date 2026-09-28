@@ -616,6 +616,26 @@ pub fn can_rehearse(session: &Session) -> bool {
     !crate::notes::closed_chapter_numbers(&session.dir).is_empty()
 }
 
+/// The Record tab's teleprompter: the plan the recording follows, one slide
+/// per chapter, opening on chapter `chapter` — recording, or up next. Later
+/// moves go through [`crate::notes::NotesPane::go_to_chapter`].
+pub fn teleprompter_page(plan: &Plan, chapter: u32, recording: bool) -> String {
+    #[derive(Serialize)]
+    struct Page {
+        plan: PlanShown,
+        chapter: u32,
+        recording: bool,
+    }
+    super::render::page(
+        "teleprompter.html",
+        Page {
+            plan: plan_shown(plan),
+            chapter: chapter.max(1),
+            recording,
+        },
+    )
+}
+
 /// The Plan tab's pane, from a view already read — the app keeps the take
 /// rows it was drawn with, to patch them as transcripts land.
 pub fn plan_page(view: &PlanView) -> String {
@@ -966,5 +986,37 @@ mod tests {
         assert_eq!(parse_mmss("1:"), None);
         assert_eq!(parse_mmss("1:5"), None);
         assert_eq!(parse_mmss("1:75"), None);
+    }
+
+    /// The Record tab's teleprompter: one slide per plan chapter plus the
+    /// past-the-plan slide, the hook and CTA saying their lines, author text
+    /// escaped, and the page opening on the chapter it was asked for.
+    #[test]
+    fn the_teleprompter_shows_the_plan_on_the_chapter_asked_for() {
+        let mut plan = plan("Ship <it>");
+        plan.number = 3;
+        plan.body.chapters[1].show = "the build log".into();
+        plan.body.chapters[1].layout = Some(crate::layouts::Pair::Split);
+        let html = teleprompter_page(&plan, 2, true);
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("Plan 3"));
+        assert!(html.contains("draft — not approved"));
+        assert_eq!(html.matches("<section class=\"slide").count(), 4);
+        assert!(html.contains("Chapter 1 of 3 · Hook"));
+        assert!(html.contains("Your deploy takes an hour."));
+        assert!(html.contains("Subscribe for part two."));
+        assert!(html.contains("On screen: <b>the build log</b>"));
+        assert!(html.contains("Split"));
+        assert!(html.contains("Ship &lt;it&gt;"), "author text is escaped");
+        assert!(html.contains("goToChapter(2, true);"));
+        assert!(html.contains("This chapter has no plan chapter"));
+
+        plan.approved = true;
+        let idle = teleprompter_page(&plan, 0, false);
+        assert!(idle.contains(">approved<"));
+        assert!(
+            idle.contains("goToChapter(1, false);"),
+            "chapter 0 opens on the first"
+        );
     }
 }

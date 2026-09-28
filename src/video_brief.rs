@@ -84,7 +84,7 @@ pub struct Source {
 impl Source {
     pub fn for_session(session: &Session, notes: &str) -> Self {
         let chapters = crate::notes::collect_completed(&session.dir);
-        let plan = crate::plan::approved(&crate::plan::dir(session))
+        let plan = crate::plan::plan_for_recording(session)
             .map(|plan| plan_context(&plan.body))
             .unwrap_or_default();
         Self {

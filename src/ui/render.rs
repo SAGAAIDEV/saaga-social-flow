@@ -50,6 +50,11 @@ fn environment() -> Environment<'static> {
         .expect("project template");
     env.add_template("plan.html", include_str!("templates/plan.html"))
         .expect("plan template");
+    env.add_template(
+        "teleprompter.html",
+        include_str!("templates/teleprompter.html"),
+    )
+    .expect("teleprompter template");
     env
 }
 

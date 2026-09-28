@@ -435,6 +435,12 @@ impl App {
             if stored.approved {
                 self.update_plan_view();
             }
+            return;
+        }
+        // A draft the Record tab is following: its teleprompter and the next
+        // chapter's layout follow the edit.
+        if crate::plan::recording_plan(&dir).is_some_and(|plan| plan.number == n) {
+            self.recording_plan_changed();
         }
     }
 
@@ -477,7 +483,7 @@ impl App {
                 .and_then(|notes| crate::plan::approve(&dir, n, &notes));
             match written {
                 Ok(_) => {
-                    self.reload_deck();
+                    self.recording_plan_changed();
                     self.set_plan_status(&format!(
                         "Plan {n} approved — it is the speaking notes on the Record tab now, \
                          and locked against edits."
@@ -487,10 +493,16 @@ impl App {
             }
         } else {
             match crate::plan::unapprove(&dir, n) {
-                Ok(()) => self.set_plan_status(&format!(
-                    "Plan {n} is no longer approved — it can be edited and refined again. The \
-                     speaking notes are unchanged."
-                )),
+                Ok(()) => {
+                    // With nothing approved the recording follows the newest
+                    // version, which may not be this one.
+                    self.recording_plan_changed();
+                    self.set_plan_status(&format!(
+                        "Plan {n} is no longer approved — it can be edited and refined again. \
+                         Until a plan is approved, the Record tab follows the newest one; the \
+                         notes the titles and posts read are unchanged."
+                    ))
+                }
                 Err(err) => {
                     self.set_plan_status(&format!("Could not un-approve Plan {n}: {err:#}"))
                 }
@@ -610,11 +622,16 @@ impl App {
             return;
         }
         match result {
-            Ok(plan) => self.set_plan_status(&format!(
-                "Plan {} ready — read it through, edit what is off, then Approve it to make it \
-                 the speaking notes.",
-                plan.number
-            )),
+            Ok(plan) => {
+                // With nothing approved, the newest plan is the one the Record
+                // tab follows — this one.
+                self.recording_plan_changed();
+                self.set_plan_status(&format!(
+                    "Plan {} ready — read it through, edit what is off, then Approve it to make \
+                     it the speaking notes.",
+                    plan.number
+                ))
+            }
             Err(err) => self.set_plan_status(&format!("Could not build the plan: {err}")),
         }
         // The buttons were switched off for the build, so the page is redrawn

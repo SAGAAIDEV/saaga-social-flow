@@ -109,19 +109,19 @@ impl PlanBody {
     /// 5 — The fix", or a warning once the take has gone past the plan.
     ///
     /// Past the plan is worth a warning rather than a shrug because of what the
-    /// render does with it: it takes the *last recorded* chapter as the call to
-    /// action, so an extra chapter break moves the CTA's missing card and
-    /// missing short onto whatever is recorded last.
+    /// take then lacks: it is bound to no plan chapter (see
+    /// [`super::binding`]), so HyperFrames gets no planned title or points for
+    /// it, and when the plan has a CTA, the ask was the chapter before.
     pub fn position(&self, n: u32) -> String {
         let of = self.chapters.len();
         match self.chapter(n) {
             Some(chapter) if chapter.title.trim().is_empty() => format!("Chapter {n} of {of}"),
             Some(chapter) => format!("Chapter {n} of {of} — {}", chapter.title.trim()),
             None if self.ends_with_cta() => format!(
-                "Chapter {n} is past the plan's {of} — the last chapter recorded is \
-                 treated as the call to action"
+                "Chapter {n} is past the plan's {of} — no plan chapter, and the call to \
+                 action was chapter {of}"
             ),
-            None => format!("Chapter {n} is past the plan's {of}"),
+            None => format!("Chapter {n} is past the plan's {of} — no plan chapter"),
         }
     }
 }
@@ -293,12 +293,15 @@ mod tests {
         assert_eq!(plan.body.position(4), "Chapter 4 of 4 — Next time");
         let past = plan.body.position(5);
         assert!(past.starts_with("Chapter 5 is past the plan's 4"), "{past}");
-        assert!(past.contains("call to action"), "{past}");
+        assert!(past.contains("call to action was chapter 4"), "{past}");
         plan.body.chapters[1].title = "  ".into();
         assert_eq!(plan.body.position(2), "Chapter 2 of 4");
         plan.body.chapters.pop();
         assert!(!plan.body.ends_with_cta());
-        assert_eq!(plan.body.position(4), "Chapter 4 is past the plan's 3");
+        assert_eq!(
+            plan.body.position(4),
+            "Chapter 4 is past the plan's 3 — no plan chapter"
+        );
         assert!(plan.body.chapter(0).is_none(), "chapters count from one");
     }
 

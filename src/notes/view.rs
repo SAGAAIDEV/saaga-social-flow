@@ -10,15 +10,6 @@ use objc2_web_kit::{WKWebView, WKWebViewConfiguration};
 
 const PLACEHOLDER: &str = "<!doctype html><html><body style=\"margin:0;background:#0b0d10;color:#8b94a0;font:15px/1.4 -apple-system,system-ui,sans-serif;padding:24px\">No notes yet. Record a take, then press Notes.</body></html>";
 
-const NEXT_SLIDE_JS: &str = r#"(function(){
-  if (typeof nextSlide === "function") { nextSlide(); return; }
-  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
-  if (!slides.length) return;
-  var cur = slides.findIndex(function(s){ return s.classList.contains("active"); });
-  var n = Math.min(slides.length - 1, Math.max(0, cur + 1));
-  slides.forEach(function(s, k){ s.classList.toggle("active", k === n); });
-})()"#;
-
 const RESET_SLIDE_JS: &str = r#"(function(){
   if (typeof goToSlide === "function") { goToSlide(0); return; }
   var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
@@ -75,15 +66,34 @@ impl NotesPane {
         }
     }
 
+    /// A page built in memory — the plan teleprompter, which is drawn from the
+    /// plan on every change rather than kept as a file.
+    pub fn show_page(&self, html: &str) {
+        self.show_html(html);
+    }
+
+    /// Put recording chapter `n` on screen, saying whether it is recording or
+    /// up next. Only the plan teleprompter defines `goToChapter`; on the deck
+    /// it falls back to that deck's own slide `n - 1`.
+    ///
+    /// For a page already on screen. A page just handed to [`Self::show_page`]
+    /// carries its starting chapter itself: script evaluated straight after a
+    /// load can run against the page being replaced.
+    pub fn go_to_chapter(&self, n: u32, recording: bool) {
+        let index = n.saturating_sub(1);
+        self.eval(&format!(
+            r#"(function(){{
+  if (typeof goToChapter === "function") {{ goToChapter({n}, {recording}); return; }}
+  if (typeof goToSlide === "function") {{ goToSlide({index}); }}
+}})()"#
+        ));
+    }
+
     pub fn load(&self, html: &Path) {
         match std::fs::read_to_string(html) {
             Ok(text) => self.show_html(&text),
             Err(err) => self.show_status(&format!("Could not read notes: {err}")),
         }
-    }
-
-    pub fn next_slide(&self) {
-        self.eval(NEXT_SLIDE_JS);
     }
 
     pub fn reset_slide(&self) {

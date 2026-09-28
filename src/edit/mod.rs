@@ -303,12 +303,12 @@ fn compose_and_render(
     // and placed before the compositions can be. Nothing to do for a take
     // with none — the common case, and the one every older project is.
     //
-    // The approved plan, if there is one, is read once here and handed down:
-    // its planned points steer the outline, and its CTA decides which chapter
-    // has no card and no short. Without one, both stages do what they always
-    // did.
-    let approved = crate::plan::approved(&crate::plan::dir(session));
-    let planned = approved.as_ref().map(|plan| &plan.body);
+    // The plan the take was recorded against, if there is one, is read once
+    // here and handed down: its planned points steer the outline, and the
+    // chapter recorded for its CTA has no card and no short. Without one, both
+    // stages do what they always did.
+    let recorded_against = crate::plan::plan_for_recording(session);
+    let planned = recorded_against.as_ref().map(|plan| &plan.body);
     let outline_numbers = crate::outline::recorded_as_outline(&session.dir, &numbers);
     let outlines = crate::outline::prepare(
         session,
@@ -318,8 +318,7 @@ fn compose_and_render(
         planned,
         status,
     )?;
-    let cta =
-        crate::plan::cta_chapter(planned, &crate::notes::closed_chapter_numbers(&session.dir));
+    let cta = crate::plan::cta_chapter_of(session);
     if let Some(n) = cta {
         drop_cta_short(&session.render_dir(), n)?;
     }
@@ -396,6 +395,11 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
     numbers
         .iter()
         .map(|&n| {
+            // The plan chapter the take was recorded for first: it is the
+            // title the author read off the teleprompter while saying it.
+            let from_plan = crate::plan::bound_chapter(session, n)
+                .map(|chapter| chapter.title.trim().to_string())
+                .filter(|t| !t.is_empty());
             let from_titles = titles.as_ref().and_then(|t| t.title_for(n));
             let from_notes = notes
                 .as_ref()
@@ -406,9 +410,8 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
             // their own slots, so a topic reading "Chapter 3" beneath them said
             // it twice — and, while the number counted something else, said
             // "02 / Chapter 3". Empty, the topic slot collapses.
-            let title = from_titles
-                .or(from_notes)
-                .map(str::to_string)
+            let title = from_plan
+                .or_else(|| from_titles.or(from_notes).map(str::to_string))
                 .unwrap_or_default();
             (n, title)
         })

@@ -20,6 +20,7 @@
 //!   llm.json                 the last model call
 //! ```
 
+pub mod binding;
 pub mod schema;
 
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use schema::ChapterKind;
 pub use schema::Plan;
 
 use crate::agent::plan::{Refine, Sources};
@@ -137,15 +139,60 @@ pub fn cta_chapter(plan: Option<&schema::PlanBody>, recorded: &[u32]) -> Option<
     recorded.iter().copied().max().filter(|&n| n > 1)
 }
 
-/// [`cta_chapter`] for `session`'s current recording version, from its approved
-/// plan and its closed chapters. `None` without an approved plan — and so for
-/// every project older than plans, and for a short, whose folder has none.
+/// The recording chapter that carries the call to action, for `session`'s
+/// current recording version.
+///
+/// Chapters recorded with the plan on the teleprompter say which plan chapter
+/// they were (see [`binding`]), and that is the answer: the last recorded
+/// chapter bound to the plan's CTA — or none, if the CTA has not been
+/// recorded yet. Only a recording with no bindings at all, made before the
+/// teleprompter showed the plan, falls back to [`cta_chapter`]'s reading of
+/// the approved plan: the last recorded chapter. `None` for a short, whose
+/// folder has no plan.
 pub fn cta_chapter_of(session: &Session) -> Option<u32> {
+    let recorded = crate::notes::closed_chapter_numbers(&session.dir);
+    let bound: Vec<(u32, binding::Binding)> = recorded
+        .iter()
+        .filter_map(|&n| Some((n, binding::load(&session.dir, n)?)))
+        .collect();
+    if !bound.is_empty() {
+        return bound
+            .iter()
+            .filter(|(_, b)| b.kind == ChapterKind::Cta)
+            .map(|(n, _)| *n)
+            .max()
+            .filter(|&n| n > 1);
+    }
     let plan = approved(&dir(session))?;
-    cta_chapter(
-        Some(&plan.body),
-        &crate::notes::closed_chapter_numbers(&session.dir),
-    )
+    cta_chapter(Some(&plan.body), &recorded)
+}
+
+/// The plan the recording follows: the approved version, else the newest.
+///
+/// This is what the teleprompter shows and what New Chapter takes its layout
+/// from. A draft drives the recording too — the author records from the plan
+/// they have — but only an approved one writes `notes.json`, so a draft never
+/// reaches the titles, blog headings and posts that read the deck.
+pub fn recording_plan(dir: &Path) -> Option<Plan> {
+    approved(dir).or_else(|| load(dir, *versions(dir).last()?).ok())
+}
+
+/// The plan `session`'s current recording was made against: the version its
+/// most recently recorded bound chapter names, else the approved version.
+/// What the video details and the outline are written from.
+pub fn plan_for_recording(session: &Session) -> Option<Plan> {
+    let plan_dir = dir(session);
+    crate::notes::closed_chapter_numbers(&session.dir)
+        .into_iter()
+        .rev()
+        .find_map(|n| binding::load(&session.dir, n))
+        .and_then(|b| load(&plan_dir, b.plan).ok())
+        .or_else(|| approved(&plan_dir))
+}
+
+/// The plan chapter recording chapter `n` was recorded for, if it was.
+pub fn bound_chapter(session: &Session, n: u32) -> Option<schema::PlanChapter> {
+    binding::resolve(&dir(session), &session.dir, n)
 }
 
 /// Writes `plan` as the next version and selects it. Never overwrites: the
@@ -945,5 +992,86 @@ mod tests {
         };
         save_input(&dir, &input).unwrap();
         assert_eq!(load_input(&dir), input);
+    }
+
+    fn project(tag: &str) -> Session {
+        let root = temp(tag);
+        let dir = root.join("drafts").join("v1");
+        std::fs::create_dir_all(&dir).unwrap();
+        Session {
+            root,
+            dir,
+            version: Some(1),
+        }
+    }
+
+    fn record(session: &Session, n: u32) {
+        std::fs::write(session.dir.join(format!("chapter-{n:02}.mp4")), "").unwrap();
+    }
+
+    /// The approved version drives the recording; with none approved, the
+    /// newest does — whichever one is on screen in the Plan tab.
+    #[test]
+    fn the_recording_follows_the_approved_plan_else_the_newest() {
+        let dir = temp("recording-plan");
+        assert!(recording_plan(&dir).is_none());
+        save_new(&dir, plan("One")).unwrap();
+        save_new(&dir, plan("Two")).unwrap();
+        select(&dir, 1).unwrap();
+        assert_eq!(recording_plan(&dir).unwrap().number, 2);
+        approve(&dir, 1, &dir.join("notes")).unwrap();
+        assert_eq!(recording_plan(&dir).unwrap().number, 1);
+    }
+
+    /// With takes bound to the plan, the CTA is the chapter recorded for it —
+    /// not the last one recorded — and a recording that has not reached it
+    /// has none.
+    #[test]
+    fn the_cta_is_the_chapter_recorded_for_it() {
+        let session = project("cta-bound");
+        let saved = save_new(&dir(&session), plan("One")).unwrap();
+        for n in 1..=4 {
+            record(&session, n);
+            binding::bind(&session.dir, n, Some(&saved)).unwrap();
+        }
+        // Chapters 1-3 are the plan's hook, body and CTA; 4 is past it.
+        assert_eq!(cta_chapter_of(&session), Some(3));
+
+        let short = project("cta-not-yet");
+        let saved = save_new(&dir(&short), plan("One")).unwrap();
+        for n in 1..=2 {
+            record(&short, n);
+            binding::bind(&short.dir, n, Some(&saved)).unwrap();
+        }
+        assert_eq!(cta_chapter_of(&short), None, "the ask is not recorded yet");
+    }
+
+    /// A recording made before takes were bound keeps the old reading: the
+    /// last recorded chapter, when the approved plan ends with a CTA.
+    #[test]
+    fn an_unbound_recording_falls_back_to_the_last_chapter() {
+        let session = project("cta-legacy");
+        save_new(&dir(&session), plan("One")).unwrap();
+        for n in 1..=4 {
+            record(&session, n);
+        }
+        assert_eq!(cta_chapter_of(&session), None, "nothing approved");
+        approve(&dir(&session), 1, &session.root.join("notes")).unwrap();
+        assert_eq!(cta_chapter_of(&session), Some(4));
+    }
+
+    /// What the copy and the outline are written from is the plan the takes
+    /// were recorded against, even once a newer one is approved.
+    #[test]
+    fn the_plan_for_a_recording_is_the_one_its_takes_name() {
+        let session = project("recorded-against");
+        let first = save_new(&dir(&session), plan("One")).unwrap();
+        assert!(plan_for_recording(&session).is_none());
+        record(&session, 1);
+        binding::bind(&session.dir, 1, Some(&first)).unwrap();
+        save_new(&dir(&session), plan("Two")).unwrap();
+        approve(&dir(&session), 2, &session.root.join("notes")).unwrap();
+        assert_eq!(plan_for_recording(&session).unwrap().number, 1);
+        assert_eq!(bound_chapter(&session, 1).unwrap().title, "Open");
     }
 }

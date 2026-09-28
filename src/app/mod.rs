@@ -18,6 +18,7 @@ pub(crate) mod face;
 mod figures;
 pub(crate) mod framing;
 mod plan;
+mod plan_recording;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
@@ -232,6 +233,10 @@ pub struct App {
     /// chapter nobody asked for, the choice is held here and applied by the next
     /// New Chapter — a layout is something you set for a take, not during it.
     pending_pair: Option<Pair>,
+    /// The chapter a layout picked by hand is for, so the plan does not pick
+    /// over it — see [`App::planned_pair`]. Idle, the next chapter to record;
+    /// mid-take, the one the next New Chapter opens.
+    hand_layout: Option<u32>,
     orientation: Orientation,
     /// The selected display's geometry, `None` when no display is selected.
     /// Every region is expressed in this display's point space, so both are
@@ -430,9 +435,11 @@ impl App {
             // shows it — and so the plan versions are read then, not on every
             // sync of an idle window.
             let plan = chapter.and_then(|n| {
-                crate::plan::approved(&crate::plan::dir(&self.session))
+                crate::plan::recording_plan(&crate::plan::dir(&self.session))
                     .map(|plan| plan.body.position(n))
             });
+            live.control_target
+                .show_pair(self.pending_pair.unwrap_or(self.pair));
             live.control_target.set_recording(
                 chapter,
                 self.session.version,
@@ -702,6 +709,7 @@ impl App {
     /// chapter boundary is not something a dropdown should invent.
     fn select_pair(&mut self, pair: Pair) {
         if self.router.is_none() {
+            self.hand_layout = Some(self.next_chapter);
             self.pending_pair = None;
             if pair != self.pair {
                 self.pair = pair;
@@ -709,7 +717,13 @@ impl App {
             }
             return;
         }
-        // Back to what is recording leaves nothing to apply.
+        // Back to what is recording leaves nothing to apply — but it is still a
+        // choice, and the plan must not overrule it at the cut.
+        let current = self
+            .router
+            .as_ref()
+            .map_or(0, |r| r.current_chapter_number());
+        self.hand_layout = Some(self.chapter_after(current));
         self.pending_pair = (pair != self.pair).then_some(pair);
         self.sync_controls();
     }
@@ -723,13 +737,22 @@ impl App {
         // the next chapter, not for the take to stay paused.
         self.end_break(true);
         if self.router.is_some() {
+            // The chapter this cut opens takes its planned layout, unless one
+            // was picked by hand — see `app::plan_recording`.
+            let current = self
+                .router
+                .as_ref()
+                .map_or(0, |r| r.current_chapter_number());
+            if let Some(pair) = self.planned_layout_for_cut(self.chapter_after(current)) {
+                self.pending_pair = Some(pair);
+            }
             // A layout waiting on this cut turns it into a reopen: same one new
             // chapter either way, and the new one is the first in the new layout.
             if let Some(pair) = self.pending_pair.take() {
                 self.pair = pair;
                 self.apply_layout_change();
-                if let Some(live) = self.live.as_ref() {
-                    live.notes.next_slide();
+                if let Some(n) = self.router.as_ref().map(|r| r.current_chapter_number()) {
+                    self.chapter_opened(n);
                 }
                 self.chapters_changed();
                 return;
@@ -743,9 +766,7 @@ impl App {
                     );
                     let opened = router.current_chapter_number();
                     report_chapter(self.clock.open(opened));
-                    if let Some(live) = self.live.as_ref() {
-                        live.notes.next_slide();
-                    }
+                    self.chapter_opened(opened);
                     self.chapters_changed();
                 }
                 Err(e) => eprintln!("stream-recorder: error cutting chapter: {:#}", e),
@@ -754,6 +775,9 @@ impl App {
             return;
         }
 
+        // The chapter about to open records in its planned layout. Usually
+        // already applied while idle; this catches a plan that arrived since.
+        self.preselect_planned_layout();
         let Some(conn) = self.connection.as_ref() else {
             eprintln!("stream-recorder: no capture session to record from");
             return;
@@ -815,6 +839,7 @@ impl App {
                 );
                 self.router = Some(router);
                 self.clock.open(self.next_chapter);
+                self.chapter_opened(self.next_chapter);
             }
             Err(e) => eprintln!("stream-recorder: error starting recording: {:#}", e),
         }
@@ -1088,6 +1113,7 @@ impl App {
     /// been generated there.
     fn refresh_version_views(&mut self) {
         self.reload_deck();
+        self.preselect_planned_layout();
         if let Some(live) = self.live.as_ref() {
             live.window.set_title(&self.window_title());
             live.control_target
@@ -1129,6 +1155,11 @@ impl App {
     /// disk. Its own step because approving a plan rewrites the deck without
     /// anything else a version switch reloads having changed.
     fn reload_deck(&self) {
+        // The plan the recording follows is the teleprompter when there is
+        // one — see `app::plan_recording`. The deck is for a video without.
+        if self.show_plan_teleprompter() {
+            return;
+        }
         let Some(live) = self.live.as_ref() else {
             return;
         };
@@ -1173,6 +1204,7 @@ impl App {
             return;
         }
         self.next_chapter = n;
+        self.next_chapter_changed();
         self.sync_controls();
     }
 
@@ -1233,6 +1265,7 @@ impl App {
             self.chapters_changed();
         }
         self.adopt_pending_layout();
+        self.next_chapter_changed();
     }
 
     /// Nothing is recording, so a layout that was waiting for a chapter can stop
@@ -4185,9 +4218,6 @@ impl ApplicationHandler for App {
         }
         match self.start(event_loop) {
             Ok(live) => {
-                if let Some(html) = crate::notes::existing_html(&self.session) {
-                    live.notes.load(&html);
-                }
                 let title = match self.session.version {
                     Some(v) => format!("stream-recorder · v{v}"),
                     None => "stream-recorder".into(),
@@ -4211,6 +4241,9 @@ impl ApplicationHandler for App {
                     self.posts_manifest = Some(manifest);
                 }
                 self.live = Some(live);
+                // After `next_chapter` is known, so the plan teleprompter opens
+                // on the chapter the first press will record.
+                self.reload_deck();
                 self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
@@ -4236,6 +4269,9 @@ impl ApplicationHandler for App {
                 self.ensure_pointer_tracker();
                 self.sync_face_control();
                 self.install_preview();
+                // Once the preview is up, so a planned layout switches it the
+                // way a click on the Layout popup would.
+                self.preselect_planned_layout();
                 self.report_clock_drift();
                 self.update_render_summary();
                 self.update_video_view();

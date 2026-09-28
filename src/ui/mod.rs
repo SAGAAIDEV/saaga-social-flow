@@ -1258,6 +1258,19 @@ impl ControlTarget {
         button.setEnabled(has_screen);
     }
 
+    /// Show `pair` in the Layout popup. A click is the only thing that used to
+    /// move it; now the plan can too — New Chapter opens a chapter in its
+    /// planned layout — so the popup is told what the App picked. Selecting
+    /// an item from code sends no action, so this cannot loop back as a click.
+    pub fn show_pair(&self, pair: Pair) {
+        if let (Some(popup), Some(index)) = (
+            self.ivars().pair_popup.borrow().as_ref(),
+            Pair::ALL.iter().position(|p| *p == pair),
+        ) {
+            popup.selectItemAtIndex(index as isize);
+        }
+    }
+
     /// `pending` names a layout picked mid-take that the next chapter will start
     /// in. It rides here rather than in its own field because this method owns
     /// the status line, and two writers would just overwrite each other.
@@ -1271,7 +1284,7 @@ impl ControlTarget {
     /// exists — see [`NextTake`]. Mid-take the menu is switched off, because
     /// the Router owns the number then.
     ///
-    /// `plan` is where the open chapter sits in the approved plan — "Chapter 3
+    /// `plan` is where the open chapter sits in the recording plan — "Chapter 3
     /// of 5 — The fix", or the warning that the take has gone past it (see
     /// `plan::schema::PlanBody::position`). It leads the line while a chapter
     /// is open, so a mismatch is read while it can still be fixed; `None`
