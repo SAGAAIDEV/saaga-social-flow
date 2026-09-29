@@ -1,0 +1,19 @@
+# Advisories cargo audit (and CI's security audit) knowingly skips.
+#
+# All four come from the legacy HTTP client the AWS SDK still compiles in
+# through its own default feature (aws-smithy-http-client pulls hyper 0.14,
+# rustls 0.21 and h2 0.3). The latest SDK versions still do, so no update here
+# removes them; each entry goes when `cargo tree -i <crate>@<version>` comes
+# back empty after a `cargo update`.
+#
+# The exposure is small in this app: the client only ever talks to AWS's own
+# endpoints (S3, EC2, SSM, STS), so these are a hostile-server denial of
+# service and certificate edge cases on connections to AWS, not to arbitrary
+# hosts. Reviewed 2026-09-29.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0258", # h2 0.3: unbounded empty DATA frames (DoS)
+    "RUSTSEC-2026-0098", # rustls-webpki 0.101: URI name constraints
+    "RUSTSEC-2026-0099", # rustls-webpki 0.101: wildcard name constraints
+    "RUSTSEC-2026-0104", # rustls-webpki 0.101: panic parsing a CRL
+]
