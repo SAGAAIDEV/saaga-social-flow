@@ -302,8 +302,26 @@ fn compose_and_render(
     // Outline chapters draw their talking points, which have to be written
     // and placed before the compositions can be. Nothing to do for a take
     // with none — the common case, and the one every older project is.
+    //
+    // The plan the take was recorded against, if there is one, is read once
+    // here and handed down: its planned points steer the outline, and the
+    // chapter recorded for its CTA has no card and no short. Without one, both
+    // stages do what they always did.
+    let recorded_against = crate::plan::plan_for_recording(session);
+    let planned = recorded_against.as_ref().map(|plan| &plan.body);
     let outline_numbers = crate::outline::recorded_as_outline(&session.dir, &numbers);
-    let outlines = crate::outline::prepare(session, edit_root, &outline_numbers, &titles, status)?;
+    let outlines = crate::outline::prepare(
+        session,
+        edit_root,
+        &outline_numbers,
+        &titles,
+        planned,
+        status,
+    )?;
+    let cta = crate::plan::cta_chapter_of(session);
+    if let Some(n) = cta {
+        drop_cta_short(&session.render_dir(), n)?;
+    }
     status("Preparing HyperFrames compositions…");
     let plan = compose::prepare_targets(
         edit_root,
@@ -311,6 +329,7 @@ fn compose_and_render(
         &compose::components_root(),
         &titles,
         &outlines,
+        cta,
         targets,
     )?;
     if plan.is_empty() {
@@ -326,6 +345,29 @@ fn compose_and_render(
         progress(within(RENDER, done, of))
     })?;
     Ok(render_out)
+}
+
+/// Takes a short of the CTA chapter off disk, if an earlier render left one.
+///
+/// Compose no longer plans one, but a render from before the plan was approved
+/// — or from before a later chapter made this one the last — may have drawn
+/// it, and the S3 upload sends whatever `vertical/chapter-NN.mp4` it finds. A
+/// render output rather than a recording, so removing it loses nothing that
+/// un-approving the plan and rendering again would not bring back.
+fn drop_cta_short(render_dir: &Path, n: u32) -> Result<()> {
+    let short = render_dir.join(format!("vertical/chapter-{n:02}.mp4"));
+    match std::fs::remove_file(&short) {
+        Ok(()) => {
+            eprintln!(
+                "stream-recorder: removed {} — chapter {n:02} is the plan's call to action, \
+                 which is not a short",
+                short.display()
+            );
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("removing {}", short.display())),
+    }
 }
 
 fn existing_cut_numbers(edit_root: &Path) -> Vec<u32> {
@@ -353,6 +395,11 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
     numbers
         .iter()
         .map(|&n| {
+            // The plan chapter the take was recorded for first: it is the
+            // title the author read off the teleprompter while saying it.
+            let from_plan = crate::plan::bound_chapter(session, n)
+                .map(|chapter| chapter.title.trim().to_string())
+                .filter(|t| !t.is_empty());
             let from_titles = titles.as_ref().and_then(|t| t.title_for(n));
             let from_notes = notes
                 .as_ref()
@@ -363,9 +410,8 @@ fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
             // their own slots, so a topic reading "Chapter 3" beneath them said
             // it twice — and, while the number counted something else, said
             // "02 / Chapter 3". Empty, the topic slot collapses.
-            let title = from_titles
-                .or(from_notes)
-                .map(str::to_string)
+            let title = from_plan
+                .or_else(|| from_titles.or(from_notes).map(str::to_string))
                 .unwrap_or_default();
             (n, title)
         })
@@ -586,6 +632,25 @@ mod tests {
     fn draft(dir: &Path, n: u32) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join(format!("chapter-{n:02}-horizontal.mp4")), b"nope").unwrap();
+    }
+
+    /// A short of the CTA left by an earlier render goes, because the upload
+    /// sends whatever chapter file it finds; every other short stays, and a
+    /// render with none to remove is not an error.
+    #[test]
+    fn a_stale_short_of_the_cta_is_removed_and_nothing_else() {
+        let render = temp("cta-short");
+        let vertical = render.join("vertical");
+        std::fs::create_dir_all(&vertical).unwrap();
+        for n in 1..=3 {
+            std::fs::write(vertical.join(format!("chapter-{n:02}.mp4")), b"v").unwrap();
+        }
+        drop_cta_short(&render, 3).unwrap();
+        assert!(!vertical.join("chapter-03.mp4").exists());
+        assert!(vertical.join("chapter-01.mp4").is_file());
+        assert!(vertical.join("chapter-02.mp4").is_file());
+        drop_cta_short(&render, 3).expect("already gone is fine");
+        let _ = std::fs::remove_dir_all(&render);
     }
 
     /// This is the message someone reads after a whole take, so it has to say

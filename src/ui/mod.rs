@@ -1,10 +1,13 @@
 //! Native AppKit controls inside the winit record window.
 //!
-//! Four primary steps: video recording, YouTube, Blog (Strapi), and Socials.
-//! Recording holds the capture controls on the left and, on the right, the
-//! title, artwork and rendered clips that one render produces; Socials groups
-//! writing, media upload, Buffer scheduling, analytics and prompt review.
-//! The navigation contract lives in [`workflow`].
+//! Six primary steps: Project, Plan, video recording, YouTube, Blog (Strapi),
+//! and Socials. Project picks, names and cleans up the project folder and
+//! summarises where it stands; Plan is where a video is thought through before
+//! a camera turns on. Recording holds the capture controls on the left and, on
+//! the right, the title, artwork and rendered clips that one render produces,
+//! beside the speaking-notes deck; Socials groups writing, media upload, Buffer
+//! scheduling, analytics and prompt review. The navigation contract lives in
+//! [`workflow`].
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -154,6 +157,7 @@ pub fn copy_to_pasteboard(text: &str) -> bool {
     }
 }
 
+pub mod planning;
 mod preview;
 pub mod render;
 pub mod web;
@@ -185,7 +189,6 @@ pub enum UiEvent {
     FaceTrackReady(Result<std::sync::Arc<crate::face::FaceTracker>, String>),
     ModelSelected(usize),
     ProviderSelected(usize),
-    PromptChanged(String),
     PostsModelSelected(usize),
     PostsProviderSelected(usize),
     PostsPromptChanged(String),
@@ -253,6 +256,9 @@ pub enum UiEvent {
     ProjectNameChanged(String),
     /// Words a pane asked to be put on the system pasteboard.
     CopyText(String),
+    /// Settings → YouTube: put this machine's stored refresh token on the
+    /// pasteboard, for pasting into `dev.sops.env`.
+    CopyYoutubeRefreshToken,
     /// Which chapter the Edit tab is showing.
     OpenChapter(u32),
     /// A hand-edited keep-list, in `[start_ms, end_ms]` pairs.
@@ -272,6 +278,52 @@ pub enum UiEvent {
     FigureSnipped {
         rect: PointRect,
     },
+    /// The Plan tab's Record idea / Stop button. Every Plan event carries the
+    /// project root its page was drawn for, so a click on a page replaced
+    /// mid-switch cannot record into, delete from or approve in another project.
+    PlanRecordToggle {
+        root: String,
+    },
+    /// Delete idea take `n`, its audio and its transcript.
+    PlanDeleteTake {
+        root: String,
+        n: u32,
+    },
+    /// Send idea take `n` to be transcribed again, after a failure.
+    PlanRetryTake {
+        root: String,
+        n: u32,
+    },
+    /// The instructions and typed-idea boxes, whole, on every keystroke.
+    SavePlanInput(std::collections::BTreeMap<String, String>),
+    /// Build a new plan version: fresh, or refined from the selected one with
+    /// the refine note.
+    BuildPlan {
+        root: String,
+        refine: bool,
+        note: String,
+    },
+    /// Build a new plan version from this recording version's chapters.
+    PlanFromRehearsal {
+        root: String,
+    },
+    /// Hand edits to one plan version, whole, on every keystroke — see
+    /// [`planning::plan_from_fields`].
+    SavePlan(std::collections::BTreeMap<String, String>),
+    /// Put plan version `n` on screen.
+    SelectPlanVersion {
+        root: String,
+        n: u32,
+    },
+    /// Approve plan version `n` (writing the deck), or lift its lock. Carries
+    /// the value rather than toggling, like [`UiEvent::WebApprove`].
+    ApprovePlan {
+        root: String,
+        n: u32,
+        value: bool,
+    },
+    /// "Go to recording →" on the Plan tab: select the Video recording tab.
+    GoToRecording,
     /// The snip was abandoned: a click that did not travel, or a right-click.
     /// Its own event rather than a `None` rect, because the App has a window to
     /// take down either way and silence would leave it up.
@@ -302,7 +354,7 @@ const TIMER_H: f64 = 22.0;
 /// sound is going into the take is visible at a glance.
 const METER_H: f64 = 18.0;
 /// Which of `left_sections` is the Microphone selector — camera, mic, screen,
-/// version, project — so the meter can sit under the device it measures.
+/// version — so the meter can sit under the device it measures.
 const MIC_SECTION: usize = 1;
 const BUTTON_GAP: f64 = 4.0;
 const GROUP_H: f64 = 114.0;
@@ -312,7 +364,6 @@ const ROW_TAG: isize = 1;
 /// One progress row under the render button: a caption and a small bar.
 const BAR_H: f64 = 14.0;
 const CAPTION_W: f64 = 72.0;
-const PROMPT_H: f64 = 52.0;
 
 pub struct ControlTargetIvars {
     tx: Sender<UiEvent>,
@@ -343,11 +394,19 @@ pub struct ControlTargetIvars {
     /// The YouTube tab's Visibility picker.
     privacy_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     version_popup: RefCell<Option<Retained<NSPopUpButton>>>,
+    /// The Project tab's picker and name field. Moved there from the Record
+    /// tab's left column with their selectors unchanged, so the app's side of
+    /// switching, naming and starting projects did not move with them.
     project_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     project_name: RefCell<Option<Retained<NSTextField>>>,
+    /// The Project tab's one native line: what Clean Up freed, or why not.
+    project_status: RefCell<Option<Retained<NSTextField>>>,
+    /// Provider and Model, on the Plan tab's strip: still the notes pick.
     model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     provider_popup: RefCell<Option<Retained<NSPopUpButton>>>,
-    prompt_field: RefCell<Option<Retained<NSTextField>>>,
+    /// The Plan tab's one native line, above its pane, for the same reason the
+    /// video details pane has one: progress must not repaint a page being read.
+    plan_status: RefCell<Option<Retained<NSTextField>>>,
     chapter_button: RefCell<Option<Retained<NSButton>>>,
     /// The chapter menu under Start Recording — see [`NextTake`]. Each item's
     /// tag is its chapter number, so the choice reaches the app as a number
@@ -428,6 +487,10 @@ pub struct ControlTargetIvars {
     analytics_tab: RefCell<Option<Retained<NSTabViewItem>>>,
     analytics_status: RefCell<Option<Retained<NSTextField>>>,
     analytics_info: RefCell<Option<Retained<NSTextView>>>,
+
+    /// The window's row of workflow tabs, so a pane can send the author on to
+    /// the next step — the Plan tab's "Go to recording →".
+    root_tabs: RefCell<Option<Retained<NSTabView>>>,
 }
 
 define_class!(
@@ -619,16 +682,6 @@ define_class!(
             }
         }
 
-        #[unsafe(method(onPromptChanged:))]
-        fn on_prompt_changed(&self, _sender: Option<&AnyObject>) {
-            self.emit_prompt();
-        }
-
-        #[unsafe(method(controlTextDidEndEditing:))]
-        fn control_text_did_end_editing(&self, _notif: Option<&AnyObject>) {
-            self.emit_prompt();
-        }
-
         #[unsafe(method(onToggleRegions:))]
         fn on_toggle_regions(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::ToggleRegions);
@@ -792,11 +845,6 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::YoutubeUpload));
         }
 
-        #[unsafe(method(onYoutubeConnect:))]
-        fn on_youtube_connect(&self, _sender: Option<&AnyObject>) {
-            let _ = self.ivars().tx.send(UiEvent::Action(Action::ConnectYoutube));
-        }
-
         #[unsafe(method(onYoutubeThumbnail:))]
         fn on_youtube_thumbnail(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::YoutubeThumbnail));
@@ -856,9 +904,10 @@ impl ControlTarget {
             version_popup: RefCell::new(None),
             project_popup: RefCell::new(None),
             project_name: RefCell::new(None),
+            project_status: RefCell::new(None),
             model_popup: RefCell::new(None),
             provider_popup: RefCell::new(None),
-            prompt_field: RefCell::new(None),
+            plan_status: RefCell::new(None),
             chapter_button: RefCell::new(None),
             chapter_popup: RefCell::new(None),
             retake_button: RefCell::new(None),
@@ -900,16 +949,9 @@ impl ControlTarget {
             analytics_tab: RefCell::new(None),
             analytics_status: RefCell::new(None),
             analytics_info: RefCell::new(None),
+            root_tabs: RefCell::new(None),
         });
         unsafe { msg_send![super(this), init] }
-    }
-
-    fn emit_prompt(&self) {
-        let Some(field) = self.ivars().prompt_field.borrow().clone() else {
-            return;
-        };
-        let text = field.stringValue().to_string();
-        let _ = self.ivars().tx.send(UiEvent::PromptChanged(text));
     }
 
     fn emit_posts_prompt(&self) {
@@ -1216,6 +1258,19 @@ impl ControlTarget {
         button.setEnabled(has_screen);
     }
 
+    /// Show `pair` in the Layout popup. A click is the only thing that used to
+    /// move it; now the plan can too — New Chapter opens a chapter in its
+    /// planned layout — so the popup is told what the App picked. Selecting
+    /// an item from code sends no action, so this cannot loop back as a click.
+    pub fn show_pair(&self, pair: Pair) {
+        if let (Some(popup), Some(index)) = (
+            self.ivars().pair_popup.borrow().as_ref(),
+            Pair::ALL.iter().position(|p| *p == pair),
+        ) {
+            popup.selectItemAtIndex(index as isize);
+        }
+    }
+
     /// `pending` names a layout picked mid-take that the next chapter will start
     /// in. It rides here rather than in its own field because this method owns
     /// the status line, and two writers would just overwrite each other.
@@ -1228,6 +1283,13 @@ impl ControlTarget {
     /// what the first button offers: a fresh chapter, or a retake of one that
     /// exists — see [`NextTake`]. Mid-take the menu is switched off, because
     /// the Router owns the number then.
+    ///
+    /// `plan` is where the open chapter sits in the recording plan — "Chapter 3
+    /// of 5 — The fix", or the warning that the take has gone past it (see
+    /// `plan::schema::PlanBody::position`). It leads the line while a chapter
+    /// is open, so a mismatch is read while it can still be fixed; `None`
+    /// without an approved plan leaves the line as it always was.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_recording(
         &self,
         chapter: Option<u32>,
@@ -1236,6 +1298,7 @@ impl ControlTarget {
         pending: Option<&str>,
         hold: Option<Hold>,
         next: &NextTake,
+        plan: Option<&str>,
     ) {
         if MainThreadMarker::new().is_none() {
             return;
@@ -1325,6 +1388,10 @@ impl ControlTarget {
                         format!("Recording {v}chapter {n:02} — press New Chapter or Stop{waiting}")
                     }
                 };
+                let line = match plan {
+                    Some(plan) => format!("{plan} · {line}"),
+                    None => line,
+                };
                 status.setStringValue(&NSString::from_str(&line));
             }
         }
@@ -1390,13 +1457,27 @@ impl ControlTarget {
         }
     }
 
-    pub fn prompt_text(&self) -> String {
-        self.ivars()
-            .prompt_field
-            .borrow()
-            .as_ref()
-            .map(|f| f.stringValue().to_string())
-            .unwrap_or_default()
+    /// The Project tab's line under its buttons.
+    pub fn set_project_status(&self, text: &str) {
+        if let Some(field) = self.ivars().project_status.borrow().clone() {
+            field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// The Plan tab's line above its pane.
+    pub fn set_plan_status(&self, text: &str) {
+        if let Some(field) = self.ivars().plan_status.borrow().clone() {
+            field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// Select a workflow tab by its pane's identifier — `draft` for Video
+    /// recording. A single-pane step is added under the pane's own key (see
+    /// `workflow::attach`), so that key is what the root tab view knows.
+    pub fn select_tab(&self, id: &str) {
+        if let Some(tabs) = self.ivars().root_tabs.borrow().clone() {
+            unsafe { tabs.selectTabViewItemWithIdentifier(&NSString::from_str(id)) };
+        }
     }
 
     // Record tab render progress
@@ -1665,6 +1746,30 @@ fn device_titles(devices: &[CaptureDevice]) -> impl IntoIterator<Item = String> 
     devices.iter().map(|d| d.name.clone())
 }
 
+/// The Project tab's native strip: the picker and name field side by side,
+/// New Project and Clean Up under them, a status line, and the summary pane
+/// taking the rest.
+struct ProjectStrip {
+    host: Retained<NSView>,
+    label: Retained<NSTextField>,
+    popup: Retained<NSPopUpButton>,
+    name: Retained<NSTextField>,
+    buttons: Vec<Retained<NSButton>>,
+    status: Retained<NSTextField>,
+    pane: Retained<NSView>,
+}
+
+/// The Plan tab's native strip: Provider and Model with the rehearsal Notes
+/// button beside them, the status line, and the plan pane under it all.
+struct PlanStrip {
+    host: Retained<NSView>,
+    /// Provider then Model, label over popup — the order the choice is made in.
+    sections: [(Retained<NSTextField>, Retained<NSPopUpButton>); 2],
+    notes_button: Retained<NSButton>,
+    status: Retained<NSTextField>,
+    pane: Retained<NSView>,
+}
+
 /// Relays the views when the window or split divider moves.
 pub struct Layout {
     left: Retained<NSView>,
@@ -1677,14 +1782,18 @@ pub struct Layout {
     timer: (Retained<NSTextField>, Retained<NSTextField>),
     meter: Retained<NSLevelIndicator>,
     left_sections: Vec<(Retained<NSTextField>, Retained<NSPopUpButton>)>,
-    project_name: Retained<NSTextField>,
     left_groups: Vec<(Retained<NSBox>, Vec<Retained<NSButton>>)>,
-    notes_sections: Vec<(Retained<NSTextField>, Retained<NSPopUpButton>)>,
-    prompt: (Retained<NSTextField>, Retained<NSTextField>),
     notes_group: (Retained<NSBox>, Vec<Retained<NSButton>>),
     render_status: Retained<NSTextField>,
     progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)>,
-    last: Cell<(u32, u32, u32, u32)>,
+    project: ProjectStrip,
+    plan: PlanStrip,
+    /// Every laid-out view's size at the last pass, so a tick that moved
+    /// nothing costs nothing. The Project and Plan hosts are in it because a
+    /// tab that is not showing keeps whatever frame it last had: `NSTabView`
+    /// sizes an item's view when it is selected, and the next pass after that
+    /// is what lays it out at its real size.
+    last: Cell<[u32; 8]>,
 }
 
 impl Layout {
@@ -1695,19 +1804,20 @@ impl Layout {
         if let Some(warning) = &self.warning {
             warning.setStringValue(&NSString::from_str(text));
             warning.setHidden(text.is_empty());
-            self.last.set((0, 0, 0, 0));
+            self.last.set([0; 8]);
         }
     }
 
     pub fn sync(&self, preview: &PreviewHost, notes: &crate::notes::NotesPane) {
         let left = self.left.bounds();
         let right = self.right.bounds();
-        let key = (
-            left.size.width.round() as u32,
-            left.size.height.round() as u32,
-            right.size.width.round() as u32,
-            right.size.height.round() as u32,
-        );
+        let project = self.project.host.bounds();
+        let plan = self.plan.host.bounds();
+        let mut key = [0u32; 8];
+        for (i, rect) in [left, right, project, plan].iter().enumerate() {
+            key[i * 2] = rect.size.width.round() as u32;
+            key[i * 2 + 1] = rect.size.height.round() as u32;
+        }
         if self.last.get() == key {
             return;
         }
@@ -1720,7 +1830,6 @@ impl Layout {
             &self.timer,
             &self.meter,
             &self.left_sections,
-            &self.project_name,
             &self.left_groups,
             &self.render_status,
             &self.progress_rows,
@@ -1729,11 +1838,11 @@ impl Layout {
         layout_right(
             right.size.width,
             right.size.height,
-            &self.notes_sections,
-            &self.prompt,
             &self.notes_group,
             notes,
         );
+        layout_project(project.size.width, project.size.height, &self.project);
+        layout_plan(plan.size.width, plan.size.height, &self.plan);
     }
 }
 
@@ -1783,7 +1892,6 @@ fn layout_left(
     timer: &(Retained<NSTextField>, Retained<NSTextField>),
     meter: &NSLevelIndicator,
     sections: &[(Retained<NSTextField>, Retained<NSPopUpButton>)],
-    project_name: &NSTextField,
     groups: &[(Retained<NSBox>, Vec<Retained<NSButton>>)],
     render_status: &NSTextField,
     progress_rows: &[(Retained<NSTextField>, Retained<NSProgressIndicator>)],
@@ -1823,10 +1931,6 @@ fn layout_left(
         }
         y -= SECTION_GAP;
     }
-    // The name field sits directly under the picker it renames.
-    y -= CONTROL_H;
-    project_name.setFrame(row(y, CONTROL_H));
-    y -= SECTION_GAP;
     let n = groups.len().max(1);
     let group_w = ((content_w - BUTTON_GAP * (n - 1) as f64) / n as f64).max(80.0);
     let group_h = groups
@@ -1868,58 +1972,22 @@ fn layout_left(
     ));
 }
 
+/// The Record tab's right column, under "Speaking notes": the buttons that act
+/// on a finished take, and the deck as the teleprompter under them. Provider,
+/// Model and the Notes prompt used to sit above these; the first two are on the
+/// Plan tab now, and the prompt's job is the plan's instructions box.
 fn layout_right(
     width: f64,
     height: f64,
-    sections: &[(Retained<NSTextField>, Retained<NSPopUpButton>)],
-    prompt: &(Retained<NSTextField>, Retained<NSTextField>),
     notes_group: &(Retained<NSBox>, Vec<Retained<NSButton>>),
     notes: &crate::notes::NotesPane,
 ) {
     let content_w = (width - PAD * 2.0).max(80.0);
-    let row = |y: f64, h: f64| NSRect::new(NSPoint::new(PAD, y), NSSize::new(content_w, h));
     let mut y = height - PAD;
-    let half = ((content_w - GAP) / 2.0).max(60.0);
-    y -= LABEL_H;
-    // Two on one row: the first section takes the left half, the second the
-    // right. The caller orders them provider-then-model, so the choice reads
-    // left to right in the order it is actually made.
-    if let [provider, model] = sections {
-        provider.0.setFrame(NSRect::new(
-            NSPoint::new(PAD, y),
-            NSSize::new(half, LABEL_H),
-        ));
-        model.0.setFrame(NSRect::new(
-            NSPoint::new(PAD + half + GAP, y),
-            NSSize::new(half, LABEL_H),
-        ));
-        y -= GAP + CONTROL_H;
-        provider.1.setFrame(NSRect::new(
-            NSPoint::new(PAD, y),
-            NSSize::new(half, CONTROL_H),
-        ));
-        model.1.setFrame(NSRect::new(
-            NSPoint::new(PAD + half + GAP, y),
-            NSSize::new(half, CONTROL_H),
-        ));
-    } else {
-        for (label, popup) in sections {
-            label.setFrame(row(y, LABEL_H));
-            y -= GAP + CONTROL_H;
-            popup.setFrame(row(y, CONTROL_H));
-            y -= SECTION_GAP + LABEL_H;
-        }
-    }
-    y -= SECTION_GAP;
-    y -= LABEL_H;
-    prompt.0.setFrame(row(y, LABEL_H));
-    y -= GAP + PROMPT_H;
-    prompt.1.setFrame(row(y, PROMPT_H));
     // Tall enough for every row, the way the left column's groups are.
     let rows = group_rows(&notes_group.1).len();
-    let group_h =
-        (rows as f64 * BUTTON_H + rows.saturating_sub(1) as f64 * BUTTON_GAP + 32.0).max(GROUP_H);
-    y -= SECTION_GAP + group_h;
+    let group_h = rows as f64 * BUTTON_H + rows.saturating_sub(1) as f64 * BUTTON_GAP + 32.0;
+    y -= group_h;
     notes_group.0.setFrame(NSRect::new(
         NSPoint::new(PAD, y),
         NSSize::new(content_w, group_h),
@@ -1929,6 +1997,92 @@ fn layout_right(
     notes.set_frame(NSRect::new(
         NSPoint::new(PAD, PAD),
         NSSize::new(content_w, deck_h),
+    ));
+}
+
+/// A push button's width for its own title, with room for the bezel, and
+/// never narrower than `min` so a row of them does not look ragged.
+fn button_width(button: &NSButton, min: f64) -> f64 {
+    (button
+        .sizeThatFits(NSSize::new(f64::MAX, BUTTON_H))
+        .width
+        .ceil()
+        + 16.0)
+        .max(min)
+}
+
+fn layout_project(width: f64, height: f64, strip: &ProjectStrip) {
+    let content_w = (width - PAD * 2.0).max(80.0);
+    let half = ((content_w - GAP) / 2.0).max(60.0);
+    let mut y = height - PAD - LABEL_H;
+    strip.label.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(content_w, LABEL_H),
+    ));
+    // The name field beside the picker it renames, each half the width.
+    y -= GAP + CONTROL_H;
+    strip.popup.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(half, CONTROL_H),
+    ));
+    strip.name.setFrame(NSRect::new(
+        NSPoint::new(PAD + half + GAP, y),
+        NSSize::new(half, CONTROL_H),
+    ));
+    y -= SECTION_GAP + BUTTON_H;
+    let mut x = PAD;
+    for button in &strip.buttons {
+        let w = button_width(button, 120.0);
+        button.setFrame(NSRect::new(NSPoint::new(x, y), NSSize::new(w, BUTTON_H)));
+        x += w + BUTTON_GAP;
+    }
+    y -= SECTION_GAP + LABEL_H;
+    strip.status.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(content_w, LABEL_H),
+    ));
+    strip.pane.setFrame(NSRect::new(
+        NSPoint::new(PAD, PAD),
+        NSSize::new(content_w, (y - GAP - PAD).max(60.0)),
+    ));
+}
+
+fn layout_plan(width: f64, height: f64, strip: &PlanStrip) {
+    let content_w = (width - PAD * 2.0).max(80.0);
+    let notes_w = button_width(&strip.notes_button, 140.0);
+    // Provider and Model share what the Notes button leaves, half each.
+    let half = ((content_w - notes_w - GAP * 2.0) / 2.0).max(60.0);
+    let mut y = height - PAD - LABEL_H;
+    let [provider, model] = &strip.sections;
+    provider.0.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(half, LABEL_H),
+    ));
+    model.0.setFrame(NSRect::new(
+        NSPoint::new(PAD + half + GAP, y),
+        NSSize::new(half, LABEL_H),
+    ));
+    y -= GAP + CONTROL_H;
+    provider.1.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(half, CONTROL_H),
+    ));
+    model.1.setFrame(NSRect::new(
+        NSPoint::new(PAD + half + GAP, y),
+        NSSize::new(half, CONTROL_H),
+    ));
+    strip.notes_button.setFrame(NSRect::new(
+        NSPoint::new(PAD + (half + GAP) * 2.0, y),
+        NSSize::new(notes_w, BUTTON_H),
+    ));
+    y -= SECTION_GAP + LABEL_H;
+    strip.status.setFrame(NSRect::new(
+        NSPoint::new(PAD, y),
+        NSSize::new(content_w, LABEL_H),
+    ));
+    strip.pane.setFrame(NSRect::new(
+        NSPoint::new(PAD, PAD),
+        NSSize::new(content_w, (y - GAP - PAD).max(60.0)),
     ));
 }
 
@@ -2015,6 +2169,10 @@ pub struct Attached {
     /// The recording page's right-hand pane: details, artwork and review.
     pub video_brief_pane: WebPane,
     pub settings_pane: WebPane,
+    /// The Project tab's summary: plan status, versions, what is live.
+    pub project_pane: WebPane,
+    /// The Plan tab's pane: the idea, the instructions, the plan.
+    pub plan_pane: WebPane,
     pub layout: Layout,
 }
 
@@ -2041,6 +2199,7 @@ pub fn settings_page(note: Option<&str>) -> String {
             team_failure => crate::settings::sops::failure().map(|f| f.reason.clone()),
             models => crate::settings::models(),
             photo_countdown => crate::config::load().photo_countdown_secs(),
+            youtube => crate::publish::account(),
             max_photo_countdown => crate::config::MAX_PHOTO_COUNTDOWN_SECS,
             saved => note.unwrap_or(""),
         },
@@ -2090,7 +2249,6 @@ pub fn attach_controls(
     model_idx: usize,
     provider_labels: &[String],
     provider_idx: usize,
-    notes_prompt: &str,
     posts_prompt: &str,
     versions: &[crate::session::VersionInfo],
     version: Option<u32>,
@@ -2119,6 +2277,7 @@ pub fn attach_controls(
     fill_parent(&tab_view);
     tab_view.setTabViewType(NSTabViewType::TopTabsBezelBorder);
     view.addSubview(&tab_view);
+    *target.ivars().root_tabs.borrow_mut() = Some(tab_view.clone());
 
     // ==========================================
     // TAB 0: DRAFT
@@ -2151,8 +2310,9 @@ pub fn attach_controls(
     split.addSubview(&right);
     split.setPosition_ofDividerAtIndex(left_w, 0);
 
-    // Keep the working brief visible beside the recording controls. Existing
-    // speaking-note controls and deck retain their own full-height panel.
+    // Keep the working brief visible beside the recording controls, with the
+    // speaking-notes deck a tab over as the teleprompter. The deck is read
+    // here, not made: plans and the rehearsal Notes button are on the Plan tab.
     let notebook_tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), right.bounds());
     fill_parent(&notebook_tabs);
     notebook_tabs.setTabViewType(NSTabViewType::TopTabsBezelBorder);
@@ -2312,84 +2472,9 @@ pub fn attach_controls(
     );
     *target.ivars().version_popup.borrow_mut() = Some(version.1.clone());
 
-    // A recording lives in a project folder. Without this picker the app minted a
-    // fresh timestamped folder on every launch and silently orphaned the last one.
-    let project_titles: Vec<String> = if projects.is_empty() {
-        vec!["(new project)".into()]
-    } else {
-        projects.iter().map(|p| p.label()).collect()
-    };
-    let project_idx = projects
-        .iter()
-        .position(|p| p.folder == project_folder)
-        .unwrap_or(0);
-    let project = add_section(
-        &left,
-        "Project",
-        project_titles,
-        project_idx,
-        sel!(onProjectChanged:),
-    );
-    *target.ivars().project_popup.borrow_mut() = Some(project.1.clone());
-
-    let project_name_field = NSTextField::initWithFrame(
-        NSTextField::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, CONTROL_H)),
-    );
-    project_name_field.setBezeled(true);
-    project_name_field.setEditable(true);
-    project_name_field.setPlaceholderString(Some(&NSString::from_str("Project name")));
-    project_name_field.setStringValue(&NSString::from_str(project_name));
-    unsafe {
-        project_name_field.setTarget(Some(&target));
-        project_name_field.setAction(Some(sel!(onProjectNameChanged:)));
-    }
-    left.addSubview(&project_name_field);
-    *target.ivars().project_name.borrow_mut() = Some(project_name_field.clone());
-
-    let left_sections = vec![camera, mic, screen, version, project];
-
-    let model_label = NSTextField::labelWithString(&NSString::from_str("Model"), mtm);
-    right.addSubview(&model_label);
-    let model_popup = make_model_popup(
-        mtm,
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, CONTROL_H)),
-        model_menu,
-        model_idx,
-        &target,
-        sel!(onModelChanged:),
-    );
-    right.addSubview(&model_popup);
-    *target.ivars().model_popup.borrow_mut() = Some(model_popup.clone());
-    let provider = add_section(
-        &right,
-        "Provider",
-        provider_labels.to_vec(),
-        provider_idx,
-        sel!(onProviderChanged:),
-    );
-    *target.ivars().provider_popup.borrow_mut() = Some(provider.1.clone());
-    let prompt_label = NSTextField::labelWithString(&NSString::from_str("Notes prompt"), mtm);
-    right.addSubview(&prompt_label);
-    let prompt_field = NSTextField::initWithFrame(
-        NSTextField::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, PROMPT_H)),
-    );
-    prompt_field.setBezeled(true);
-    prompt_field.setEditable(true);
-    prompt_field.setPlaceholderString(Some(&NSString::from_str(
-        "Steer the notes, e.g. keep the intro tight",
-    )));
-    prompt_field.setStringValue(&NSString::from_str(notes_prompt));
-    unsafe {
-        prompt_field.setTarget(Some(&target));
-        prompt_field.setAction(Some(sel!(onPromptChanged:)));
-    }
-    right.addSubview(&prompt_field);
-    *target.ivars().prompt_field.borrow_mut() = Some(prompt_field.clone());
-    // Provider above Model, because that is the order the choice actually has:
-    // the provider decides which models are in the list below it.
-    let notes_sections = vec![provider, (model_label, model_popup)];
+    // The Project picker and its name field used to follow here; they are on
+    // the Project tab now — see "TAB: PROJECT" below.
+    let left_sections = vec![camera, mic, screen, version];
 
     let pair_label = NSTextField::labelWithString(&NSString::from_str("Layout"), mtm);
     let pair_popup = make_popup(
@@ -2536,7 +2621,12 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 15] = [
+    //
+    // Notes, New Project and Clean Up Old Recordings are not in it: they
+    // moved to the Plan and Project tabs, which build their own buttons with
+    // the same selectors. Copy Transcript and Suggest Shorts stay, because
+    // they act on a finished take.
+    let buttons: [(&str, Sel); 12] = [
         ("", sel!(onNewChapter:)),                           // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
         ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
@@ -2544,20 +2634,18 @@ pub fn attach_controls(
         ("Render video and thumbnails", sel!(onRunRender:)), // 4 │
         ("Re-render missing", sel!(onRerenderMissing:)),     // 5 ┘
         ("", sel!(onStartShort:)),                           // 6   Record, title set by set_shorts
-        ("Notes", sel!(onNotes:)),                           // 7 ┐ Notes (right pane)
-        ("Copy Transcript", sel!(onCopyTranscript:)),        // 8 │
-        ("Suggest Shorts", sel!(onSuggestShorts:)),          // 9 ┘
-        ("New Project", sel!(onNewProject:)),                // 10 ┐
-        ("New Version", sel!(onNewVersion:)),                // 11 │
-        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 12 │ Session
-        ("", sel!(onToggleRegions:)),                        // 13 │ title set by set_regions
-        ("Open Rendered Video", sel!(onOpenVideo:)),         // 14 ┘
+        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 ┐ Notes (right pane)
+        ("Suggest Shorts", sel!(onSuggestShorts:)),          // 8 ┘
+        ("New Version", sel!(onNewVersion:)),                // 9 ┐ Session
+        ("", sel!(onToggleRegions:)),                        // 10 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),         // 11 ┘
     ];
     const RECORD: Range<usize> = 0..6;
     const START_SHORT: usize = 6;
-    const NOTES: Range<usize> = 7..10;
-    const SESSION: Range<usize> = 10..15;
-    const REGIONS: usize = 13;
+    const NOTES: Range<usize> = 7..9;
+    const SUGGEST_SHORTS: usize = 8;
+    const SESSION: Range<usize> = 9..12;
+    const REGIONS: usize = 10;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
         let button = unsafe {
@@ -2609,7 +2697,7 @@ pub fn attach_controls(
         suggestions: Vec::new(),
         selected: 0,
     });
-    built[9].setToolTip(Some(&NSString::from_str(
+    built[SUGGEST_SHORTS].setToolTip(Some(&NSString::from_str(
         "Read the finished take and suggest asides worth their own Short — pick one \
          beside Start Short",
     )));
@@ -2693,7 +2781,7 @@ pub fn attach_controls(
         })
         .collect();
     let notes_buttons = &built[NOTES];
-    let notes_box = make_button_group(mtm, "Notes", notes_buttons);
+    let notes_box = make_button_group(mtm, "Finished take", notes_buttons);
     right.addSubview(&notes_box);
 
     let preview = PreviewHost::attach(
@@ -2716,6 +2804,178 @@ pub fn attach_controls(
     };
     draft_item.setLabel(&NSString::from_str("Record"));
     draft_item.setView(Some(&split));
+
+    // ==========================================
+    // TAB: PROJECT
+    // ==========================================
+    // Pick, name, start and clean up. These sat at the foot of the Record
+    // tab's left column and in its Session group; they moved here with their
+    // selectors and ivars, so the app's `switch_project`, `new_project`,
+    // `run_cleanup` and renaming did not change. The pane under them is a
+    // read-only summary of where the project stands — see
+    // [`planning::project_page`]. Laid out by [`layout_project`].
+    let project_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&project_view);
+
+    // A recording lives in a project folder. Without this picker the app minted a
+    // fresh timestamped folder on every launch and silently orphaned the last one.
+    let project_titles: Vec<String> = if projects.is_empty() {
+        vec!["(new project)".into()]
+    } else {
+        projects.iter().map(|p| p.label()).collect()
+    };
+    let project_idx = projects
+        .iter()
+        .position(|p| p.folder == project_folder)
+        .unwrap_or(0);
+    let (project_label, project_popup) = add_section(
+        &project_view,
+        "Project",
+        project_titles,
+        project_idx,
+        sel!(onProjectChanged:),
+    );
+    pin_top_left(&project_label);
+    pin_top_left(&project_popup);
+    *target.ivars().project_popup.borrow_mut() = Some(project_popup.clone());
+
+    let project_name_field = NSTextField::initWithFrame(
+        NSTextField::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, CONTROL_H)),
+    );
+    project_name_field.setBezeled(true);
+    project_name_field.setEditable(true);
+    project_name_field.setPlaceholderString(Some(&NSString::from_str("Project name")));
+    project_name_field.setStringValue(&NSString::from_str(project_name));
+    unsafe {
+        project_name_field.setTarget(Some(&target));
+        project_name_field.setAction(Some(sel!(onProjectNameChanged:)));
+    }
+    pin_top_left(&project_name_field);
+    project_view.addSubview(&project_name_field);
+    *target.ivars().project_name.borrow_mut() = Some(project_name_field.clone());
+
+    let project_buttons: Vec<Retained<NSButton>> = [
+        ("New Project", sel!(onNewProject:), None),
+        (
+            "Clean Up Old Recordings",
+            sel!(onCleanUp:),
+            Some(
+                "Delete the audio and video of projects untouched for a week, after asking. \
+                 Transcripts, notes and plans are kept.",
+            ),
+        ),
+    ]
+    .into_iter()
+    .map(|(title, action, tip)| {
+        let button = unsafe {
+            NSButton::buttonWithTitle_target_action(
+                &NSString::from_str(title),
+                Some(&target),
+                Some(action),
+                mtm,
+            )
+        };
+        if let Some(tip) = tip {
+            button.setToolTip(Some(&NSString::from_str(tip)));
+        }
+        pin_top_left(&button);
+        project_view.addSubview(&button);
+        button
+    })
+    .collect();
+
+    let project_status = NSTextField::labelWithString(
+        &NSString::from_str("Pick a project, name it, or start a new one."),
+        mtm,
+    );
+    pin_top(&project_status);
+    project_view.addSubview(&project_status);
+    *target.ivars().project_status.borrow_mut() = Some(project_status.clone());
+
+    let project_pane = WebPane::attach(&project_view, mtm, tx.clone());
+    project_pane.fill_below();
+
+    let project_item = unsafe {
+        NSTabViewItem::initWithIdentifier(
+            NSTabViewItem::alloc(),
+            Some(&NSString::from_str("project")),
+        )
+    };
+    project_item.setLabel(&NSString::from_str("Project"));
+    project_item.setView(Some(&project_view));
+
+    // ==========================================
+    // TAB: PLAN
+    // ==========================================
+    // A native strip over the plan pane: Provider and Model, moved from the
+    // Record tab's right column and still driving the notes pick, and the
+    // rehearsal Notes button beside them — the old way to a deck, kept until
+    // Plan from rehearsal replaces it. The pane is `plan.html`, drawn by
+    // [`planning::plan_page`]. Laid out by [`layout_plan`].
+    let plan_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&plan_view);
+
+    // Provider before Model, because that is the order the choice actually
+    // has: the provider decides which models are in the list beside it.
+    let provider = add_section(
+        &plan_view,
+        "Provider",
+        provider_labels.to_vec(),
+        provider_idx,
+        sel!(onProviderChanged:),
+    );
+    *target.ivars().provider_popup.borrow_mut() = Some(provider.1.clone());
+    let model_label = NSTextField::labelWithString(&NSString::from_str("Model"), mtm);
+    plan_view.addSubview(&model_label);
+    let model_popup = make_model_popup(
+        mtm,
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, CONTROL_H)),
+        model_menu,
+        model_idx,
+        &target,
+        sel!(onModelChanged:),
+    );
+    plan_view.addSubview(&model_popup);
+    *target.ivars().model_popup.borrow_mut() = Some(model_popup.clone());
+    pin_top_left(&provider.0);
+    pin_top_left(&provider.1);
+    pin_top_left(&model_label);
+    pin_top_left(&model_popup);
+
+    let notes_button = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Notes from rehearsal"),
+            Some(&target),
+            Some(sel!(onNotes:)),
+            mtm,
+        )
+    };
+    notes_button.setToolTip(Some(&NSString::from_str(
+        "Write the speaking-notes deck from this version's recorded chapters — the way to a \
+         deck before plans. It replaces the deck on the Record tab.",
+    )));
+    pin_top_left(&notes_button);
+    plan_view.addSubview(&notes_button);
+
+    let plan_status = NSTextField::labelWithString(
+        &NSString::from_str(
+            "The plan for this project. An approved plan becomes the speaking notes.",
+        ),
+        mtm,
+    );
+    pin_top(&plan_status);
+    plan_view.addSubview(&plan_status);
+    *target.ivars().plan_status.borrow_mut() = Some(plan_status.clone());
+
+    let plan_pane = WebPane::attach(&plan_view, mtm, tx.clone());
+    plan_pane.fill_below();
+
+    let plan_item = unsafe {
+        NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), Some(&NSString::from_str("plan")))
+    };
+    plan_item.setLabel(&NSString::from_str("Plan"));
+    plan_item.setView(Some(&plan_view));
 
     // ==========================================
     // TAB 2: POST
@@ -2937,24 +3197,6 @@ pub fn attach_controls(
     publish_view.addSubview(&publish_btn);
     *target.ivars().publish_button.borrow_mut() = Some(publish_btn.clone());
 
-    // Beside Upload rather than hidden behind a failure: the grant dies on a
-    // schedule Google controls, so reconnecting is routine maintenance, not an
-    // error path.
-    let connect_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Connect…"),
-            Some(&target),
-            Some(sel!(onYoutubeConnect:)),
-            mtm,
-        )
-    };
-    connect_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 172.0, bounds.size.height - 84.0),
-        NSSize::new(110.0, 28.0),
-    ));
-    pin_top_left(&connect_btn);
-    publish_view.addSubview(&connect_btn);
-
     // The thumbnail is the one part of a live video that keeps being redesigned
     // after the upload, and Upload only re-sets it while the render is
     // byte-identical to what went up. This pushes the selected artwork onto the
@@ -2968,7 +3210,7 @@ pub fn attach_controls(
         )
     };
     thumbnail_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 294.0, bounds.size.height - 84.0),
+        NSPoint::new(PAD * 2.0 + 172.0, bounds.size.height - 84.0),
         NSSize::new(150.0, 28.0),
     ));
     pin_top_left(&thumbnail_btn);
@@ -3400,7 +3642,7 @@ pub fn attach_controls(
     // ==========================================
     // SETTINGS (API keys)
     // ==========================================
-    // Deliberately outside `workflow::attach`: the five steps describe how a
+    // Deliberately outside `workflow::attach`: the workflow steps describe how a
     // video gets made, and this is not one of them — it is the thing you open
     // once on a new machine and then never again. Appending it here keeps the
     // workflow contract in `workflow::STEPS` describing only the workflow,
@@ -3429,6 +3671,8 @@ pub fn attach_controls(
         bounds,
         mtm,
         &[
+            ("project", &project_item),
+            ("plan", &plan_item),
             ("draft", &draft_item),
             ("youtube", &publish_item),
             ("blog", &blog_item),
@@ -3448,14 +3692,27 @@ pub fn attach_controls(
         timer: (timer, timer_detail),
         meter,
         left_sections,
-        project_name: project_name_field,
         left_groups,
-        notes_sections,
-        prompt: (prompt_label, prompt_field),
         notes_group: (notes_box, notes_buttons.to_vec()),
         render_status,
         progress_rows,
-        last: Cell::new((0, 0, 0, 0)),
+        project: ProjectStrip {
+            host: project_view.clone(),
+            label: project_label,
+            popup: project_popup,
+            name: project_name_field,
+            buttons: project_buttons,
+            status: project_status,
+            pane: project_pane.view(),
+        },
+        plan: PlanStrip {
+            host: plan_view.clone(),
+            sections: [provider, (model_label, model_popup)],
+            notes_button,
+            status: plan_status,
+            pane: plan_pane.view(),
+        },
+        last: Cell::new([0; 8]),
     };
     layout.sync(&preview, &notes);
 
@@ -3474,6 +3731,8 @@ pub fn attach_controls(
         publish_pane,
         video_brief_pane,
         settings_pane,
+        project_pane,
+        plan_pane,
         layout,
     })
 }

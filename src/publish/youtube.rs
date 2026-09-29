@@ -183,13 +183,14 @@ fn expected_channel(token: &token_store::Token) -> Result<()> {
          re-consenting silently reuses {got} and never offers the chooser — \
          `prompt=consent` re-asks for permission, not for a channel. To break \
          it: remove this app at https://myaccount.google.com/permissions, \
-         switch to the right channel on youtube.com, then Connect again and \
+         switch to the right channel on youtube.com, then press Connect… in \
+         Settings → YouTube and \
          pick it when Google asks."
     )
 }
 
 /// The team's shared grant, `YOUTUBE_REFRESH_TOKEN` from `dev.sops.env`.
-fn shared_refresh_token() -> Option<String> {
+pub(super) fn shared_refresh_token() -> Option<String> {
     std::env::var("YOUTUBE_REFRESH_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
@@ -238,7 +239,7 @@ pub(super) fn is_unverified_shared(token: &token_store::Token) -> bool {
 /// upload that takes longer than the round trip that fetched it.
 pub fn access_token() -> Result<String> {
     let Some(mut token) = current_token()? else {
-        bail!("YouTube is not connected — run Connect first");
+        bail!("YouTube is not connected — press Connect… in Settings → YouTube");
     };
     if !token.is_stale(60) {
         return Ok(token.access_token);
@@ -302,7 +303,7 @@ fn explain_dead_refresh(err: anyhow::Error, client_id: &str) -> anyhow::Error {
         "{text}\n\nGoogle has expired the YouTube connection. It does this every seven days \
          while the OAuth app (client {client_id}) is in \"Testing\". To stay connected: Google \
          Cloud Console → APIs & Services → OAuth consent screen → Publish app (or make the \
-         app Internal), then press Connect once more."
+         app Internal), then press Connect… once more in Settings → YouTube."
     )
 }
 
@@ -388,7 +389,7 @@ fn scope_allows_update(granted: &str) -> bool {
 /// What to tell someone whose grant cannot change a video: the fix is one
 /// press, and the message should say which.
 const RECONNECT_FOR_UPDATE: &str = "the YouTube connection was granted before this app could \
-change a video's visibility — press Connect… once more and allow \"Manage your YouTube \
+change a video's visibility — press Connect… once more in Settings → YouTube and allow \"Manage your YouTube \
 account\" to give it that permission";
 
 /// Sets who can see `video_id`, leaving the rest of its status as it is.

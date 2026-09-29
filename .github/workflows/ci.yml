@@ -44,3 +44,5 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # The same list, with the reasons, is in .cargo/audit.toml.
+          ignore: RUSTSEC-2026-0258,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104

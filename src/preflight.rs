@@ -204,7 +204,13 @@ pub fn check() -> Vec<Finding> {
 /// Silence on a healthy machine is the point: a banner printed every launch is
 /// one nobody reads by the third day, which is exactly when it starts mattering.
 pub fn warn_once() {
-    let findings = check();
+    if let Some(out) = startup_message(&check()) {
+        eprintln!("{out}");
+    }
+}
+
+/// [`warn_once`]'s text for `findings`, or `None` when it should say nothing.
+fn startup_message(findings: &[Finding]) -> Option<String> {
     // Only what will actually fail a render. A degraded dependency — no S3
     // uploader on a machine that never uploads — is a permanent state for some
     // people, and a banner printed at every launch about a permanent state is
@@ -215,7 +221,7 @@ pub fn warn_once() {
         .filter(|f| !f.ok && f.impact == Impact::Breaks)
         .collect();
     if breaking.is_empty() {
-        return;
+        return None;
     }
     let mut out = String::new();
     for finding in breaking {
@@ -229,7 +235,7 @@ pub fn warn_once() {
         out,
         "stream-recorder: recording still works; run `saaga-social-flow doctor` for the rest."
     );
-    eprintln!("{out}");
+    Some(out)
 }
 
 /// The `doctor` subcommand: every dependency, healthy ones included.
@@ -309,17 +315,37 @@ mod tests {
     /// Startup stays quiet about things that merely degrade — those are
     /// permanent states for some setups, and a banner every launch is one
     /// nobody reads by the time it matters.
+    ///
+    /// Judged on made-up findings rather than this machine's: whether the
+    /// renderer is installed here says nothing about the rule, and a CI runner
+    /// without one failed this test on every push.
     #[test]
     fn startup_only_speaks_up_about_hard_failures() {
-        let findings = check();
-        let breaking = findings
-            .iter()
-            .filter(|f| !f.ok && f.impact == Impact::Breaks)
-            .count();
+        let finding = |what, ok, impact| Finding {
+            what,
+            ok,
+            impact,
+            detail: format!("{what} is missing — run scripts/setup.sh"),
+        };
         assert_eq!(
-            breaking, 0,
-            "this checkout has a render-breaking dependency, so startup would warn"
+            startup_message(&[
+                finding("renderer", true, Impact::Breaks),
+                finding("s3 uploader", false, Impact::Degrades),
+            ]),
+            None,
+            "healthy, or only degraded: quiet"
         );
+        let out = startup_message(&[
+            finding("renderer", false, Impact::Breaks),
+            finding("s3 uploader", false, Impact::Degrades),
+        ])
+        .expect("a breaking finding speaks up");
+        assert!(out.contains("renderer — renderer is missing"), "{out}");
+        assert!(
+            !out.contains("s3 uploader"),
+            "degraded stays out of the banner: {out}"
+        );
+        assert!(out.ends_with("for the rest."), "{out}");
     }
 
     #[test]

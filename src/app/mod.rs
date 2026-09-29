@@ -17,6 +17,8 @@ mod devices;
 pub(crate) mod face;
 mod figures;
 pub(crate) mod framing;
+mod plan;
+mod plan_recording;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
@@ -88,6 +90,10 @@ struct Live {
     /// and the rendered clips — see `update_video_view`.
     video_brief_pane: ui::WebPane,
     settings_pane: ui::WebPane,
+    /// The Project tab's summary — see `update_project_view`.
+    project_pane: ui::WebPane,
+    /// The Plan tab's pane — see `update_plan_view`.
+    plan_pane: ui::WebPane,
     layout: ui::Layout,
 }
 
@@ -153,6 +159,9 @@ pub struct App {
     /// `figures::Break`. Any open chapter is paused for as long as this is
     /// `Some`, and every path that finishes a chapter ends it first.
     aside: Option<figures::Break>,
+    /// The Plan tab's idea take, if one is recording, and its build job —
+    /// see [`plan`].
+    plan: plan::PlanState,
     thumbnail_tx: mpsc::Sender<crate::thumbnail::ThumbnailEvent>,
     thumbnail_rx: Receiver<crate::thumbnail::ThumbnailEvent>,
     thumbnail_busy: bool,
@@ -224,6 +233,10 @@ pub struct App {
     /// chapter nobody asked for, the choice is held here and applied by the next
     /// New Chapter — a layout is something you set for a take, not during it.
     pending_pair: Option<Pair>,
+    /// The chapter a layout picked by hand is for, so the plan does not pick
+    /// over it — see [`App::planned_pair`]. Idle, the next chapter to record;
+    /// mid-take, the one the next New Chapter opens.
+    hand_layout: Option<u32>,
     orientation: Orientation,
     /// The selected display's geometry, `None` when no display is selected.
     /// Every region is expressed in this display's point space, so both are
@@ -336,7 +349,6 @@ impl App {
             self.notes_pick.menu_index(),
             &self.notes_providers,
             self.notes_pick.provider_index(&self.notes_providers),
-            &self.notes_prompt,
             &self.posts_prompt,
             &self.session.list_versions(),
             self.session.version,
@@ -370,6 +382,8 @@ impl App {
             publish_pane: attached.publish_pane,
             video_brief_pane: attached.video_brief_pane,
             settings_pane: attached.settings_pane,
+            project_pane: attached.project_pane,
+            plan_pane: attached.plan_pane,
             layout: attached.layout,
         })
     }
@@ -416,8 +430,18 @@ impl App {
                 (false, true) => Some(ui::Hold::Paused),
                 (false, false) => None,
             };
+            let chapter = self.router.as_ref().map(|r| r.current_chapter_number());
+            // Only while a chapter is open, which is the only time the line
+            // shows it — and so the plan versions are read then, not on every
+            // sync of an idle window.
+            let plan = chapter.and_then(|n| {
+                crate::plan::recording_plan(&crate::plan::dir(&self.session))
+                    .map(|plan| plan.body.position(n))
+            });
+            live.control_target
+                .show_pair(self.pending_pair.unwrap_or(self.pair));
             live.control_target.set_recording(
-                self.router.as_ref().map(|r| r.current_chapter_number()),
+                chapter,
                 self.session.version,
                 crate::shorts::number(&self.session.root),
                 waiting.as_deref(),
@@ -426,6 +450,7 @@ impl App {
                     recorded: crate::notes::closed_chapter_numbers(&self.session.dir),
                     chapter: self.next_chapter,
                 },
+                plan.as_deref(),
             );
             live.control_target.set_stage_gates(&self.stages());
             live.control_target.set_render_targets(
@@ -505,8 +530,10 @@ impl App {
         match action {
             Action::Quit => {
                 // The aside's writer hangs off the capture session; it has to
-                // be finished before that session stops delivering.
+                // be finished before that session stops delivering. An idea
+                // take is an aside too.
                 self.end_break(false);
+                self.finish_plan_take();
                 // Stop capture first so no more sample buffers race the
                 // writers while the router finishes the final chapter.
                 if let Some(ref conn) = self.connection {
@@ -642,7 +669,7 @@ impl App {
         const WEEK: std::time::Duration = std::time::Duration::from_secs(7 * 86_400);
         let stale = crate::sessions::stale(WEEK, &self.session.root);
         if stale.is_empty() {
-            self.set_render_status(
+            self.set_project_status(
                 "Nothing to clean up — no project older than a week still has recordings.",
             );
             return;
@@ -652,7 +679,7 @@ impl App {
             .as_ref()
             .is_some_and(|live| live.control_target.confirm_cleanup(&stale));
         if !confirmed {
-            self.set_render_status("Clean up cancelled — nothing deleted.");
+            self.set_project_status("Clean up cancelled — nothing deleted.");
             return;
         }
         let cleaned = crate::sessions::clean(&stale);
@@ -660,7 +687,7 @@ impl App {
             0 => String::new(),
             n => format!(" — {n} file(s) would not delete; see the log"),
         };
-        self.set_render_status(&format!(
+        self.set_project_status(&format!(
             "Freed {} — removed {} recording(s) from {} project(s){failed}.",
             crate::sessions::human_bytes(cleaned.bytes),
             cleaned.files,
@@ -682,6 +709,7 @@ impl App {
     /// chapter boundary is not something a dropdown should invent.
     fn select_pair(&mut self, pair: Pair) {
         if self.router.is_none() {
+            self.hand_layout = Some(self.next_chapter);
             self.pending_pair = None;
             if pair != self.pair {
                 self.pair = pair;
@@ -689,24 +717,44 @@ impl App {
             }
             return;
         }
-        // Back to what is recording leaves nothing to apply.
+        // Back to what is recording leaves nothing to apply — but it is still a
+        // choice, and the plan must not overrule it at the cut.
+        let current = self
+            .router
+            .as_ref()
+            .map_or(0, |r| r.current_chapter_number());
+        self.hand_layout = Some(self.chapter_after(current));
         self.pending_pair = (pair != self.pair).then_some(pair);
         self.sync_controls();
     }
 
     fn start_or_cut(&mut self) {
+        // An idea take and a chapter do not overlap — see `app::plan`.
+        if self.plan_take_blocks_recording() {
+            return;
+        }
         // New Chapter on a break ends it and then cuts: the operator asked for
         // the next chapter, not for the take to stay paused.
         self.end_break(true);
         if self.router.is_some() {
+            // The chapter this cut opens takes its planned layout, unless one
+            // was picked by hand — see `app::plan_recording`.
+            let current = self
+                .router
+                .as_ref()
+                .map_or(0, |r| r.current_chapter_number());
+            if let Some(pair) = self.planned_layout_for_cut(self.chapter_after(current)) {
+                self.pending_pair = Some(pair);
+            }
             // A layout waiting on this cut turns it into a reopen: same one new
             // chapter either way, and the new one is the first in the new layout.
             if let Some(pair) = self.pending_pair.take() {
                 self.pair = pair;
                 self.apply_layout_change();
-                if let Some(live) = self.live.as_ref() {
-                    live.notes.next_slide();
+                if let Some(n) = self.router.as_ref().map(|r| r.current_chapter_number()) {
+                    self.chapter_opened(n);
                 }
+                self.chapters_changed();
                 return;
             }
             let router = self.router.as_mut().expect("checked above");
@@ -718,9 +766,8 @@ impl App {
                     );
                     let opened = router.current_chapter_number();
                     report_chapter(self.clock.open(opened));
-                    if let Some(live) = self.live.as_ref() {
-                        live.notes.next_slide();
-                    }
+                    self.chapter_opened(opened);
+                    self.chapters_changed();
                 }
                 Err(e) => eprintln!("stream-recorder: error cutting chapter: {:#}", e),
             }
@@ -728,6 +775,9 @@ impl App {
             return;
         }
 
+        // The chapter about to open records in its planned layout. Usually
+        // already applied while idle; this catches a plan that arrived since.
+        self.preselect_planned_layout();
         let Some(conn) = self.connection.as_ref() else {
             eprintln!("stream-recorder: no capture session to record from");
             return;
@@ -789,6 +839,7 @@ impl App {
                 );
                 self.router = Some(router);
                 self.clock.open(self.next_chapter);
+                self.chapter_opened(self.next_chapter);
             }
             Err(e) => eprintln!("stream-recorder: error starting recording: {:#}", e),
         }
@@ -840,12 +891,6 @@ impl App {
             UiEvent::YoutubePrivacySelected(idx) => self.select_youtube_privacy(idx),
             UiEvent::ModelSelected(idx) => self.select_model(idx),
             UiEvent::ProviderSelected(idx) => self.select_provider(idx),
-            UiEvent::PromptChanged(text) => {
-                if text != self.notes_prompt {
-                    self.notes_prompt = text;
-                    self.save_notes_choice();
-                }
-            }
             UiEvent::PostsModelSelected(idx) => self.select_posts_model(idx),
             UiEvent::PostsProviderSelected(idx) => self.select_posts_provider(idx),
             UiEvent::PostsPromptChanged(text) => {
@@ -919,6 +964,7 @@ impl App {
             UiEvent::RemoveReference(name) => self.remove_reference(&name),
             UiEvent::ProjectNameChanged(name) => self.rename_project(&name),
             UiEvent::CopyText(text) => self.copy_text(&text),
+            UiEvent::CopyYoutubeRefreshToken => self.copy_youtube_refresh_token(),
             UiEvent::OpenChapter(chapter) => self.open_edit_chapter(chapter),
             UiEvent::SaveEdit { chapter, spans } => self.save_edit_spans(chapter, &spans),
             UiEvent::ApplyEdit(chapter) => self.apply_edit(chapter),
@@ -927,6 +973,18 @@ impl App {
             UiEvent::RegionPlaced { orientation, rect } => self.region_placed(orientation, rect),
             UiEvent::FigureSnipped { rect } => self.figure_snipped(rect),
             UiEvent::FigureSnipCancelled => self.figure_snip_cancelled(),
+            UiEvent::PlanRecordToggle { root } => self.toggle_plan_take(&root),
+            UiEvent::PlanDeleteTake { root, n } => self.delete_plan_take(&root, n),
+            UiEvent::PlanRetryTake { root, n } => self.retry_plan_take(&root, n),
+            UiEvent::SavePlanInput(fields) => self.save_plan_input(&fields),
+            UiEvent::BuildPlan { root, refine, note } => {
+                self.build_plan(&root, refine, &note, false)
+            }
+            UiEvent::PlanFromRehearsal { root } => self.build_plan(&root, false, "", true),
+            UiEvent::SavePlan(fields) => self.save_plan(&fields),
+            UiEvent::SelectPlanVersion { root, n } => self.select_plan_version(&root, n),
+            UiEvent::ApprovePlan { root, n, value } => self.approve_plan(&root, n, value),
+            UiEvent::GoToRecording => self.go_to_recording(),
         }
     }
 
@@ -993,6 +1051,31 @@ impl App {
         live.control_target
             .set_versions(&self.session.list_versions(), self.session.version);
         live.window.set_title(&self.window_title());
+        // The summary leads with the project's name, and lists the versions.
+        self.update_project_view();
+    }
+
+    /// The Project tab's summary, drawn again from disk: the plan's standing,
+    /// each recording version with its chapters and render, and what is live.
+    ///
+    /// Called wherever any of that can change — a project or version switch, a
+    /// rename, a clean up, a finished render, an upload, a blog post, a new
+    /// deck. It is only ever read, so a repaint costs nothing but a few small
+    /// file reads, and a stale summary is the one thing it must not be.
+    fn update_project_view(&self) {
+        if let Some(live) = self.live.as_ref() {
+            live.project_pane
+                .show(&ui::planning::project_page(&self.session));
+        }
+    }
+
+    /// The Project tab's line, for what Clean Up freed. It used to share the
+    /// render status line, which is on the Record tab — the one place a press
+    /// on the Project tab would never be seen.
+    fn set_project_status(&self, text: &str) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_project_status(text);
+        }
     }
 
     /// Both halves of where you are, always. The title used to say either the
@@ -1018,7 +1101,10 @@ impl App {
     /// Notes, both forms, all three summaries, the version popup and the title —
     /// everything that means something different in v2 than it did in v1. The
     /// project-scoped views are deliberately absent: the picker, analytics,
-    /// reflect and thumbnails do not move when the version does.
+    /// reflect, thumbnails and the plan do not move when the version does. The
+    /// Project tab's summary is the exception, because it marks the open
+    /// version and a new one adds a row — and so is the Plan pane's "Plan from
+    /// rehearsal", which plans from this version's chapters.
     ///
     /// One function because the three callers kept drifting apart. New Version
     /// was missing the titles and posts reloads, so a fresh version opened
@@ -1026,20 +1112,9 @@ impl App {
     /// before it runs, then wrote that copy into the new version as though it had
     /// been generated there.
     fn refresh_version_views(&mut self) {
+        self.reload_deck();
+        self.preselect_planned_layout();
         if let Some(live) = self.live.as_ref() {
-            // A video with no notes yet but suggested shorts shows those: it is
-            // the deck the Start Short menu is read against.
-            let deck = crate::notes::existing_html(&self.session).or_else(|| {
-                (!self.session.is_short())
-                    .then(|| crate::shorts::suggestions_html(&self.session.root))
-                    .flatten()
-            });
-            if let Some(html) = deck {
-                live.notes.load(&html);
-                live.notes.reset_slide();
-            } else {
-                live.notes.show_placeholder();
-            }
             live.window.set_title(&self.window_title());
             live.control_target
                 .set_versions(&self.session.list_versions(), self.session.version);
@@ -1060,7 +1135,47 @@ impl App {
         self.update_blog_view();
         self.update_publish_summary();
         self.update_schedule_summary();
+        // The open version's row, and its deck, are on the Project tab.
+        self.update_project_view();
+        self.sync_plan_rehearsal();
         self.sync_controls();
+    }
+
+    /// A chapter closed, so the views that count them are drawn again: the
+    /// Project tab's Recordings table, and the Plan pane's "Plan from
+    /// rehearsal", which the first closed chapter of a version switches on.
+    /// Neither is on the Record tab, where the chapter closed, so nothing else
+    /// would redraw them before the author looks.
+    fn chapters_changed(&mut self) {
+        self.update_project_view();
+        self.sync_plan_rehearsal();
+    }
+
+    /// Load the speaking-notes deck into the Record tab's teleprompter, from
+    /// disk. Its own step because approving a plan rewrites the deck without
+    /// anything else a version switch reloads having changed.
+    fn reload_deck(&self) {
+        // The plan the recording follows is the teleprompter when there is
+        // one — see `app::plan_recording`. The deck is for a video without.
+        if self.show_plan_teleprompter() {
+            return;
+        }
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        // A video with no notes yet but suggested shorts shows those: it is
+        // the deck the Start Short menu is read against.
+        let deck = crate::notes::existing_html(&self.session).or_else(|| {
+            (!self.session.is_short())
+                .then(|| crate::shorts::suggestions_html(&self.session.root))
+                .flatten()
+        });
+        if let Some(html) = deck {
+            live.notes.load(&html);
+            live.notes.reset_slide();
+        } else {
+            live.notes.show_placeholder();
+        }
     }
 
     /// The chapter a recording would open next: one past the highest already
@@ -1089,16 +1204,20 @@ impl App {
             return;
         }
         self.next_chapter = n;
+        self.next_chapter_changed();
         self.sync_controls();
     }
 
     /// Points every tab at `next`. Anything missed here would keep showing the
     /// previous project's work.
     fn adopt_session(&mut self, next: crate::session::Session) {
+        // An idea take is filed in the project it was started in.
+        self.finish_plan_take();
         self.session = next;
         self.next_chapter = self.resume_chapter_number();
         self.refresh_version_views();
         self.refresh_project_controls();
+        self.update_plan_view();
         self.last_report = None;
         self.refresh_analytics_view();
         self.update_reflect_view();
@@ -1143,8 +1262,10 @@ impl App {
             }
             report_chapter(self.clock.close());
             self.sync_controls();
+            self.chapters_changed();
         }
         self.adopt_pending_layout();
+        self.next_chapter_changed();
     }
 
     /// Nothing is recording, so a layout that was waiting for a chapter can stop
@@ -1162,22 +1283,39 @@ impl App {
         }
     }
 
+    /// The rehearsal's Notes button. Refused while a plan is approved: the
+    /// approved plan is what writes the deck (see [`crate::plan`]), and a
+    /// rehearsal deck over it would leave the plan reading as approved while
+    /// the cards, titles and posts came from somewhere else. Checked before the
+    /// open chapter is finished, so a refused press leaves the take rolling.
     fn build_notes(&mut self) {
+        if let Some(why) = crate::plan::rehearsal_notes_refusal(&crate::plan::dir(&self.session)) {
+            if let Some(live) = self.live.as_ref() {
+                live.control_target.set_plan_status(&why);
+            }
+            return;
+        }
         self.finish_open_chapter();
         let title = self
             .session
             .name()
             .unwrap_or_else(|| "Speaking notes".into());
+        // The button is on the Plan tab and the deck it fills is on the Record
+        // tab, so the Plan tab's line says where the result will land.
         if let Some(live) = self.live.as_ref() {
-            self.notes_prompt = live.control_target.prompt_text();
+            live.control_target.set_plan_status(
+                "Writing speaking notes from this version's recording — they replace the deck \
+                 on the Record tab.",
+            );
         }
+        let input = crate::plan::load_input(&crate::plan::dir(&self.session));
         println!("stream-recorder: building notes…");
         crate::notes::spawn_notes(
             self.session.clone(),
             title,
             self.notes_pick.model().to_string(),
             self.notes_pick.provider().map(str::to_string),
-            (!self.notes_prompt.trim().is_empty()).then(|| self.notes_prompt.clone()),
+            crate::plan::notes_steer(&input, &self.notes_prompt),
             self.notes_tx.clone(),
         );
     }
@@ -1201,6 +1339,12 @@ impl App {
                 }
                 Err(err) => eprintln!("stream-recorder: could not reopen the video: {err:#}"),
             }
+            return;
+        }
+        // The same refusal Start Recording gives, asked before anything moves:
+        // past this point `adopt_session` would finish the take without a word
+        // and the short would start rolling in its place.
+        if self.plan_take_blocks_recording() {
             return;
         }
         self.finish_open_chapter();
@@ -1403,7 +1547,7 @@ impl App {
             );
         }
         if crate::publish::connected_channel().is_none() {
-            return "YouTube is not connected — press Connect… on the YouTube tab, then Upload."
+            return "YouTube is not connected — press Connect… in Settings → YouTube, then Upload."
                 .to_string();
         }
         match self.stages().publish {
@@ -1920,6 +2064,7 @@ impl App {
                 crate::blog::BlogEvent::Ready(post) => {
                     self.blog_busy = false;
                     self.update_blog_view();
+                    self.update_project_view();
                     // The warning is surfaced rather than logged: a post that
                     // went up with no byline is live and wrong, and the status
                     // line is the only place anyone would notice.
@@ -1991,10 +2136,18 @@ impl App {
     fn run_youtube_connect(&mut self) {
         if self.publish_busy {
             self.set_publish_status("A YouTube job is already running…");
+            self.set_youtube_account_status(
+                "A YouTube job is already running — try again when it ends.",
+                false,
+            );
             return;
         }
         self.publish_busy = true;
         self.set_publish_status("Opening a browser to connect YouTube…");
+        self.set_youtube_account_status(
+            "Opening a browser — finish Google's sign-in within five minutes…",
+            true,
+        );
         let tx = self.publish_tx.clone();
         if let Err(err) = std::thread::Builder::new()
             .name("youtube-connect".into())
@@ -2009,7 +2162,7 @@ impl App {
                     // or timed out left the terminal silent and the operator
                     // pressing Upload against a store that never got a token.
                     eprintln!("stream-recorder: youtube connect failed: {err:#}");
-                    let _ = tx.send(crate::publish::PublishEvent::Failed(format!(
+                    let _ = tx.send(crate::publish::PublishEvent::ConnectFailed(format!(
                         "Connect failed: {err:#}"
                     )));
                 }
@@ -2474,6 +2627,36 @@ impl App {
             ));
         }
         self.update_video_view();
+    }
+
+    /// Settings → YouTube: copy the stored refresh token, for `dev.sops.env`.
+    ///
+    /// Copied natively rather than through `copyText`, so the token never has
+    /// to be put into the page — the Settings pane is not handed secrets.
+    fn copy_youtube_refresh_token(&self) {
+        let note = match crate::publish::stored_refresh_token() {
+            None => "No stored grant on this machine — press Connect… first.".to_string(),
+            Some(token) if crate::ui::copy_to_pasteboard(&token) => {
+                "Copied. Paste it as YOUTUBE_REFRESH_TOKEN in dev.sops.env \
+                 (AWS_PROFILE=dev sops dev.sops.env) and commit it."
+                    .to_string()
+            }
+            Some(_) => "Could not reach the pasteboard.".to_string(),
+        };
+        self.set_youtube_account_status(&note, true);
+    }
+
+    /// The line under Settings → YouTube's buttons, set in place so a redraw
+    /// does not throw away keys typed further down the pane.
+    fn set_youtube_account_status(&self, msg: &str, ok: bool) {
+        if let Some(live) = self.live.as_ref() {
+            let text = serde_json::to_string(msg).unwrap_or_default();
+            let class = if ok { "result ok" } else { "result bad" };
+            live.settings_pane.eval(&format!(
+                "(function(){{var e=document.getElementById('youtube-account-result');\
+                 if(e){{e.className='{class}';e.textContent={text};}}}})();"
+            ));
+        }
     }
 
     fn redraw_settings(&self, note: Option<&str>) {
@@ -3183,8 +3366,10 @@ impl App {
                         }
                     }
                     // The Video pane lists both links under the clips, so it has
-                    // to re-read the ledger after either row lands.
+                    // to re-read the ledger after either row lands; so does the
+                    // Project tab's Published card.
                     self.update_video_view();
+                    self.update_project_view();
                 }
                 crate::publish::PublishEvent::ThumbnailSet(upload) => {
                     // The summary re-reads the ledger and repaints the status
@@ -3234,6 +3419,15 @@ impl App {
                         crate::stage::Gate::Busy => "YouTube connected.".to_string(),
                     };
                     self.set_publish_status(&status);
+                    // Redrawn rather than annotated: the card's buttons and its
+                    // channel line both change with a new grant.
+                    self.redraw_settings(None);
+                }
+                crate::publish::PublishEvent::ConnectFailed(msg) => {
+                    self.publish_busy = false;
+                    self.set_publish_status(&msg);
+                    self.set_youtube_account_status(&msg, false);
+                    self.sync_controls();
                 }
                 crate::publish::PublishEvent::Failed(msg) => {
                     self.publish_busy = false;
@@ -3526,7 +3720,7 @@ impl App {
         match crate::publish::connected_channel() {
             Some(channel) => info.push_str(&format!("- Connected to {channel}\n\n")),
             None => info.push_str(
-                "- NOT CONNECTED — press Connect… and finish Google's flow within \
+                "- NOT CONNECTED — press Connect… in Settings → YouTube and finish Google's flow within \
                  five minutes. To land on the SAAGA channel, switch to it on \
                  youtube.com *first*: the grant binds to whichever channel is active \
                  there.\n\n",
@@ -3746,12 +3940,18 @@ impl App {
             return;
         };
         let mut suggested = false;
+        let mut deck_changed = false;
         for event in events {
             match event {
                 crate::notes::NotesEvent::Status(msg) => live.notes.show_status(&msg),
                 crate::notes::NotesEvent::Ready(html) => {
                     live.notes.load(&html);
                     live.notes.reset_slide();
+                    live.control_target.set_plan_status(
+                        "Speaking notes written from the recording — they are the deck on the \
+                         Record tab.",
+                    );
+                    deck_changed = true;
                 }
                 crate::notes::NotesEvent::Shorts(html) => {
                     live.notes.load(&html);
@@ -3768,6 +3968,9 @@ impl App {
                          record again.",
                         self.mic_name()
                     ));
+                    live.control_target.set_plan_status(&format!(
+                        "Notes failed: {why}. More on the Record tab's deck."
+                    ));
                 }
             }
         }
@@ -3776,6 +3979,10 @@ impl App {
             // a pick into the old one would name a different short now.
             self.short_pick = 0;
             self.sync_controls();
+        }
+        if deck_changed {
+            // The Project tab counts the deck's chapters and says where it came from.
+            self.update_project_view();
         }
     }
 
@@ -3839,6 +4046,7 @@ impl App {
                     self.update_blog_view();
                     self.update_publish_summary();
                     self.update_schedule_summary();
+                    self.update_project_view();
                     self.sync_controls();
                 }
                 crate::edit::RenderEvent::Failed(msg) => {
@@ -4010,9 +4218,6 @@ impl ApplicationHandler for App {
         }
         match self.start(event_loop) {
             Ok(live) => {
-                if let Some(html) = crate::notes::existing_html(&self.session) {
-                    live.notes.load(&html);
-                }
                 let title = match self.session.version {
                     Some(v) => format!("stream-recorder · v{v}"),
                     None => "stream-recorder".into(),
@@ -4036,6 +4241,9 @@ impl ApplicationHandler for App {
                     self.posts_manifest = Some(manifest);
                 }
                 self.live = Some(live);
+                // After `next_chapter` is known, so the plan teleprompter opens
+                // on the chapter the first press will record.
+                self.reload_deck();
                 self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
@@ -4045,7 +4253,9 @@ impl ApplicationHandler for App {
                 }
                 // Nothing filled the project and version pickers before this, so
                 // a launch showed both empty however far along the project was.
+                // The Project tab's summary is drawn by the same call.
                 self.refresh_project_controls();
+                self.update_plan_view();
                 self.sync_controls();
                 self.sync_overlay();
                 // Before `install_preview`, so a session that launches with
@@ -4059,6 +4269,9 @@ impl ApplicationHandler for App {
                 self.ensure_pointer_tracker();
                 self.sync_face_control();
                 self.install_preview();
+                // Once the preview is up, so a planned layout switches it the
+                // way a click on the Layout popup would.
+                self.preselect_planned_layout();
                 self.report_clock_drift();
                 self.update_render_summary();
                 self.update_video_view();
@@ -4105,6 +4318,8 @@ impl ApplicationHandler for App {
             live.preview.pump();
         }
         self.tick_timer();
+        self.tick_plan();
+        self.drain_plan();
         self.drain_notes();
         self.drain_render();
         self.drain_deps();

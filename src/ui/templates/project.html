@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{#
+  The Project tab: where the open project stands. Read-only — picking, naming,
+  starting and cleaning up projects are the native controls above this pane,
+  and every card here is a summary of files another tab writes.
+#}
+{% block content %}
+<style>
+  table { border-collapse: collapse; width: 100%; max-width: 900px; }
+  th, td { text-align: left; padding: 6px 10px; border-top: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase;
+       letter-spacing: .06em; border-top: 0; }
+  tr.current td { color: #fff; }
+  .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+          color: var(--dim); word-break: break-all; }
+  .card { max-width: 900px; }
+  .link { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; }
+  .link .name { flex: none; width: 84px; color: var(--dim); font-size: 11px;
+                text-transform: uppercase; }
+  .link a { color: var(--accent); word-break: break-all; }
+</style>
+
+<h1>{{ title }}</h1>
+<div class="sub path">{{ root }}</div>
+
+<h2>Plan</h2>
+<div class="card">
+  <div class="row">
+    <span class="grow">{{ plan.text }}</span>
+    {% if plan.state == "approved" %}{{ ui.tag("Approved", "ok") }}
+    {% elif plan.state == "draft" %}{{ ui.tag("Not approved", "warn") }}
+    {% else %}{{ ui.tag("No plan") }}{% endif %}
+  </div>
+  {% if plan.working_title %}
+  <p class="why">“{{ plan.working_title }}” · {{ plan.chapters }} chapter{{ "" if plan.chapters == 1 else "s" }}, hook and call to action included</p>
+  {% endif %}
+  <p class="why">
+    {% if deck is none %}No speaking notes yet — an approved plan writes them.
+    {% elif deck_from_plan %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written by {% if plan.state == "approved" %}the approved plan{% else %}a plan that is no longer approved{% endif %}.
+    {% else %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written from a rehearsal.{% endif %}
+  </p>
+</div>
+
+<h2>Recordings</h2>
+<table>
+  <tr><th>Version</th><th>Chapters</th><th>Rendered</th><th>Also on disk</th></tr>
+  {% for version in versions %}
+  <tr class="{{ 'current' if version.current else '' }}">
+    <td>{{ version.label }}{% if version.current %} {{ ui.tag("open") }}{% endif %}</td>
+    <td>{{ version.chapters }}</td>
+    <td>{% if version.rendered %}{{ ui.tag("Rendered", "ok") }}{% else %}<span class="muted">not yet</span>{% endif %}</td>
+    <td class="muted">{{ version.stages | join(", ") if version.stages else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="why">Switch versions and start a new one on the Record tab — a version is a set of takes.</p>
+
+<h2>Published</h2>
+{% if links %}
+<div class="card">
+  {% for link in links %}
+  <div class="link"><span class="name">{{ link.name }}</span><a href="{{ link.url }}">{{ link.url }}</a></div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">Nothing published yet. Render, then upload from the YouTube tab.</p>
+{% endif %}
+{% endblock %}

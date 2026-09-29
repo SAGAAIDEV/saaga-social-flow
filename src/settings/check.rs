@@ -177,7 +177,7 @@ fn youtube() -> Result<String> {
     }
     match crate::publish::connected_channel() {
         Some(channel) => Ok(format!("signed in as {channel}")),
-        None => Ok("client looks right — press Connect on the YouTube tab to sign in".into()),
+        None => Ok("client looks right — press Connect… under YouTube account to sign in".into()),
     }
 }
 

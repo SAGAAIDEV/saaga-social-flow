@@ -71,6 +71,13 @@ fn run_posts_generation(
         .and_then(|dir| crate::notes::load_notes(&dir).ok());
 
     let mut contexts = collect_video_contexts(&session.dir, notes.as_ref());
+    // The approved plan's CTA chapter is never rendered as a short, so it is
+    // not given copy either: a post for it would sit in the schedule as "not on
+    // S3 yet — press Upload to S3", and pressing it would never send one.
+    if let Some(n) = crate::plan::cta_chapter_of(session) {
+        let cta = format!("chapter-{n:02}");
+        contexts.retain(|video| video.id != cta);
+    }
     publication::enrich(session, &mut contexts);
 
     if contexts.is_empty() {

@@ -38,8 +38,9 @@ impl App {
             unsafe { conn.session.stopRunning() };
         }
         // The aside's writer hangs off the session about to be torn down; it
-        // has to be finished before that session goes.
+        // has to be finished before that session goes. So does an idea take's.
         self.end_break(false);
+        self.finish_plan_take();
         if let Some(current) = self.router.as_ref().map(|r| r.current_chapter_number()) {
             self.next_chapter = self.chapter_after(current);
             self.router

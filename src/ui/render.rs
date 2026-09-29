@@ -46,6 +46,15 @@ fn environment() -> Environment<'static> {
         .expect("youtube template");
     env.add_template("settings.html", include_str!("templates/settings.html"))
         .expect("settings template");
+    env.add_template("project.html", include_str!("templates/project.html"))
+        .expect("project template");
+    env.add_template("plan.html", include_str!("templates/plan.html"))
+        .expect("plan template");
+    env.add_template(
+        "teleprompter.html",
+        include_str!("templates/teleprompter.html"),
+    )
+    .expect("teleprompter template");
     env
 }
 
@@ -114,6 +123,8 @@ mod tests {
             "edit.html",
             "blog.html",
             "youtube.html",
+            "project.html",
+            "plan.html",
         ] {
             assert!(env.get_template(name).is_ok(), "{name} is registered");
         }
@@ -150,6 +161,44 @@ mod tests {
             rows => Vec::<()>::new(), can_write => false,
             hint => "⌃⇧S over the screen, then drag, to capture a figure.",
         }
+    }
+
+    fn settings_with(youtube: crate::publish::Account) -> String {
+        page(
+            "settings.html",
+            context! {
+                sections => Vec::<()>::new(), missing => Vec::<String>::new(),
+                env_path => "/tmp/.env", team_count => 0, models => Vec::<()>::new(),
+                photo_countdown => 3, max_photo_countdown => 10, saved => "", youtube => youtube,
+            },
+        )
+    }
+
+    /// Connect lives on Settings now; Copy only appears once there is a grant
+    /// to copy, and the page is never handed the token itself.
+    #[test]
+    fn the_settings_pane_carries_the_youtube_account_card() {
+        let bare = settings_with(crate::publish::Account {
+            channel: None,
+            shared: false,
+            local_differs: false,
+            can_copy: false,
+        });
+        assert!(!bare.contains("template error"), "{bare}");
+        assert!(bare.contains(r#"{"type":"connectYoutube"}"#));
+        assert!(!bare.contains("copyYoutubeRefreshToken"));
+        assert!(bare.contains("not connected"));
+
+        let shared = settings_with(crate::publish::Account {
+            channel: Some("SAAGA Solve (UCLhaTNJktUZeDjge3tOv11Q)".into()),
+            shared: true,
+            local_differs: true,
+            can_copy: true,
+        });
+        assert!(shared.contains("copyYoutubeRefreshToken"));
+        assert!(shared.contains("Uploads go to SAAGA Solve"));
+        assert!(shared.contains("team's shared grant"));
+        assert!(shared.contains("overrides"));
     }
 
     #[test]
@@ -1116,5 +1165,259 @@ mod tests {
         assert!(html.contains("saveYoutube"));
         assert!(html.contains("Save video details"));
         assert!(!html.contains("Template error"));
+    }
+
+    fn no_plan_status() -> minijinja::Value {
+        context! { state => "none", text => "No plan yet — build one on the Plan tab.",
+        working_title => "", chapters => 0 }
+    }
+
+    /// A fresh project: no plan, one empty version, nothing live — and each
+    /// card says so rather than drawing an empty table or box.
+    #[test]
+    fn an_empty_project_pane_says_what_is_missing() {
+        let html = page(
+            "project.html",
+            context! {
+                title => "2026-09-26_10-00-00", folder => "2026-09-26_10-00-00",
+                root => "/tmp/project", plan => no_plan_status(),
+                versions => vec![context! { label => "v1", current => true, chapters => 0,
+                                            rendered => false, stages => Vec::<String>::new() }],
+                deck => None::<usize>, deck_from_plan => false, links => Vec::<()>::new(),
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("No plan yet"));
+        assert!(html.contains("No speaking notes yet"));
+        assert!(html.contains("Nothing published yet"));
+        assert!(html.contains("v1") && html.contains("not yet"));
+    }
+
+    #[test]
+    fn the_project_pane_shows_an_approved_plan_versions_and_links() {
+        let html = page(
+            "project.html",
+            context! {
+                title => "Deploys <fast>", folder => "2026-09-26_10-00-00", root => "/tmp/project",
+                plan => context! { state => "approved", text => "Plan 2 approved",
+                                   working_title => "Ship it", chapters => 4 },
+                versions => vec![
+                    context! { label => "v1", current => false, chapters => 3, rendered => true,
+                               stages => vec!["cut", "titles"] },
+                    context! { label => "v2", current => true, chapters => 1, rendered => false,
+                               stages => Vec::<String>::new() },
+                ],
+                deck => 4, deck_from_plan => true,
+                links => vec![context! { name => "YouTube", url => "https://www.youtube.com/watch?v=abc" }],
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("Deploys &lt;fast&gt;"), "the name is escaped");
+        assert!(html.contains("Plan 2 approved") && html.contains(r#"class="tag ok">Approved"#));
+        assert!(html.contains("written by the approved plan"));
+        assert!(html.contains("cut, titles") && html.contains("Rendered"));
+        assert!(html.contains("watch?v=abc"));
+    }
+
+    /// Un-approving leaves the plan's deck in place, and the summary must not
+    /// go on calling it the approved plan's.
+    #[test]
+    fn a_plan_deck_with_nothing_approved_does_not_claim_an_approved_plan() {
+        let html = page(
+            "project.html",
+            context! {
+                title => "Deploys", folder => "2026-09-26_10-00-00", root => "/tmp/project",
+                plan => context! { state => "draft", text => "Plan 2, not approved",
+                                   working_title => "Ship it", chapters => 4 },
+                versions => vec![context! { label => "v1", current => true, chapters => 0,
+                                            rendered => false, stages => Vec::<String>::new() }],
+                deck => 4, deck_from_plan => true, links => Vec::<()>::new(),
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(!html.contains("written by the approved plan"), "{html}");
+        assert!(html.contains("a plan that is no longer approved"), "{html}");
+    }
+
+    fn plan_chapter(n: usize, kind: &str, label: &str, title: &str) -> minijinja::Value {
+        context! {
+            n => n, kind => kind, kind_label => label, title => title, goal => "", points => vec!["a point"],
+            verbatim => None::<String>, cues => Vec::<String>::new(), show => "", layout => None::<String>,
+            layout_key => "", est => None::<String>,
+        }
+    }
+
+    fn a_plan(approved: bool) -> minijinja::Value {
+        context! {
+            n => 2, label => if approved { "Plan 2 (approved)" } else { "Plan 2" }, approved => approved,
+            working_title => "Ship it", audience => "Engineers", promise => "A faster deploy",
+            hook_line => "Your deploy takes an hour.", hook_angle => "",
+            outline => vec!["The hour", "The fix"],
+            chapters => vec![
+                plan_chapter(1, "hook", "Hook", "The hour"),
+                context! {
+                    n => 2, kind => "body", kind_label => "Body", title => "The cache",
+                    goal => "Why it misses", points => vec!["keys change"],
+                    verbatim => None::<String>, cues => vec!["pause"], show => "the build log",
+                    layout => "Split", layout_key => "split", est => "1:30",
+                },
+                plan_chapter(3, "cta", "Call to action", "Next time"),
+            ],
+            cta_line => "Subscribe for part two.", cta_placement => "",
+            instructions => vec!["Have the dashboard open"],
+            refined_from => "Plan 1", refine_note => "tighter", sources => vec!["take 01"],
+            created_at => "", est_total => "2:10",
+        }
+    }
+
+    fn layouts() -> Vec<minijinja::Value> {
+        vec![
+            context! { key => "talking-head", label => "Talking Head" },
+            context! { key => "split", label => "Split" },
+            context! { key => "outline", label => "Outline" },
+        ]
+    }
+
+    fn plan_versions(approved: bool) -> Vec<minijinja::Value> {
+        vec![
+            context! { n => 1, label => "Plan 1", selected => false, approved => false },
+            context! { n => 2, label => "Plan 2", selected => true, approved => approved },
+        ]
+    }
+
+    /// Nothing recorded, typed or built: every section says what fills it,
+    /// Record idea and Build plan are ready, and Plan from rehearsal is off
+    /// until this version has chapters to plan from.
+    #[test]
+    fn an_empty_plan_pane_says_what_to_do_first() {
+        let html = page(
+            "plan.html",
+            context! {
+                root => "/tmp/project", instructions => "", typed => "", takes => Vec::<()>::new(),
+                recording => None::<u32>, recording_label => None::<String>, building => false,
+                versions => Vec::<()>::new(), plan => None::<()>, unreadable => None::<String>,
+                locked => None::<String>, can_rehearse => false, layouts => layouts(),
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("No idea takes yet"));
+        assert!(
+            html.contains("Audience, tone, length"),
+            "the instructions box says what goes in it"
+        );
+        assert!(html.contains("No plan yet"));
+        assert!(!html.contains("Refine Plan"), "nothing to refine yet");
+        let button = |label: &str| {
+            let at = html
+                .find(label)
+                .unwrap_or_else(|| panic!("{label} is drawn"));
+            html[html[..at].rfind("<button").unwrap()..at].to_string()
+        };
+        assert!(!button("Record idea").contains("disabled"));
+        assert!(!button("Build plan").contains("disabled"));
+        assert!(button("Plan from rehearsal").contains("disabled"));
+        assert!(html.contains("needs chapters recorded in this version"));
+        assert!(
+            html.contains(r#""root":"/tmp/project""#),
+            "messages carry the project"
+        );
+    }
+
+    /// The author's own words go into the page as text, never as markup.
+    #[test]
+    fn the_plan_pane_escapes_author_text() {
+        let html = page(
+            "plan.html",
+            context! {
+                instructions => "</p><script>bad()</script>", typed => "<b>typed</b>",
+                takes => vec![context! { label => "Take 01", state => "ready",
+                                         text => "<img src=x onerror=bad()>", why => "" }],
+                versions => Vec::<()>::new(), plan => None::<()>, unreadable => None::<String>,
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(!html.contains("<script>bad()</script>"));
+        assert!(!html.contains("<b>typed</b>"));
+        assert!(!html.contains("<img src=x"));
+        // Shown as the words typed, not dropped: escaped, not stripped.
+        assert!(html.contains("&lt;script&gt;bad()"));
+    }
+
+    #[test]
+    fn an_approved_plan_shows_as_approved_and_locked() {
+        let html = page(
+            "plan.html",
+            context! {
+                instructions => "For engineers.", typed => "",
+                takes => vec![
+                    context! { label => "Take 01", state => "ready", text => "Deploys are slow.", why => "" },
+                    context! { label => "Take 02", state => "nothing", text => "", why => "silent" },
+                ],
+                versions => plan_versions(true), plan => a_plan(true), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(),
+                locked => "Plan 2 is approved and locked — un-approve it to edit it, refine it or build again.",
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("Plan 2 (approved)"));
+        assert!(html.contains("Approved — locked"));
+        assert!(html.contains("Plan 2 · approved"));
+        assert!(html.contains("Un-approve"));
+        assert!(html.contains("Deploys are slow.") && html.contains("silent"));
+        // The whole plan is on the page, in the order it is recorded.
+        let hook = html.find("Your deploy takes an hour.").unwrap();
+        let body = html.find("The cache").unwrap();
+        let cta = html.find("Subscribe for part two.").unwrap();
+        assert!(hook < body && body < cta);
+        for part in [
+            "Why it misses",
+            "keys change",
+            r#"value="the build log""#,
+            r#"<option value="split" selected>Split</option>"#,
+            r#"value="1:30""#,
+            "Call to action",
+            "Have the dashboard open",
+            "Refined from Plan 1",
+            "About 2:10 long",
+        ] {
+            assert!(html.contains(part), "missing {part}");
+        }
+
+        let draft = page(
+            "plan.html",
+            context! {
+                instructions => "", typed => "", takes => Vec::<()>::new(),
+                versions => plan_versions(false), plan => a_plan(false), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(), locked => None::<String>,
+            },
+        );
+        // Locked: every box read-only, and why the build buttons are off.
+        assert!(html.contains("readonly"));
+        assert!(html.contains("un-approve it to edit it"));
+        assert!(!draft.contains("readonly"), "a draft is editable");
+        assert!(!draft.contains("Approved — locked"));
+        assert!(draft.contains("Not approved") && draft.contains(">Approve<"));
+    }
+
+    /// Plan versions are "Plan N" everywhere on the page. "vN" is what the
+    /// recording versions are called, and one word for two things is how a
+    /// take gets recorded against the wrong one.
+    #[test]
+    fn plan_versions_read_plan_n_never_v_n() {
+        let html = page(
+            "plan.html",
+            context! {
+                instructions => "", typed => "", takes => Vec::<()>::new(),
+                versions => plan_versions(false), plan => a_plan(false), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(), locked => None::<String>,
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("Plan 1") && html.contains("Plan 2"));
+        let text = html.split("<script>").next().unwrap();
+        for n in 1..=3 {
+            assert!(!text.contains(&format!(">v{n}")), "a plan reads as v{n}");
+            assert!(!text.contains(&format!(" v{n}")), "a plan reads as v{n}");
+        }
     }
 }

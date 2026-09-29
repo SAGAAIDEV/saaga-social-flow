@@ -73,6 +73,10 @@ struct Generated {
 #[derive(Debug)]
 pub struct Source {
     pub notes: String,
+    /// What the approved plan meant the video to be — see [`plan_context`].
+    /// Empty without an approved plan, and the prompt is then what it always
+    /// was.
+    pub plan: String,
     pub transcript: String,
     pub completed: usize,
     pub total: usize,
@@ -80,8 +84,12 @@ pub struct Source {
 impl Source {
     pub fn for_session(session: &Session, notes: &str) -> Self {
         let chapters = crate::notes::collect_completed(&session.dir);
+        let plan = crate::plan::plan_for_recording(session)
+            .map(|plan| plan_context(&plan.body))
+            .unwrap_or_default();
         Self {
             notes: notes.trim().into(),
+            plan,
             transcript: chapters
                 .iter()
                 .map(|(n, text)| format!("## Chapter {n:02}\n\n{}", text.trim()))
@@ -98,8 +106,24 @@ impl Source {
         if self.notes.chars().count() > 20_000 {
             bail!("Keep video notes under 20,000 characters.");
         }
+        // The plan sits between the notes and the transcript, labelled as
+        // intent. It is what the title should be *about* — who it is for, what
+        // it promises — and it was written before a word was recorded, so it
+        // can promise what the take never delivered. The label says the
+        // transcript wins, and a plan alone still generates nothing: the
+        // transcript check above comes first.
+        let plan = if self.plan.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "The plan made before recording (what the video set out to do — its \
+                 intent, not a record of what was said; where it and the transcript \
+                 disagree, the transcript is right):\n{}\n\n",
+                self.plan
+            )
+        };
         Ok(format!(
-            "Author's notes and emphasis:\n{}\n\nRecorded video transcript:\n{}",
+            "Author's notes and emphasis:\n{}\n\n{plan}Recorded video transcript:\n{}",
             if self.notes.is_empty() {
                 "(No additional notes.)"
             } else {
@@ -125,6 +149,27 @@ impl Source {
         }
     }
 }
+/// The approved plan's intent, a line per field, for the copy prompt: working
+/// title, audience, promise, hook line and CTA line. The chapters are left out
+/// — the transcript already says what each one covers, and says it as it was
+/// recorded — and so is any field the plan left empty.
+fn plan_context(plan: &crate::plan::schema::PlanBody) -> String {
+    [
+        ("Working title", &plan.working_title),
+        ("Audience", &plan.audience),
+        ("Promise", &plan.promise),
+        ("Hook line", &plan.hook.line),
+        ("Call to action", &plan.cta.line),
+    ]
+    .into_iter()
+    .filter_map(|(label, value)| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| format!("{label}: {value}"))
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
 /// The system prompt for video copy.
 ///
 /// A function rather than an inline literal so the test that checks its own
@@ -296,6 +341,88 @@ mod tests {
             prompt,
             "source is frozen before the worker starts"
         );
+    }
+
+    /// With an approved plan the prompt carries its intent, labelled as the
+    /// plan and placed apart from the transcript; a plan that is only built,
+    /// not approved, adds nothing; and a plan never stands in for a missing
+    /// transcript.
+    #[test]
+    fn the_approved_plan_is_context_labelled_as_intent() {
+        use crate::plan::schema::{ChapterKind, Cta, Hook, PlanBody, PlanChapter};
+        let session = session("plan-context");
+        std::fs::create_dir_all(&session.dir).unwrap();
+        let chapter = |kind| PlanChapter {
+            kind,
+            title: "Part".into(),
+            goal: String::new(),
+            points: vec!["A chapter point".into()],
+            verbatim: None,
+            cues: Vec::new(),
+            show: String::new(),
+            layout: None,
+            est_seconds: None,
+        };
+        let plan = crate::plan::Plan {
+            body: PlanBody {
+                working_title: "Faster Deploys".into(),
+                audience: "Platform engineers".into(),
+                promise: "Cut a deploy to ten minutes".into(),
+                hook: Hook {
+                    line: "Your deploy takes an hour.".into(),
+                    angle: "the pain".into(),
+                },
+                cta: Cta {
+                    line: "Try the cache today.".into(),
+                    placement: String::new(),
+                },
+                chapters: vec![chapter(ChapterKind::Hook), chapter(ChapterKind::Cta)],
+                ..PlanBody::default()
+            },
+            ..crate::plan::Plan::default()
+        };
+        let dir = crate::plan::dir(&session);
+        crate::plan::save_new(&dir, plan).unwrap();
+
+        let unapproved = Source::for_session(&session, "");
+        assert!(unapproved.plan.is_empty(), "only the approved plan counts");
+        let error = unapproved.prompt().unwrap_err().to_string();
+        assert!(error.contains("No completed transcript"));
+
+        crate::plan::approve(&dir, 1, &session.root.join("notes")).unwrap();
+        let planned = Source::for_session(&session, "");
+        assert!(
+            planned.prompt().is_err(),
+            "a plan is no substitute for a transcript"
+        );
+
+        std::fs::write(session.dir.join("chapter-01.mp3"), b"recorded").unwrap();
+        std::fs::write(
+            session.dir.join("chapter-01.transcript.json"),
+            r#"{"status":"completed","text":"What was actually said."}"#,
+        )
+        .unwrap();
+        let prompt = Source::for_session(&session, "").prompt().unwrap();
+        for line in [
+            "Working title: Faster Deploys",
+            "Audience: Platform engineers",
+            "Promise: Cut a deploy to ten minutes",
+            "Hook line: Your deploy takes an hour.",
+            "Call to action: Try the cache today.",
+        ] {
+            assert!(prompt.contains(line), "{line} missing:\n{prompt}");
+        }
+        assert!(prompt.contains("The plan made before recording"));
+        assert!(prompt.contains("not a record of what was said"));
+        assert!(
+            !prompt.contains("A chapter point") && !prompt.contains("the pain"),
+            "intent only, not the chapter outline or the reasoning"
+        );
+        let plan_at = prompt.find("The plan made before recording").unwrap();
+        let transcript_at = prompt.find("Recorded video transcript:").unwrap();
+        assert!(plan_at < transcript_at);
+        assert!(prompt[transcript_at..].contains("What was actually said."));
+        std::fs::remove_dir_all(session.root).unwrap();
     }
 
     #[test]

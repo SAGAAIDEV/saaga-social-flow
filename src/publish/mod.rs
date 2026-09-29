@@ -50,6 +50,36 @@ pub fn connected_channel() -> Option<String> {
     })
 }
 
+/// What Settings → YouTube shows about the connection.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Account {
+    /// The channel uploads go to, as [`connected_channel`] words it.
+    pub channel: Option<String>,
+    /// `YOUTUBE_REFRESH_TOKEN` is set, so uploads use the team's grant.
+    pub shared: bool,
+    /// This machine has a grant of its own that the shared one is overriding —
+    /// typically a Connect just made, waiting to be copied into sops.
+    pub local_differs: bool,
+    /// There is a stored refresh token for Copy to hand over.
+    pub can_copy: bool,
+}
+
+pub fn account() -> Account {
+    let stored_refresh = stored_refresh_token();
+    let shared = youtube::shared_refresh_token();
+    Account {
+        channel: connected_channel(),
+        shared: shared.is_some(),
+        local_differs: shared.is_some() && stored_refresh.is_some() && stored_refresh != shared,
+        can_copy: stored_refresh.is_some(),
+    }
+}
+
+/// This machine's stored refresh token — the one the last Connect minted.
+pub fn stored_refresh_token() -> Option<String> {
+    token_store::load().ok().flatten()?.refresh_token
+}
+
 /// Append-only, beside the schedule ledger and for the same reason: what went out
 /// is the one fact a second press must not be free to contradict.
 pub const UPLOADS_JSONL: &str = "youtube.jsonl";
@@ -177,6 +207,10 @@ pub enum PublishEvent {
     /// The OAuth flow finished. Terminal like `Done` and `Failed` — the app has
     /// to know the thread is gone before it re-enables the button.
     Connected,
+    /// The OAuth flow failed. Apart from `Failed` because its answer belongs on
+    /// Settings, where Connect is, not on the render and thumbnail lines an
+    /// upload failure is written to.
+    ConnectFailed(String),
     Failed(String),
 }
 
