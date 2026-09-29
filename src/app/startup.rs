@@ -348,6 +348,7 @@ pub fn run_record_session(
         publish_tx,
         publish_rx,
         publish_busy: false,
+        youtube_draft: None,
         open_edit_chapter: None,
         last_report: None,
         clock: crate::app::clock::RecordClock::default(),

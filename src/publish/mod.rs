@@ -605,6 +605,30 @@ fn upload_one(
                 },
             }
         }
+        // The copy may have been edited since this went up, and the upload
+        // confirmation showed the copy as it is now — so a press brings the
+        // video's title and description in line, as it does its visibility.
+        status(format!(
+            "Updating the title and description of {} on YouTube…",
+            orientation.noun()
+        ));
+        if let Err(err) = youtube::access_token().and_then(|token| {
+            youtube::update_details(&token, &prior.video_id, &meta.title, &meta.description)
+        }) {
+            match orientation {
+                Orientation::Horizontal => {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "{} is up, but its title and description on YouTube did not change",
+                            prior.url
+                        )
+                    })
+                }
+                Orientation::Vertical => eprintln!(
+                    "stream-recorder: the Short's title and description did not change: {err:#}"
+                ),
+            }
+        }
         return Ok(prior);
     }
 
@@ -677,7 +701,15 @@ fn set_poster(orientation: Orientation, video_id: &str, url: &str, jpeg: &[u8]) 
 /// video — with `#Shorts` added to the description, which is how YouTube asks
 /// to be told and costs nothing if it had already worked that out.
 fn video_meta(session: &Session, orientation: Orientation) -> Result<youtube::VideoMeta> {
-    let metadata = metadata::load(session);
+    meta_from(&metadata::load(session), orientation)
+}
+
+/// [`video_meta`] from copy not yet saved — what the upload confirmation shows
+/// for edits still on the YouTube tab.
+fn meta_from(
+    metadata: &metadata::Metadata,
+    orientation: Orientation,
+) -> Result<youtube::VideoMeta> {
     metadata.validate()?;
     let config = crate::config::load();
     let description = metadata.description.trim().to_string();
@@ -690,6 +722,79 @@ fn video_meta(session: &Session, orientation: Orientation) -> Result<youtube::Vi
         category_id: config.youtube_category_id,
         privacy: config.youtube_privacy,
     })
+}
+
+/// One video as the next Upload press would send it — what the confirmation
+/// shows before anything goes up.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UploadPreview {
+    /// "The full video" or "The Short".
+    pub video: &'static str,
+    /// The title and description exactly as sent, after YouTube's limits.
+    pub title: String,
+    pub description: String,
+    /// Whether the copy had to be cut to fit, which the dialog warns about.
+    pub title_cut: bool,
+    pub description_cut: bool,
+    pub privacy: youtube::Privacy,
+}
+
+/// Every video the next Upload press would send, with `metadata` as its copy,
+/// in the order it would send them — the same checks as [`run`], so a press
+/// that would fail says why here instead of after a confirmation.
+pub fn upload_preview(
+    session: &Session,
+    metadata: &metadata::Metadata,
+) -> Result<Vec<UploadPreview>> {
+    let vertical = session.render_dir().join("vertical/longform.mp4");
+    let mut videos = Vec::new();
+    if session.is_short() {
+        if !vertical.is_file() {
+            bail!("the short is not rendered yet — run Render first");
+        }
+        videos.push(("The Short", Orientation::Vertical));
+    } else {
+        let targets = crate::config::render_targets(session);
+        if !targets.horizontal {
+            bail!(
+                "the horizontal longform is switched off above the Render button — tick it and \
+                 Render before uploading"
+            );
+        }
+        if !session
+            .render_dir()
+            .join("horizontal/longform.mp4")
+            .is_file()
+        {
+            bail!("no longform rendered yet — run Render first");
+        }
+        videos.push(("The full video", Orientation::Horizontal));
+        if vertical.is_file() && targets.vertical && short_block(&vertical).is_none() {
+            videos.push(("The Short", Orientation::Vertical));
+        }
+    }
+    videos
+        .into_iter()
+        .map(|(video, orientation)| {
+            let meta = meta_from(metadata, orientation)?;
+            let body = meta.body();
+            let sent = |key: &str| {
+                body["snippet"][key]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            let (title, description) = (sent("title"), sent("description"));
+            Ok(UploadPreview {
+                video,
+                title_cut: title != meta.title,
+                description_cut: description != meta.description,
+                title,
+                description,
+                privacy: meta.privacy,
+            })
+        })
+        .collect()
 }
 
 /// First letter up, for a reason written to read mid-sentence and shown alone.
@@ -1045,5 +1150,52 @@ mod tests {
         );
         assert_eq!(body["status"]["privacyStatus"], "public");
         assert_eq!(body["snippet"]["categoryId"], "28");
+    }
+
+    /// Nothing to upload is said before any confirmation is shown.
+    #[test]
+    fn the_preview_refuses_what_the_upload_would_refuse() {
+        let root = temp("preview-none");
+        let copy = metadata::Metadata {
+            title: "A video".into(),
+            description: "What it shows.".into(),
+        };
+        let err = upload_preview(&session(&root), &copy)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("run Render first") || err.contains("switched off"),
+            "{err}"
+        );
+    }
+
+    /// The preview is what YouTube gets — the Short's description with
+    /// #Shorts added — and copy YouTube would reject is refused there, before
+    /// the confirmation, with the same reason the upload would give.
+    #[test]
+    fn the_preview_shows_the_copy_as_sent() {
+        let copy = metadata::Metadata {
+            title: "A video".into(),
+            description: "What it shows.".into(),
+        };
+        let body = meta_from(&copy, Orientation::Vertical).unwrap().body();
+        assert_eq!(body["snippet"]["title"], "A video");
+        assert!(body["snippet"]["description"]
+            .as_str()
+            .unwrap()
+            .ends_with("#Shorts"));
+        let too_long = metadata::Metadata {
+            title: "t".repeat(130),
+            description: String::new(),
+        };
+        assert!(meta_from(&too_long, Orientation::Horizontal).is_err());
+        let empty = metadata::Metadata {
+            title: " ".into(),
+            description: String::new(),
+        };
+        assert!(
+            meta_from(&empty, Orientation::Horizontal).is_err(),
+            "no title, no upload"
+        );
     }
 }

@@ -188,6 +188,11 @@ pub struct App {
     /// uploading a video and queueing social posts are different systems that
     /// happen to be reachable from the same window.
     publish_busy: bool,
+    /// Title and description typed on the YouTube tab and not saved yet, as
+    /// the page last reported them. The page is redrawn from this rather than
+    /// the saved copy, so a repaint never throws typing away, and Upload shows
+    /// it and saves it before sending — see [`App::run_youtube_upload`].
+    youtube_draft: Option<crate::publish::metadata::Metadata>,
     /// Which chapter the Edit tab has open. View state, not project state — nothing on
     /// disk records it, and reopening the app lands on the first chapter.
     open_edit_chapter: Option<u32>,
@@ -934,6 +939,15 @@ impl App {
             }
             UiEvent::SaveVideoBrief { fields, apply } => self.save_video_brief(&fields, apply),
             UiEvent::GenerateVideoCopy(fields) => self.generate_video_copy(&fields),
+            UiEvent::YoutubeDraft(fields) => {
+                let draft = crate::publish::metadata::Metadata {
+                    title: fields.get("title").cloned().unwrap_or_default(),
+                    description: fields.get("description").cloned().unwrap_or_default(),
+                };
+                // Typed back to what is saved is no draft at all.
+                let saved = crate::publish::metadata::load(&self.session);
+                self.youtube_draft = (draft != saved).then_some(draft);
+            }
             UiEvent::SaveTeamLinks(text) => self.save_team_links(&text),
             UiEvent::ReloadTeamLinks => self.load_team_template(),
             UiEvent::SaveTeamFooter(footer) => self.save_team_footer(&footer),
@@ -944,6 +958,7 @@ impl App {
                 };
                 match crate::publish::metadata::save(&self.session, &metadata) {
                     Ok(()) => {
+                        self.youtube_draft = None;
                         self.update_publish_summary();
                         self.sync_controls();
                         if let Some(live) = &self.live {
@@ -1120,6 +1135,8 @@ impl App {
     /// before it runs, then wrote that copy into the new version as though it had
     /// been generated there.
     fn refresh_version_views(&mut self) {
+        // Typed for the version being left; this one has its own copy.
+        self.youtube_draft = None;
         self.reload_deck();
         self.preselect_planned_layout();
         if let Some(live) = self.live.as_ref() {
@@ -3283,10 +3300,44 @@ impl App {
         self.sync_controls();
     }
 
+    /// Upload, once the person pressing it has seen what goes up: every video's
+    /// title and description exactly as YouTube will get them — see
+    /// [`crate::ui::ControlTarget::confirm_upload`]. Copy typed on the YouTube
+    /// tab and not saved is what is shown, and confirming saves it first, so
+    /// nothing goes up that was not on screen.
     fn run_youtube_upload(&mut self) {
         if self.publish_busy {
             self.set_publish_status("An upload is already running…");
             return;
+        }
+        let unsaved = self.youtube_draft.clone();
+        let copy = unsaved
+            .clone()
+            .unwrap_or_else(|| crate::publish::metadata::load(&self.session));
+        let previews = match crate::publish::upload_preview(&self.session, &copy) {
+            Ok(previews) => previews,
+            Err(err) => {
+                self.set_publish_status(&format!("Not uploading: {err:#}"));
+                return;
+            }
+        };
+        let confirmed = self.live.as_ref().is_some_and(|live| {
+            live.control_target
+                .confirm_upload(&previews, unsaved.is_some())
+        });
+        if !confirmed {
+            self.set_publish_status("Upload cancelled — nothing was sent.");
+            return;
+        }
+        if let Some(draft) = unsaved {
+            if let Err(err) = crate::publish::metadata::save(&self.session, &draft) {
+                self.set_publish_status(&format!(
+                    "Not uploading — the edits did not save: {err:#}"
+                ));
+                return;
+            }
+            self.youtube_draft = None;
+            self.update_publish_summary();
         }
         self.publish_busy = true;
         self.set_publish_status("Uploading the longform to YouTube…");
@@ -3812,7 +3863,11 @@ impl App {
             &ui::render::page(
                 "youtube.html",
                 minijinja::context! {
-                    metadata => crate::publish::metadata::load(&self.session), info => info,
+                    metadata => self
+                        .youtube_draft
+                        .clone()
+                        .unwrap_or_else(|| crate::publish::metadata::load(&self.session)),
+                    unsaved => self.youtube_draft.is_some(), info => info,
                     youtube => youtube, short => short, both => both,
                     team => self.footer_view(),
                 },

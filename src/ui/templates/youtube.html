@@ -24,7 +24,7 @@
   <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%">
   <p><label for="youtube-description">Description</label></p>
   <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit">{{ metadata.description }}</textarea>
-  <div class="bar"><button type="submit">Save video details</button></div>
+  <div class="bar"><button type="submit">Save video details</button>{% if unsaved %} <span class="sub">Unsaved edits — Upload shows them and saves them first.</span>{% endif %}</div>
 </form>
 {% if youtube or short %}
 <div class="links">
@@ -54,6 +54,17 @@
 {% endif %}
 <pre style="white-space:pre-wrap;font:inherit">{{ info }}</pre>
 <script>
+// Every edit is reported as a draft, so a repaint keeps it and Upload shows
+// it. Debounced: a message per keystroke would be noise.
+(function () {
+  var form = document.getElementById('youtube-details'), timer = null;
+  form.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      send({type: 'youtubeDraft', fields: {title: form.elements.title.value, description: form.elements.description.value}});
+    }, 250);
+  });
+})();
 document.getElementById('youtube-details').addEventListener('submit', function(event) {
   event.preventDefault();
   send({type: 'saveYoutube', fields: {title: this.elements.title.value, description: this.elements.description.value}});

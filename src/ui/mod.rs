@@ -198,6 +198,8 @@ pub enum UiEvent {
     ReloadTeamLinks,
     /// Save for team on the YouTube tab, with the footer box's text.
     SaveTeamFooter(String),
+    /// The YouTube tab's title and description as typed, before a save.
+    YoutubeDraft(std::collections::BTreeMap<String, String>),
     VersionSelected(u32),
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].
@@ -1141,6 +1143,74 @@ impl ControlTarget {
             "Remove recordings from {} project(s)",
             stale.len()
         )));
+        alert.runModal() == 1001
+    }
+
+    /// Ask before an upload, showing exactly what YouTube will get: each
+    /// video's title and full description as sent, and who will see it.
+    /// `unsaved` means the copy shown is edits still on the YouTube tab, which
+    /// the confirming button saves first. Cancel is the default, so a stray
+    /// Return does not upload.
+    pub fn confirm_upload(
+        &self,
+        previews: &[crate::publish::UploadPreview],
+        unsaved: bool,
+    ) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let alert = NSAlert::new(mtm);
+        alert.setMessageText(&NSString::from_str(match previews.len() {
+            1 => "Upload this to YouTube?",
+            _ => "Upload these to YouTube?",
+        }));
+        let mut info = previews
+            .iter()
+            .map(|preview| {
+                format!(
+                    "{}, {}",
+                    preview.video,
+                    preview.privacy.label().to_lowercase()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if unsaved {
+            info.push_str(
+                "\n\nThis is the copy on the YouTube tab, which has not been saved yet — \
+                 uploading saves it first.",
+            );
+        }
+        if previews.iter().any(|p| p.title_cut || p.description_cut) {
+            info.push_str("\n\nSome copy is over YouTube's limit and will be cut, as shown below.");
+        }
+        alert.setInformativeText(&NSString::from_str(&info));
+        let text = upload_preview_text(previews);
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(540.0, 300.0));
+        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), frame);
+        scroll.setHasVerticalScroller(true);
+        scroll.setBorderType(NSBorderType::BezelBorder);
+        let view = NSTextView::initWithFrame(NSTextView::alloc(mtm), frame);
+        view.setEditable(false);
+        view.setRichText(false);
+        view.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+        view.setString(&NSString::from_str(&text));
+        view.setVerticallyResizable(true);
+        view.setHorizontallyResizable(false);
+        view.setMaxSize(NSSize::new(f64::MAX, f64::MAX));
+        unsafe {
+            if let Some(container) = view.textContainer() {
+                container.setWidthTracksTextView(true);
+            }
+        }
+        scroll.setDocumentView(Some(&view));
+        alert.setAccessoryView(Some(&scroll));
+        alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+        alert.addButtonWithTitle(&NSString::from_str(if unsaved {
+            "Save and upload"
+        } else {
+            "Upload"
+        }));
         alert.runModal() == 1001
     }
 
@@ -2117,6 +2187,33 @@ fn layout_plan(width: f64, height: f64, strip: &PlanStrip) {
         NSPoint::new(PAD, PAD),
         NSSize::new(content_w, (y - GAP - PAD).max(60.0)),
     ));
+}
+
+/// The upload confirmation's scrolling text: each video's title and
+/// description as YouTube will get them, with their lengths against the limits.
+fn upload_preview_text(previews: &[crate::publish::UploadPreview]) -> String {
+    previews
+        .iter()
+        .map(|preview| {
+            let cut = |was: bool| if was { " — cut to fit" } else { "" };
+            format!(
+                "{} ({})\n\nTitle ({}/100{}):\n{}\n\nDescription ({}/5000{}):\n{}",
+                preview.video.to_uppercase(),
+                preview.privacy.label(),
+                preview.title.chars().count(),
+                cut(preview.title_cut),
+                preview.title,
+                preview.description.chars().count(),
+                cut(preview.description_cut),
+                if preview.description.trim().is_empty() {
+                    "(empty)"
+                } else {
+                    &preview.description
+                },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n────────────\n\n")
 }
 
 /// The group's rows: every button its own row, except a run of buttons tagged
@@ -3906,7 +4003,7 @@ mod settings_pane_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::common_ancestor;
+    use super::{common_ancestor, upload_preview_text};
     use std::path::{Path, PathBuf};
 
     /// The scope the thumbnail pane needs: the project holds the stills and
@@ -3939,5 +4036,34 @@ mod tests {
             common_ancestor(Path::new("/Users/andrew/x"), Path::new("/Volumes/refs")),
             PathBuf::from("/")
         );
+    }
+
+    #[test]
+    fn the_upload_preview_text_shows_each_video_its_lengths_and_any_cut() {
+        let previews = [
+            crate::publish::UploadPreview {
+                video: "The full video",
+                title: "Ship it".into(),
+                description: "What it shows.".into(),
+                title_cut: false,
+                description_cut: false,
+                privacy: crate::publish::youtube::Privacy::Public,
+            },
+            crate::publish::UploadPreview {
+                video: "The Short",
+                title: "t".repeat(100),
+                description: String::new(),
+                title_cut: true,
+                description_cut: false,
+                privacy: crate::publish::youtube::Privacy::Unlisted,
+            },
+        ];
+        let text = upload_preview_text(&previews);
+        assert!(text.starts_with("THE FULL VIDEO (Public)"), "{text}");
+        assert!(text.contains("Title (7/100):\nShip it"));
+        assert!(text.contains("Description (14/5000):\nWhat it shows."));
+        assert!(text.contains("THE SHORT (Unlisted)"));
+        assert!(text.contains("Title (100/100 — cut to fit)"));
+        assert!(text.contains("(empty)"));
     }
 }
