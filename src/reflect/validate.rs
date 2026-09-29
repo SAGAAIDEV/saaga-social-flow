@@ -87,6 +87,9 @@ fn generate_with(
         model,
         provider,
         None,
+        // No team links: a validation compares preambles, and the links would
+        // only be one more thing that differs between the two runs.
+        &[],
         None,
         Some(&rewrite.preamble),
     )?;

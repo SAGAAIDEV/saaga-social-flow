@@ -441,6 +441,89 @@ pub fn update_privacy(token: &str, video_id: &str, privacy: Privacy) -> Result<(
     }
 }
 
+/// Changes the title and description of `video_id`, which is already up.
+///
+/// Read-then-write, for the reason [`update_privacy`] gives: `videos.update`
+/// replaces the whole `snippet` part, so the tags, category and languages are
+/// read back and sent again — and the category is required, so an update
+/// without it is rejected outright. Unlike visibility there is no safe default
+/// to fall back to, so a failed read fails the update rather than guessing.
+pub fn update_details(token: &str, video_id: &str, title: &str, description: &str) -> Result<()> {
+    if grant_allows_update() == Some(false) {
+        bail!("{RECONNECT_FOR_UPDATE}");
+    }
+    let current = read_part(token, video_id, "snippet")?;
+    let body = snippet_update_body(video_id, &current, title, description);
+    let response = ureq::put(VIDEOS)
+        .query("part", "snippet")
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .send_json(body);
+    match response {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::Status(403, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to change the title and description (403): {} — {RECONNECT_FOR_UPDATE}",
+                detail.trim()
+            );
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to change the title and description ({code}): {}",
+                detail.trim()
+            );
+        }
+        Err(err) => Err(err).context("calling youtube videos.update"),
+    }
+}
+
+/// The `videos.update` request for the snippet: the new title and
+/// description, cut to YouTube's limits as the upload cuts them, with the
+/// properties an update may carry copied across from `current`. The read-only
+/// ones — `publishedAt`, `thumbnails`, `channelTitle` — would be rejected.
+fn snippet_update_body(
+    video_id: &str,
+    current: &serde_json::Value,
+    title: &str,
+    description: &str,
+) -> serde_json::Value {
+    let mut snippet = serde_json::Map::new();
+    snippet.insert("title".into(), truncate(title, 100).into());
+    snippet.insert("description".into(), truncate(description, 5000).into());
+    for key in [
+        "categoryId",
+        "tags",
+        "defaultLanguage",
+        "defaultAudioLanguage",
+    ] {
+        if let Some(value) = current.get(key) {
+            snippet.insert(key.into(), value.clone());
+        }
+    }
+    serde_json::json!({ "id": video_id, "snippet": snippet })
+}
+
+/// One part of the video — `status`, `snippet` — as YouTube reports it.
+fn read_part(token: &str, video_id: &str, part: &str) -> Result<serde_json::Value> {
+    let body: serde_json::Value = ureq::get(VIDEOS)
+        .query("part", part)
+        .query("id", video_id)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .call()
+        .context("calling youtube videos.list")?
+        .into_json()
+        .context("parsing the videos.list response")?;
+    body.get("items")
+        .and_then(|items| items.as_array())
+        .and_then(|items| items.first())
+        .and_then(|item| item.get(part))
+        .cloned()
+        .with_context(|| format!("youtube returned no {part} for {video_id}"))
+}
+
 /// The video's current `status` part, as YouTube reports it.
 fn read_status(token: &str, video_id: &str) -> Result<serde_json::Value> {
     let body: serde_json::Value = ureq::get(VIDEOS)
@@ -554,6 +637,30 @@ mod tests {
 
     /// The upload body is the one thing here that can be checked without a
     /// network: everything else is a round trip to Google.
+    #[test]
+    fn a_details_update_keeps_the_category_tags_and_languages() {
+        let current = serde_json::json!({
+            "title": "Old", "description": "Old words", "categoryId": "28",
+            "tags": ["rust"], "defaultLanguage": "en",
+            "publishedAt": "2026-09-01T00:00:00Z", "channelTitle": "saaga",
+        });
+        let body = snippet_update_body("abc", &current, &"t".repeat(120), "New words");
+        assert_eq!(body["id"], "abc");
+        assert_eq!(
+            body["snippet"]["title"].as_str().unwrap().chars().count(),
+            100
+        );
+        assert_eq!(body["snippet"]["description"], "New words");
+        assert_eq!(body["snippet"]["categoryId"], "28");
+        assert_eq!(body["snippet"]["tags"][0], "rust");
+        assert_eq!(body["snippet"]["defaultLanguage"], "en");
+        assert!(
+            body["snippet"].get("publishedAt").is_none(),
+            "read-only is left out"
+        );
+        assert!(body["snippet"].get("channelTitle").is_none());
+    }
+
     #[test]
     fn the_upload_body_carries_the_snippet_and_the_status() {
         let meta = VideoMeta {

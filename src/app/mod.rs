@@ -22,6 +22,7 @@ mod plan_recording;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
+mod team;
 mod video_brief;
 
 pub use startup::run_record_session;
@@ -291,6 +292,8 @@ pub struct App {
     posts_pick: crate::notes::Picker,
     posts_prompt: String,
     posts_manifest: Option<crate::posts::PostsManifest>,
+    /// The team template and the YouTube details push — see `app::team`.
+    team: team::TeamState,
     /// Which short Start Short records: 0 for a freeform one, else the
     /// suggestion at `short_pick - 1` in the project's list — see
     /// [`crate::shorts`]. View state, like `open_edit_chapter`.
@@ -931,6 +934,9 @@ impl App {
             }
             UiEvent::SaveVideoBrief { fields, apply } => self.save_video_brief(&fields, apply),
             UiEvent::GenerateVideoCopy(fields) => self.generate_video_copy(&fields),
+            UiEvent::SaveTeamLinks(text) => self.save_team_links(&text),
+            UiEvent::ReloadTeamLinks => self.load_team_template(),
+            UiEvent::SaveTeamFooter(footer) => self.save_team_footer(&footer),
             UiEvent::SaveYoutube(fields) => {
                 let metadata = crate::publish::metadata::Metadata {
                     title: fields.get("title").cloned().unwrap_or_default(),
@@ -944,6 +950,8 @@ impl App {
                             live.control_target
                                 .set_publish_status("Video details saved.");
                         }
+                        // Already up: the edit is the video's now, on YouTube too.
+                        self.push_youtube_details(&metadata);
                     }
                     Err(err) => {
                         if let Some(live) = &self.live {
@@ -3806,6 +3814,7 @@ impl App {
                 minijinja::context! {
                     metadata => crate::publish::metadata::load(&self.session), info => info,
                     youtube => youtube, short => short, both => both,
+                    team => self.footer_view(),
                 },
             ),
             &self.session.root,
@@ -4244,6 +4253,9 @@ impl ApplicationHandler for App {
                 // After `next_chapter` is known, so the plan teleprompter opens
                 // on the chapter the first press will record.
                 self.reload_deck();
+                // S3, on a thread: the links box and the YouTube footer fill in
+                // when it lands.
+                self.load_team_template();
                 self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
@@ -4324,6 +4336,7 @@ impl ApplicationHandler for App {
         self.drain_render();
         self.drain_deps();
         self.drain_posts();
+        self.drain_team();
         self.drain_substack();
         self.drain_blog();
         self.drain_titles();

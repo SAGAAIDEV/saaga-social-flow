@@ -370,6 +370,127 @@ fn read_up_to(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize
     Ok(filled)
 }
 
+/// A private object the team shares, read back with its ETag so the next
+/// write can be conditional on nobody having changed it since.
+///
+/// Kept at the bucket's root, outside `S3_PREFIX`: the bucket grants public
+/// read by policy on that prefix, and a team file has no reason to be served
+/// to the world. Sent with no ACL for the same reason.
+pub(crate) struct TeamObject {
+    pub body: Vec<u8>,
+    pub etag: String,
+}
+
+/// How a conditional team write went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TeamWrite {
+    Saved {
+        etag: String,
+    },
+    /// Someone wrote the object after it was read — or created it, when this
+    /// write expected it not to exist. Nothing was written.
+    Conflict,
+}
+
+/// `key` under the bucket root, or `None` if nothing is there yet.
+pub(crate) fn read_team_object(key: &str) -> Result<Option<TeamObject>> {
+    let config = Config::from_env()?;
+    team_runtime()?.block_on(async {
+        let client = client(&config).await;
+        match client
+            .get_object()
+            .bucket(&config.bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(object) => {
+                let etag = object.e_tag().unwrap_or_default().to_string();
+                let body = object
+                    .body
+                    .collect()
+                    .await
+                    .with_context(|| format!("reading s3://{}/{key}", config.bucket))?
+                    .into_bytes()
+                    .to_vec();
+                Ok(Some(TeamObject { body, etag }))
+            }
+            Err(err) if err.as_service_error().is_some_and(|e| e.is_no_such_key()) => Ok(None),
+            Err(err) => Err(explain_team(
+                &format!("reading s3://{}/{key}", config.bucket),
+                &err,
+            )),
+        }
+    })
+}
+
+/// Write `key` only if it is still what was read: `expected` is the ETag it
+/// was read with, or `None` when it did not exist then. A teammate's save in
+/// between comes back as [`TeamWrite::Conflict`] rather than being overwritten.
+pub(crate) fn write_team_object(
+    key: &str,
+    body: Vec<u8>,
+    expected: Option<&str>,
+) -> Result<TeamWrite> {
+    let config = Config::from_env()?;
+    team_runtime()?.block_on(async {
+        let client = client(&config).await;
+        let put = client
+            .put_object()
+            .bucket(&config.bucket)
+            .key(key)
+            .content_type("application/json")
+            .body(ByteStream::from(body));
+        let put = match expected {
+            Some(etag) => put.if_match(etag),
+            None => put.if_none_match("*"),
+        };
+        match put.send().await {
+            Ok(written) => Ok(TeamWrite::Saved {
+                etag: written.e_tag().unwrap_or_default().to_string(),
+            }),
+            // 412: the ETag no longer matches, or the object now exists. 409:
+            // two conditional writes raced and this one lost.
+            Err(err)
+                if err
+                    .raw_response()
+                    .is_some_and(|raw| matches!(raw.status().as_u16(), 409 | 412)) =>
+            {
+                Ok(TeamWrite::Conflict)
+            }
+            Err(err) => Err(explain_team(
+                &format!("writing s3://{}/{key}", config.bucket),
+                &err,
+            )),
+        }
+    })
+}
+
+fn team_runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting tokio for a team file")
+}
+
+/// [`explain`] for the team files, whose retry is not Distribute.
+fn explain_team<E>(what: &str, err: &SdkError<E>) -> anyhow::Error
+where
+    E: std::error::Error + 'static,
+{
+    let detail = format!("{}", DisplayErrorContext(err));
+    let lower = detail.to_lowercase();
+    if ["sso", "token", "credential", "expired"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        let profile = crate::settings::sops::aws_profile();
+        anyhow!("{what}: {detail} — run `aws sso login --profile {profile}` and try again")
+    } else {
+        anyhow!("{what}: {detail}")
+    }
+}
+
 /// The SDK's `Display` stops at "service error"; the cause is down the source
 /// chain, which `DisplayErrorContext` walks. An expired login is the failure a
 /// person actually hits, so that one names the command that fixes it.

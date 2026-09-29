@@ -37,9 +37,13 @@ pub fn spawn_generate_posts(
                 custom_prompt.as_deref(),
                 &tx,
             ) {
-                Ok((path, manifest)) => {
+                Ok((path, manifest, warning)) => {
                     eprintln!("stream-recorder: posts ready → {}", path.display());
                     let _ = tx.send(PostsEvent::Ready(path, manifest));
+                    if let Some(warning) = warning {
+                        eprintln!("stream-recorder: {warning}");
+                        let _ = tx.send(PostsEvent::Status(warning));
+                    }
                 }
                 Err(err) => {
                     eprintln!("stream-recorder: posts generation failed: {err:#}");
@@ -60,7 +64,7 @@ fn run_posts_generation(
     provider: Option<&str>,
     custom_prompt: Option<&str>,
     tx: &Sender<PostsEvent>,
-) -> Result<(PathBuf, PostsManifest)> {
+) -> Result<(PathBuf, PostsManifest, Option<String>)> {
     let _ = tx.send(PostsEvent::Status(
         "Gathering project transcripts & render outputs…".into(),
     ));
@@ -92,9 +96,19 @@ fn run_posts_generation(
         .or_else(|| notes.as_ref().map(|n| n.title.clone()))
         .unwrap_or_else(|| "Video Project".into());
 
+    // Read fresh for every run, so a link a teammate saved a minute ago is
+    // in this one; the local copy stands in when S3 cannot be read.
+    let team = crate::team::load();
+    let funnel = team.template.links.clone();
     let _ = tx.send(PostsEvent::Status(format!(
-        "Generating posts for {} video(s) via {model}…",
-        contexts.len()
+        "Generating posts for {} video(s) via {model}{}…",
+        contexts.len(),
+        match (&team.source, funnel.len()) {
+            (_, 0) => String::new(),
+            (crate::team::Source::Cached(_), n) =>
+                format!(" with {n} funnel link(s) from this Mac's copy"),
+            (_, n) => format!(" with {n} funnel link(s)"),
+        }
     )));
 
     let (manifest, step) = generate_posts(
@@ -104,6 +118,7 @@ fn run_posts_generation(
         model,
         provider,
         custom_prompt,
+        &funnel,
         Some(&session.root),
         None,
     )?;
@@ -112,5 +127,38 @@ fn run_posts_generation(
     let json_path = save_manifest(&posts_dir, &manifest)?;
     crate::agent::trace::write_step(&posts_dir, &session.root, &step)?;
 
-    Ok((json_path, manifest))
+    // A URL the copy carries that nobody gave the model was invented or
+    // mangled. Said after Ready, so it is the line left on screen.
+    let allowed = allowed_urls(&contexts, &funnel);
+    let unknown: Vec<String> = manifest
+        .items
+        .iter()
+        .flat_map(|video| video.posts.iter())
+        .flat_map(|post| crate::team::unknown_urls(&post.content, &allowed))
+        .collect();
+    let warning = (!unknown.is_empty()).then(|| {
+        format!(
+            "Posts saved, but check these links — they are not the team's or this video's: {}",
+            unknown.join(", ")
+        )
+    });
+
+    Ok((json_path, manifest, warning))
+}
+
+/// The URLs a post may carry: the team's funnel links, and the published
+/// video and article URLs `publication::enrich` wrote into the points.
+fn allowed_urls(contexts: &[generate::VideoContext], funnel: &[crate::team::Link]) -> Vec<String> {
+    let mut allowed: Vec<String> = funnel.iter().map(|link| link.url.clone()).collect();
+    for video in contexts {
+        for point in &video.points {
+            allowed.extend(
+                point
+                    .split_whitespace()
+                    .filter(|word| word.starts_with("http://") || word.starts_with("https://"))
+                    .map(str::to_string),
+            );
+        }
+    }
+    allowed
 }

@@ -1420,4 +1420,44 @@ mod tests {
             assert!(!text.contains(&format!(" v{n}")), "a plan reads as v{n}");
         }
     }
+
+    /// The team footer box, and the line that says a save now reaches the
+    /// video on YouTube — only once it is up.
+    #[test]
+    fn the_youtube_tab_edits_the_team_footer_and_says_a_save_updates_youtube() {
+        let html = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata {
+                    title: "A video".into(), description: "Details".into(),
+                }, info => "",
+                youtube => "https://youtu.be/abc",
+                team => minijinja::context! {
+                    footer => "Start here:\n{links} <b>", status => "2 team links.", loaded => true,
+                },
+            },
+        );
+        assert!(!html.contains("Template error"), "{html}");
+        assert!(html.contains("also changes its title and description there"));
+        assert!(html.contains("Team description footer"));
+        assert!(html.contains("Start here:\n{links} &lt;b&gt;"));
+        assert!(html.contains("2 team links."));
+        assert!(html.contains("saveTeamFooter"));
+        let at = html.find("Save for team").unwrap();
+        let button = &html[html[..at].rfind("<button").unwrap()..at];
+        assert!(!button.contains("disabled"), "{button}");
+
+        let not_up = page(
+            "youtube.html",
+            minijinja::context! {
+                metadata => crate::publish::metadata::Metadata {
+                    title: "A video".into(), description: "Details".into(),
+                }, info => "",
+                team => minijinja::context! { footer => "", status => "Loading…", loaded => false },
+            },
+        );
+        assert!(!not_up.contains("also changes its title"));
+        let at = not_up.find("Save for team").unwrap();
+        assert!(not_up[not_up[..at].rfind("<button").unwrap()..at].contains("disabled"));
+    }
 }

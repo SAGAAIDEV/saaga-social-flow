@@ -192,6 +192,12 @@ pub enum UiEvent {
     PostsModelSelected(usize),
     PostsProviderSelected(usize),
     PostsPromptChanged(String),
+    /// Save for team, with the links box's text.
+    SaveTeamLinks(String),
+    /// Reload the team links from S3, dropping unsaved edits in the box.
+    ReloadTeamLinks,
+    /// Save for team on the YouTube tab, with the footer box's text.
+    SaveTeamFooter(String),
     VersionSelected(u32),
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].
@@ -462,6 +468,8 @@ pub struct ControlTargetIvars {
     posts_model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     posts_provider_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     posts_prompt_view: RefCell<Option<Retained<NSTextView>>>,
+    /// The team's funnel links, one per line — see [`crate::posts::links`].
+    team_links_view: RefCell<Option<Retained<NSTextView>>>,
     posts_status: RefCell<Option<Retained<NSTextField>>>,
 
     // YouTube tab
@@ -804,6 +812,23 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::SavePosts));
         }
 
+        #[unsafe(method(onSaveTeamLinks:))]
+        fn on_save_team_links(&self, _sender: Option<&AnyObject>) {
+            let text = self
+                .ivars()
+                .team_links_view
+                .borrow()
+                .as_ref()
+                .map(|view| view.string().to_string())
+                .unwrap_or_default();
+            let _ = self.ivars().tx.send(UiEvent::SaveTeamLinks(text));
+        }
+
+        #[unsafe(method(onReloadTeamLinks:))]
+        fn on_reload_team_links(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::ReloadTeamLinks);
+        }
+
         #[unsafe(method(onDistribute:))]
         fn on_distribute(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Distribute));
@@ -938,6 +963,7 @@ impl ControlTarget {
             posts_model_popup: RefCell::new(None),
             posts_provider_popup: RefCell::new(None),
             posts_prompt_view: RefCell::new(None),
+            team_links_view: RefCell::new(None),
             posts_status: RefCell::new(None),
             distribute_status: RefCell::new(None),
             schedule_status: RefCell::new(None),
@@ -1536,6 +1562,13 @@ impl ControlTarget {
     pub fn set_posts_status(&self, text: &str) {
         if let Some(field) = self.ivars().posts_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// Replace the links box's text — a load or a save that reformatted it.
+    pub fn set_team_links_text(&self, text: &str) {
+        if let Some(view) = self.ivars().team_links_view.borrow().as_ref() {
+            view.setString(&NSString::from_str(text));
         }
     }
 
@@ -3143,11 +3176,96 @@ pub fn attach_controls(
     post_view.addSubview(&posts_status);
     *target.ivars().posts_status.borrow_mut() = Some(posts_status.clone());
 
+    // The team's funnel links, under the run's own controls: they are not this
+    // project's, they are everyone's, so they get a save of their own rather
+    // than riding on Save Edits. See `crate::posts::links`.
+    let links_label = NSTextField::labelWithString(
+        &NSString::from_str(
+            "Funnel links for the whole team, saved to S3 — one per line:              Label — https://… — when to send people there",
+        ),
+        mtm,
+    );
+    links_label.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 214.0),
+        NSSize::new(700.0, LABEL_H),
+    ));
+    pin_top_left(&links_label);
+    post_view.addSubview(&links_label);
+
+    let save_links_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Save for team"),
+            Some(&target),
+            Some(sel!(onSaveTeamLinks:)),
+            mtm,
+        )
+    };
+    save_links_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 254.0),
+        NSSize::new(180.0, 32.0),
+    ));
+    pin_top_left(&save_links_btn);
+    post_view.addSubview(&save_links_btn);
+
+    let reload_links_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Reload"),
+            Some(&target),
+            Some(sel!(onReloadTeamLinks:)),
+            mtm,
+        )
+    };
+    reload_links_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 290.0),
+        NSSize::new(180.0, 32.0),
+    ));
+    pin_top_left(&reload_links_btn);
+    post_view.addSubview(&reload_links_btn);
+
+    let links_x = PAD * 2.0 + 190.0;
+    let links_w = (bounds.size.width - PAD * 2.0 - links_x).max(280.0);
+    let links_scroll = NSScrollView::initWithFrame(
+        NSScrollView::alloc(mtm),
+        NSRect::new(
+            NSPoint::new(links_x, bounds.size.height - 294.0),
+            NSSize::new(links_w, 76.0),
+        ),
+    );
+    links_scroll.setHasVerticalScroller(true);
+    links_scroll.setBorderType(NSBorderType::BezelBorder);
+    pin_top(&links_scroll);
+    let team_links_view = NSTextView::initWithFrame(
+        NSTextView::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(links_w, 76.0)),
+    );
+    team_links_view.setEditable(true);
+    // Plain text, and no smart substitutions: a URL pasted here has to come
+    // back out byte for byte.
+    team_links_view.setRichText(false);
+    team_links_view.setAutomaticLinkDetectionEnabled(false);
+    team_links_view.setAutomaticQuoteSubstitutionEnabled(false);
+    team_links_view.setAutomaticDashSubstitutionEnabled(false);
+    team_links_view.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+    team_links_view.setMinSize(NSSize::new(0.0, 0.0));
+    team_links_view.setMaxSize(NSSize::new(f64::MAX, f64::MAX));
+    team_links_view.setVerticallyResizable(true);
+    team_links_view.setHorizontallyResizable(false);
+    team_links_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
+    team_links_view.setString(&NSString::from_str("Loading the team's links…"));
+    unsafe {
+        if let Some(container) = team_links_view.textContainer() {
+            container.setWidthTracksTextView(true);
+        }
+    }
+    links_scroll.setDocumentView(Some(&team_links_view));
+    post_view.addSubview(&links_scroll);
+    *target.ivars().team_links_view.borrow_mut() = Some(team_links_view.clone());
+
     let post_scroll_frame = NSRect::new(
         NSPoint::new(PAD * 2.0, PAD * 2.0),
         NSSize::new(
             bounds.size.width - PAD * 4.0,
-            (bounds.size.height - 216.0).max(80.0),
+            (bounds.size.height - 310.0).max(80.0),
         ),
     );
     let posts_form = crate::posts::PostsForm::attach(&post_view, mtm);

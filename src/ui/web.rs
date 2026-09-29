@@ -88,6 +88,10 @@ pub enum WebEvent {
     SaveYoutube {
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// The team's YouTube description footer — see [`crate::team`].
+    SaveTeamFooter {
+        footer: String,
+    },
     SaveCard {
         fields: std::collections::BTreeMap<String, String>,
     },
@@ -270,6 +274,7 @@ impl WebEvent {
             WebEvent::SaveVideoBrief { fields, apply } => UiEvent::SaveVideoBrief { fields, apply },
             WebEvent::GenerateVideoCopy { fields } => UiEvent::GenerateVideoCopy(fields),
             WebEvent::SaveYoutube { fields } => UiEvent::SaveYoutube(fields),
+            WebEvent::SaveTeamFooter { footer } => UiEvent::SaveTeamFooter(footer),
             WebEvent::SelectThumbnail { id } => UiEvent::SelectThumbnail(id),
             WebEvent::ThumbnailModel { value } => UiEvent::ThumbnailModelSelected(value),
             WebEvent::ToggleReference { name, value } => UiEvent::ToggleReference { name, value },
@@ -831,6 +836,16 @@ mod tests {
             r#"{"type":"approvePlan","root":"/p","value":true}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn the_team_footer_message_reaches_the_ui_event() {
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"saveTeamFooter","footer":"More: {links}"}"#).unwrap();
+        let UiEvent::SaveTeamFooter(footer) = event.into_ui_event() else {
+            panic!("expected SaveTeamFooter");
+        };
+        assert_eq!(footer, "More: {links}");
     }
 
     #[test]

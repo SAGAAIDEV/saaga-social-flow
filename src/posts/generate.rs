@@ -127,6 +127,8 @@ pub fn generate_posts(
     model: &str,
     provider: Option<&str>,
     custom_prompt: Option<&str>,
+    // The team's funnel links — see [`crate::team`]. Empty for none.
+    links: &[crate::team::Link],
     prompt_root: Option<&std::path::Path>,
     // `preamble_override` runs a preamble *instead of* the resolved one without
     // writing it anywhere: validating a proposed rewrite must never change what
@@ -149,7 +151,7 @@ pub fn generate_posts(
             crate::agent::prompt::resolve(crate::agent::prompt::POSTS, SYSTEM_PROMPT, prompt_root)
         }
     };
-    let prompt = build_user_prompt(videos, project_title, custom_prompt);
+    let prompt = build_user_prompt(videos, project_title, custom_prompt, links);
 
     // Through the extractor, like notes and titles: the shape is enforced by the
     // schema rather than asked for in prose, and the LlmStep comes back with it —
@@ -174,11 +176,13 @@ fn build_user_prompt(
     videos: &[VideoContext],
     project_title: &str,
     custom_prompt: Option<&str>,
+    links: &[crate::team::Link],
 ) -> String {
     let mut out = format!("Project: {project_title}\n\n");
     if let Some(extra) = custom_prompt.filter(|p| !p.trim().is_empty()) {
         out.push_str(&format!("Author guidance/tone instructions:\n{extra}\n\n"));
     }
+    out.push_str(&crate::team::prompt_section(links));
 
     out.push_str("Generate posts for the following videos:\n\n");
     for v in videos {
@@ -439,12 +443,12 @@ mod tests {
             points: vec!["a point".into()],
             transcript_text: "spoken words".into(),
         }];
-        let user = build_user_prompt(&videos, "vd-42-demo", Some("keep it dry"));
+        let user = build_user_prompt(&videos, "vd-42-demo", Some("keep it dry"), &[]);
         assert!(user.contains("Project: vd-42-demo"));
         assert!(user.contains("keep it dry"));
         assert!(user.contains("--- Video ID: chapter-01 (vertical) ---"));
         assert!(user.contains("- a point"));
         assert!(user.contains("spoken words"));
-        assert!(!build_user_prompt(&videos, "p", None).contains("Author guidance"));
+        assert!(!build_user_prompt(&videos, "p", None, &[]).contains("Author guidance"));
     }
 }
