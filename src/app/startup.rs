@@ -254,6 +254,11 @@ pub fn run_record_session(
         .with_activation_policy(winit::platform::macos::ActivationPolicy::Accessory)
         .with_default_menu(false)
         .build()?;
+    // No default menu — it would bring ⌘Q and ⌘H — but an Edit menu, or ⌘C and
+    // ⌘V reach no text box at all. See `ui::menu`.
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        crate::ui::menu::install(mtm);
+    }
 
     let notes_providers = crate::notes::load_providers();
     // A saved provider OpenRouter no longer lists is dropped rather than sent:
