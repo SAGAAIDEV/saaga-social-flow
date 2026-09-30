@@ -42,7 +42,7 @@ const ISO_PARSE: &str = "%Y-%m-%dT%H:%M:%S%.f";
 ///
 /// `extra` catches every key this app does not name so a round-trip through
 /// Rust never drops a field the Python side wrote (or will write later).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Token {
     pub access_token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,6 +62,25 @@ pub struct Token {
     pub client_id: Option<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Hand-written so the secrets never reach a log. The repo is public and a
+/// stray `{token:?}` in an error path would otherwise print a live access
+/// token and the refresh token that outlives it. `extra` is shown by key only,
+/// since the provider may put an `id_token` or the like there.
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redact = |present: bool| if present { "<redacted>" } else { "<none>" };
+        f.debug_struct("Token")
+            .field("access_token", &redact(!self.access_token.is_empty()))
+            .field("refresh_token", &redact(self.refresh_token.is_some()))
+            .field("expires_at", &self.expires_at)
+            .field("channel_id", &self.channel_id)
+            .field("channel_title", &self.channel_title)
+            .field("client_id", &self.client_id)
+            .field("extra", &self.extra.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl Token {
@@ -205,6 +224,27 @@ pub fn expires_at_from(expires_in: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_never_prints_the_secrets() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("id_token".into(), "eyJ-secret-id".into());
+        let token = Token {
+            access_token: "ya29.secret-access".into(),
+            refresh_token: Some("1//secret-refresh".into()),
+            channel_id: Some("UC123".into()),
+            extra,
+            ..Token::default()
+        };
+        let shown = format!("{token:?} {token:#?}");
+        for secret in ["ya29.secret-access", "1//secret-refresh", "eyJ-secret-id"] {
+            assert!(!shown.contains(secret), "leaked {secret}: {shown}");
+        }
+        assert!(
+            shown.contains("UC123") && shown.contains("id_token"),
+            "{shown}"
+        );
+    }
 
     #[test]
     fn unknown_expiry_is_stale() {
