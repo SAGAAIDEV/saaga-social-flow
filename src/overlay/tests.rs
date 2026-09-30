@@ -225,7 +225,11 @@ fn geom() -> DisplayGeometry {
 fn punched(regions: Vec<DrawnRegion>, anchor: (f64, f64), punch: f64) -> OverlayState {
     let capture = regions[0].rect;
     let cell = std::sync::Arc::new(crate::region::framing::TrackCell::new());
-    cell.set(Some(crate::region::framing::Track { anchor, punch }));
+    cell.set(Some(crate::region::framing::Track {
+        anchor,
+        punch,
+        zoom: None,
+    }));
     OverlayState {
         geometry: geom(),
         regions,

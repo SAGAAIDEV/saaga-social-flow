@@ -119,6 +119,7 @@ impl Composite {
             // The slot's own pixels: one buffer pixel per output pixel is
             // where the punch-in stops, and this is that number.
             (self.screen_slot.2, self.screen_slot.3),
+            track.zoom,
         ))
     }
 }

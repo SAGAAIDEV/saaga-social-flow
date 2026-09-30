@@ -899,6 +899,7 @@ impl App {
                 self.sync_face_control();
             }
             UiEvent::MouseTrackToggled(on) => self.set_mouse_tracking(on),
+            UiEvent::PunchZoomSelected(idx) => self.set_punch_zoom(idx),
             UiEvent::ShowAppToggled(on) => self.set_show_app(on),
             UiEvent::HideMouseToggled(on) => self.set_hide_mouse(on),
             UiEvent::FaceTrackReady(built) => self.face_tracker_ready(built),
@@ -4358,6 +4359,10 @@ impl ApplicationHandler for App {
                 }
                 self.ensure_pointer_tracker();
                 self.sync_face_control();
+                if let Some(live) = self.live.as_ref() {
+                    live.control_target
+                        .set_punch_zoom(self.pointer_config.punch_zoom);
+                }
                 self.install_preview();
                 // Once the preview is up, so a planned layout switches it the
                 // way a click on the Layout popup would.

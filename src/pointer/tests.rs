@@ -195,3 +195,37 @@ fn losing_the_pointer_holds_the_framing() {
          from {before:?} to {after:?}",
     );
 }
+
+/// The configured multiplier rides every reading, and a change from the Zoom
+/// popup reaches the very next frame — mid-punch included.
+#[test]
+fn the_zoom_multiplier_is_published_and_changes_live() {
+    let config = MouseTracking {
+        punch_zoom: Some(1.5),
+        ..MouseTracking::default()
+    };
+    let tracker = PointerTracker::new(&config);
+    let t = run(&tracker, (0.5, 0.5), true, 3, 0.0);
+    assert_eq!(published(&tracker).zoom, Some(1.5));
+    tracker.set_zoom(Some(2.5));
+    run(&tracker, (0.5, 0.5), true, 1, t);
+    assert_eq!(published(&tracker).zoom, Some(2.5));
+    tracker.set_zoom(None);
+    run(&tracker, (0.5, 0.5), true, 1, t + FRAME);
+    assert_eq!(published(&tracker).zoom, None, "Sharpest");
+}
+
+#[test]
+fn the_zoom_choices_read_as_labels_and_a_saved_value_finds_its_row() {
+    assert_eq!(zoom_label(None), "Sharpest");
+    assert_eq!(zoom_label(Some(1.5)), "1.5×");
+    assert_eq!(zoom_label(Some(2.0)), "2×");
+    assert_eq!(zoom_index(None), 0);
+    assert_eq!(zoom_index(Some(2.0)), 3);
+    assert_eq!(
+        zoom_index(Some(2.1)),
+        3,
+        "a hand-edited value finds the nearest row"
+    );
+    assert_eq!(PUNCH_ZOOMS[zoom_index(Some(9.0))], Some(3.0));
+}

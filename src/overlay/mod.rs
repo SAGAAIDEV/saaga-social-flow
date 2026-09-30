@@ -190,6 +190,7 @@ impl OverlayState {
             pointer,
             track.punch,
             tracked.floors[region.orientation as usize],
+            track.zoom,
         );
         PointRect { x, y, w, h }
     }

@@ -99,6 +99,38 @@ pub struct PointerTracker {
     /// Outside the lock on purpose: a composite reading the framing must never
     /// block behind a sample, however briefly.
     track: Arc<TrackCell>,
+    /// The Zoom popup's multiplier; its own lock so a change from the main
+    /// thread never waits on a sample.
+    zoom: Mutex<Option<f64>>,
+}
+
+/// The Zoom popup's choices, in order: as far as stays sharp, then fixed
+/// multipliers. Past the sharp limit a multiplier upscales the screen, which
+/// is the operator's call to make — the label says so.
+pub const PUNCH_ZOOMS: [Option<f64>; 6] =
+    [None, Some(1.25), Some(1.5), Some(2.0), Some(2.5), Some(3.0)];
+
+/// "Sharpest", "1.5×".
+pub fn zoom_label(zoom: Option<f64>) -> String {
+    match zoom {
+        None => "Sharpest".into(),
+        Some(m) => format!("{m}×"),
+    }
+}
+
+/// The popup row for a saved multiplier; an odd value from a hand-edited
+/// config shows as the nearest choice rather than as Sharpest.
+pub fn zoom_index(zoom: Option<f64>) -> usize {
+    let Some(m) = zoom else { return 0 };
+    PUNCH_ZOOMS
+        .iter()
+        .enumerate()
+        .skip(1)
+        .min_by(|(_, a), (_, b)| {
+            let d = |z: &Option<f64>| (z.unwrap_or(1.0) - m).abs();
+            d(a).total_cmp(&d(b))
+        })
+        .map_or(0, |(i, _)| i)
 }
 
 impl PointerTracker {
@@ -121,7 +153,19 @@ impl PointerTracker {
                 stats: Stats::default(),
             }),
             track: Arc::new(TrackCell::new()),
+            zoom: Mutex::new(config.punch_zoom),
         }
+    }
+
+    /// Change how far a full punch-in goes — the Zoom popup. Takes effect on
+    /// the next frame, mid-take included: it is a framing choice like the
+    /// region itself, not something a writer is built around.
+    pub fn set_zoom(&self, zoom: Option<f64>) {
+        *self.zoom.lock().unwrap_or_else(|e| e.into_inner()) = zoom;
+    }
+
+    fn zoom(&self) -> Option<f64> {
+        *self.zoom.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The cell the composites read. Cloned into each graph; the tracker
@@ -193,7 +237,12 @@ impl PointerTracker {
         let aimed = inner.latched.or(live);
         drop(inner);
 
-        self.track.set(aimed.map(|anchor| Track { anchor, punch }));
+        let zoom = self.zoom();
+        self.track.set(aimed.map(|anchor| Track {
+            anchor,
+            punch,
+            zoom,
+        }));
     }
 
     /// The recovering lock convention, for the reason [`TrackCell`] documents:

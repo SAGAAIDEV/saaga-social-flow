@@ -591,6 +591,13 @@ pub struct MouseTracking {
     /// detect, because the operator says when.
     #[serde(default = "default_punch_s")]
     pub punch_s: f64,
+    /// How far ⌃⌥⇧ punches in, as a multiplier of the region: `Some(2.0)`
+    /// shows half its width. `None` — the default — is as far as stays sharp,
+    /// one captured pixel per output pixel, which is how the punch-in always
+    /// behaved. Set from the Zoom popup on the Record tab; see
+    /// [`crate::pointer::PUNCH_ZOOMS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub punch_zoom: Option<f64>,
     /// Ease back to the middle of the region after this long with the pointer
     /// off the captured display. Absent holds the last framing, which is the
     /// default and almost always right: reaching to a second monitor should
@@ -639,6 +646,7 @@ impl Default for MouseTracking {
             confirm: default_pointer_confirm(),
             punch_s: default_punch_s(),
             recenter_after_s: None,
+            punch_zoom: None,
         }
     }
 }
