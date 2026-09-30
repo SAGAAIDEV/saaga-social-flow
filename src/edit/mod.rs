@@ -386,7 +386,7 @@ fn existing_cut_numbers(edit_root: &Path) -> Vec<u32> {
     numbers
 }
 
-fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
+pub(crate) fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
     let titles = crate::titles::load(&session.titles_dir()).ok();
     let notes = session
         .notes_dir()

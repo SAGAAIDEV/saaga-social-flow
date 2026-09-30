@@ -1460,4 +1460,53 @@ mod tests {
         let at = not_up.find("Save for team").unwrap();
         assert!(not_up[not_up[..at].rfind("<button").unwrap()..at].contains("disabled"));
     }
+
+    /// The Summary card: the summary, takeaways and chapter lines, escaped;
+    /// a copy button carrying the plain text; and the states before and after.
+    #[test]
+    fn the_summary_card_shows_what_the_final_video_says() {
+        let summary = crate::summary::Summary {
+            summary: "How deploys <got> fast.".into(),
+            takeaways: vec!["Cache the layers".into()],
+            chapters: vec![crate::summary::ChapterSummary {
+                n: 2,
+                title: "The fix".into(),
+                summary: "Why the cache mattered.".into(),
+            }],
+            transcript_hash: "h".into(),
+            model: "m".into(),
+            created_at: String::new(),
+        };
+        let view = |summary: Option<&crate::summary::Summary>, stale: bool, ready: bool| {
+            minijinja::context! {
+                summary => summary.cloned(), text => summary.map(crate::summary::plain_text).unwrap_or_default(),
+                stale => stale, busy => false, ready => ready,
+            }
+        };
+        let pane = |summary: minijinja::Value| {
+            page(
+                "video.html",
+                context! {
+                    brief => crate::video_brief::Brief::default(),
+                    root => "/tmp/p", busy => false, model => "m",
+                    art => empty_art(), review => no_clips(), youtube => None::<String>,
+                    figures => no_figures(), summary => summary,
+                },
+            )
+        };
+        let html = pane(view(Some(&summary), false, true));
+        assert!(!html.to_lowercase().contains("template error"), "{html}");
+        assert!(html.contains("How deploys &lt;got&gt; fast."));
+        assert!(html.contains("Cache the layers"));
+        assert!(html.contains(r#"<li value="2"><b>The fix</b> — Why the cache mattered."#));
+        assert!(html.contains("Summarize again"));
+        assert!(html.contains("Copy summary"));
+        assert!(html.contains("summarizeVideo"));
+
+        assert!(pane(view(Some(&summary), true, true)).contains("Out of date"));
+
+        let none = pane(view(None, false, false));
+        assert!(none.contains("Nothing to summarize yet"));
+        assert!(!none.contains("Copy summary"));
+    }
 }

@@ -548,9 +548,54 @@
   </div>
 </section>
 
+<!-- 5. What the final cut says -->
+{% if summary %}
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Summary</h2>
+      <p class="card-desc">What the final video says, from the transcript of the cut. Written when a render finishes.</p>
+    </div>
+    {% if summary.busy %}<span class="badge outline">Writing…</span>
+    {% elif summary.stale %}<span class="badge outline">Out of date</span>
+    {% elif summary.summary %}<span class="badge secondary">Current</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if summary.summary %}
+      <p class="summary-text">{{ summary.summary.summary }}</p>
+      {% if summary.summary.takeaways %}
+      <h3 class="summary-h">Key takeaways</h3>
+      <ul class="summary-list">{% for line in summary.summary.takeaways %}<li>{{ line }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if summary.summary.chapters %}
+      <h3 class="summary-h">Chapters</h3>
+      <ol class="summary-list">{% for ch in summary.summary.chapters %}<li value="{{ ch.n }}">{% if ch.title %}<b>{{ ch.title }}</b> — {% endif %}{{ ch.summary }}</li>{% endfor %}</ol>
+      {% endif %}
+      {% if summary.stale %}<p class="card-desc">The cut has changed since this was written — Summarize again to catch up.</p>{% endif %}
+    {% elif summary.ready %}
+      <div class="empty">No summary yet. It is written when a render finishes, or press Summarize now.</div>
+    {% else %}
+      <div class="empty">Nothing to summarize yet — record, let the chapters transcribe, then Render.</div>
+    {% endif %}
+    <div class="bar">
+      <button type="button"{% if summary.busy or not summary.ready %} disabled{% endif %}
+        data-send='{{ {"type": "summarizeVideo", "root": root} | tojson }}'>{% if summary.summary %}Summarize again{% else %}Summarize now{% endif %}</button>
+      {% if summary.text %}<button type="button" class="copy" data-send='{{ {"type": "copyText", "text": summary.text} | tojson }}'>Copy summary</button>{% endif %}
+    </div>
+  </div>
+</section>
+<style>
+  .summary-text { margin: 0 0 10px; line-height: 1.5; }
+  .summary-h { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  .summary-list { margin: 0 0 6px 18px; padding: 0; line-height: 1.45; }
+  .summary-list li { margin: 3px 0; }
+</style>
+{% endif %}
+
 {% if youtube or short or hosted %}
 <!--
-  5. Published: one link per cut, so the Short's does not stand in for both —
+  6. Published: one link per cut, so the Short's does not stand in for both —
   and the S3 upload beside them, since the tab that used to list it is gone.
 -->
 <section class="card">
