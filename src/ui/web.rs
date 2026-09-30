@@ -88,6 +88,12 @@ pub enum WebEvent {
     SaveYoutube {
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// Critique the take, with the direction typed beside the button.
+    CritiqueTake {
+        root: String,
+        #[serde(default)]
+        direction: String,
+    },
     /// Summarize again, with the project the page was drawn for.
     SummarizeVideo {
         root: String,
@@ -285,6 +291,7 @@ impl WebEvent {
             WebEvent::SaveTeamFooter { footer } => UiEvent::SaveTeamFooter(footer),
             WebEvent::YoutubeDraft { fields } => UiEvent::YoutubeDraft(fields),
             WebEvent::SummarizeVideo { root } => UiEvent::SummarizeVideo(root),
+            WebEvent::CritiqueTake { root, direction } => UiEvent::CritiqueTake { root, direction },
             WebEvent::SelectThumbnail { id } => UiEvent::SelectThumbnail(id),
             WebEvent::ThumbnailModel { value } => UiEvent::ThumbnailModelSelected(value),
             WebEvent::ToggleReference { name, value } => UiEvent::ToggleReference { name, value },
@@ -846,6 +853,26 @@ mod tests {
             r#"{"type":"approvePlan","root":"/p","value":true}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_critique_carries_the_project_and_the_direction() {
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"critiqueTake","root":"/tmp/p","direction":"Lead with the demo"}"#,
+        )
+        .unwrap();
+        let UiEvent::CritiqueTake { root, direction } = event.into_ui_event() else {
+            panic!("expected CritiqueTake");
+        };
+        assert_eq!(
+            (root.as_str(), direction.as_str()),
+            ("/tmp/p", "Lead with the demo")
+        );
+        let bare: WebEvent =
+            serde_json::from_str(r#"{"type":"critiqueTake","root":"/tmp/p"}"#).unwrap();
+        assert!(
+            matches!(bare.into_ui_event(), UiEvent::CritiqueTake { direction, .. } if direction.is_empty())
+        );
     }
 
     #[test]

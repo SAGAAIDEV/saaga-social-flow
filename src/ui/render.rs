@@ -1509,4 +1509,94 @@ mod tests {
         assert!(none.contains("Nothing to summarize yet"));
         assert!(!none.contains("Copy summary"));
     }
+
+    /// The plan as pages: an overview, a page per chapter with its line and
+    /// points, and what to have ready — with the dots and the page count to
+    /// turn them, and the editable boxes one tab away.
+    #[test]
+    fn the_plan_reads_as_pages_like_the_speaking_notes() {
+        let html = page(
+            "plan.html",
+            context! {
+                instructions => "", typed => "", takes => Vec::<()>::new(),
+                versions => plan_versions(false), plan => a_plan(false), unreadable => None::<String>,
+                root => "/tmp/project", layouts => layouts(), locked => None::<String>,
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert_eq!(
+            html.matches(r#"<section class="page"#).count(),
+            5,
+            "overview, 3 chapters, ready"
+        );
+        assert!(html.contains("Chapter 2 of 3 · Body"));
+        assert!(html.contains("<h1>The cache</h1>"));
+        assert!(html.contains("On screen: <b>the build log</b>"));
+        assert!(html.contains("Split · ~1:30"));
+        assert!(html.contains("<span class=\"label\">Open with</span>Your deploy takes an hour."));
+        assert!(html.contains("<span class=\"label\">The ask</span>Subscribe for part two."));
+        assert!(html.contains("Have the dashboard open"));
+        assert_eq!(html.matches(r#"class="dot""#).count(), 5);
+        assert!(html.contains(r#"id="page-count">1 / 5<"#));
+        assert!(html.contains(r#"id="plan-edit" data-view-panel="edit" hidden"#));
+        assert!(
+            html.contains(r#"data-field="ch2.title""#),
+            "the boxes are still there to edit"
+        );
+    }
+
+    /// The Critique card: the direction box, the button, each chapter's keep
+    /// and change, the reorganization, and the plan it wrote.
+    #[test]
+    fn the_critique_card_shows_each_chapter_and_the_plan_it_wrote() {
+        let critique = crate::critique::Critique {
+            overall: "Strong <hook>, slow middle.".into(),
+            chapters: vec![crate::critique::ChapterCritique {
+                n: 2,
+                title: "The cache".into(),
+                worked: "The number lands.".into(),
+                fix: "Cut the aside.".into(),
+            }],
+            reorganize: "Merge 2 into 1.".into(),
+            direction: "Lead with the demo".into(),
+            plan_written: Some(4),
+            ..crate::critique::Critique::default()
+        };
+        let pane = |critique: minijinja::Value| {
+            page(
+                "video.html",
+                context! {
+                    brief => crate::video_brief::Brief::default(),
+                    root => "/tmp/p", busy => false, model => "m",
+                    art => empty_art(), review => no_clips(), youtube => None::<String>,
+                    figures => no_figures(), critique => critique,
+                },
+            )
+        };
+        let html = pane(context! {
+            critique => critique.clone(), text => crate::critique::plain_text(&critique),
+            busy => false, blocked => None::<String>,
+        });
+        assert!(!html.to_lowercase().contains("template error"), "{html}");
+        assert!(html.contains("Critique &amp; next take"));
+        assert!(html.contains("Strong &lt;hook&gt;, slow middle."));
+        assert!(
+            html.contains(">Lead with the demo</textarea>"),
+            "the last direction is kept"
+        );
+        assert!(html.contains("Chapter 2 — The cache"));
+        assert!(html.contains("<span class=\"keep\">Keep</span> The number lands."));
+        assert!(html.contains("<span class=\"change\">Change</span> Cut the aside."));
+        assert!(html.contains("Merge 2 into 1."));
+        assert!(html.contains("Plan 4 was written from this and is now the speaking notes"));
+        assert!(html.contains("critiqueTake"));
+
+        let blocked = pane(context! {
+            critique => None::<()>, text => "", busy => false,
+            blocked => "Record a take first — there are no chapters to critique.",
+        });
+        assert!(blocked.contains("Record a take first"));
+        let at = blocked.find("Critique and rewrite the notes").unwrap();
+        assert!(blocked[blocked[..at].rfind("<button").unwrap()..at].contains("disabled"));
+    }
 }

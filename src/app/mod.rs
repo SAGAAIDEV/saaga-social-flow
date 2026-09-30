@@ -13,6 +13,7 @@
 
 pub(crate) mod card;
 pub(crate) mod clock;
+mod critique;
 mod devices;
 pub(crate) mod face;
 mod figures;
@@ -145,6 +146,8 @@ pub struct App {
     video_copy_job: Option<video_brief::CopyJob>,
     /// The Summary card's job — see `app::summary`.
     summary_job: Option<summary::SummaryJob>,
+    /// The Critique card's job — see `app::critique`.
+    critique_job: Option<critique::CritiqueJob>,
     /// The offscreen web view while a card is being photographed. Its presence
     /// *is* the busy flag — there is exactly one at a time — and holding it is
     /// what keeps the navigation delegate alive, which `WKWebView` does not.
@@ -950,6 +953,11 @@ impl App {
                 // Typed back to what is saved is no draft at all.
                 let saved = crate::publish::metadata::load(&self.session);
                 self.youtube_draft = (draft != saved).then_some(draft);
+            }
+            UiEvent::CritiqueTake { root, direction } => {
+                if self.session.root.to_str() == Some(root.as_str()) {
+                    self.critique_take(&direction);
+                }
             }
             UiEvent::SummarizeVideo(root) => {
                 // A click on a page drawn for another project is not for this one.
@@ -2820,6 +2828,8 @@ impl App {
                     ),
                     // What the final cut says — see `app::summary`.
                     summary => self.summary_view(),
+                    // Critique the take and rewrite the notes — see `app::critique`.
+                    critique => self.critique_view(),
                 },
             ),
             &self.session.root,
@@ -4418,6 +4428,7 @@ impl ApplicationHandler for App {
         self.drain_card();
         self.drain_video_copy();
         self.drain_summary();
+        self.drain_critique();
         // `None` means never scanned, so the first tick after launch paints the
         // queue immediately rather than leaving it blank for a minute.
         if self

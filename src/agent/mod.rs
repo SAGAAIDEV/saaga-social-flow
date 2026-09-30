@@ -1,5 +1,6 @@
 //! Rig OpenRouter client, extractors, and LLM trace files.
 
+pub mod critique;
 pub mod extract;
 pub mod notes;
 pub mod outline;

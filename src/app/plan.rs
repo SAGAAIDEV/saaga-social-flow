@@ -197,6 +197,12 @@ impl App {
         self.session.root.to_str() == Some(root)
     }
 
+    /// A Plan-tab build is running, for any project — the critique's rewrite
+    /// writes the next plan version too, and two writers would race for it.
+    pub(super) fn plan_building_somewhere(&self) -> bool {
+        self.plan.job.is_some()
+    }
+
     fn plan_building_here(&self) -> bool {
         self.plan
             .job
