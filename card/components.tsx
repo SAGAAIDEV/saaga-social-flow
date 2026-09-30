@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { h, escape } from "./jsx";
 import { box, type Rect } from "./layout";
-import { titleSize, descriptionSize, titleGap, type Theme } from "./theme";
+import { titleSize, type Theme } from "./theme";
 
 export const FONT = 'font-family:"Booton",-apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased;';
 
@@ -80,10 +80,11 @@ export function Photo(src: string, focus: Point, rect: Rect, size?: Size): strin
 }
 /**
  * The words, in the chapter card's order: the kicker where its CHAPTER label
- * sits, the thin orange rule, the Bold title, and the description in the
- * muted Regular of its subtitle.
+ * sits, the thin orange rule, and the Bold title — nothing under it. A line of
+ * description drew at a sixth of its size in YouTube's grid, where it read as
+ * texture rather than words, and the headline is what a thumbnail is for.
  */
-export function TextPanel(title: string, description: string, kicker: string, theme: Theme, rect: Rect, ruleWidth: number): string {
+export function TextPanel(title: string, kicker: string, theme: Theme, rect: Rect, ruleWidth: number): string {
   // Explicit breaks consume real lines as well as characters. Keep long words
   // within the panel and cap secondary copy so the headline retains priority.
   const size = Math.min(titleSize(title), rect.height / (title.trim().split(/\n/).length * 1.15 + 2));
@@ -91,6 +92,5 @@ export function TextPanel(title: string, description: string, kicker: string, th
     {kicker.trim() && <div style={`color:${theme.kicker};font-size:28px;font-weight:500;text-transform:uppercase;margin-bottom:18px;flex-shrink:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;`}>{escape(kicker.trim())}</div>}
     <div style={`width:${ruleWidth}px;max-width:100%;height:2px;background:${theme.accent};margin-bottom:22px;flex-shrink:0;`} />
     <div style={`color:${theme.title};font-size:${size}px;font-weight:700;line-height:1.11;white-space:pre-line;overflow:hidden;flex-shrink:1;`}>{escape(title.trim())}</div>
-    {description.trim() && <div style={`color:${theme.description};font-size:${descriptionSize(title)}px;font-weight:400;line-height:1.3;margin-top:${titleGap(title)}px;flex-shrink:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;`}>{escape(description.trim())}</div>}
   </div>;
 }

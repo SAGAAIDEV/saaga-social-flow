@@ -39,7 +39,6 @@ export interface Theme {
   /** Behind the whole card, seen only in the seam and the scrim. */
   ground: string;
   title: string;
-  description: string;
   accent: string;
   /** The hairline between the photo and the panel. */
   rule: string;
@@ -59,7 +58,6 @@ export const THEMES: Record<ThemeName, Theme> = {
     kicker: BRAND.chapterMuted,
     ground: BRAND.lightMustard,
     title: BRAND.black,
-    description: BRAND.chapterMuted,
     accent: BRAND.orange,
     rule: BRAND.lightGray,
   },
@@ -73,9 +71,6 @@ export const THEMES: Record<ThemeName, Theme> = {
     kicker: "#A5A5A0",
     ground: "#141414",
     title: BRAND.white,
-    // Not `darkGrey` on black: #626262 on #1D1D1D is a 2.6:1 contrast ratio and
-    // illegible at the 210px-wide thumbnail YouTube actually shows.
-    description: "#A5A5A0",
     accent: BRAND.orange,
     rule: "#333331",
   },
@@ -100,27 +95,4 @@ export function titleSize(title: string): number {
   if (length <= 64) return 72;
   if (length <= 90) return 60;
   return 50;
-}
-
-/**
- * The description tracks the title down, but never below readable.
- *
- * The floor is the load-bearing number. YouTube shows a thumbnail about 210px
- * wide in a grid, which is a sixth of this card — so 30px here is 5px there, and
- * that is already the point where a second line stops being read and starts
- * being texture. Anything smaller is decoration.
- */
-export function descriptionSize(title: string): number {
-  return Math.max(30, Math.round(titleSize(title) * 0.33));
-}
-
-/**
- * The gap between the title and the description.
- *
- * Proportional to the title, because the space a headline needs under it scales
- * with how big it is — but floored, because a long title shrinks to 50px and a
- * 17px gap puts the description inside its descenders.
- */
-export function titleGap(title: string): number {
-  return Math.max(24, Math.round(titleSize(title) * 0.34));
 }

@@ -71,7 +71,6 @@ pub fn payload(
         // fallback to a letterboxed 16:9 as the only symptom.
         "og": (width, height) == super::assets::Kind::Og.size(),
         "title": card.title.trim(),
-        "description": card.description.trim(),
         "kicker": card.kicker.trim(),
         "theme": card.theme_or_default(),
         "focus": card.focus_clamped(),
@@ -227,7 +226,8 @@ mod tests {
     fn the_payload_trims_and_carries_every_field() {
         let value = payload(&card(), None, None, 1280, 720);
         assert_eq!(value["title"], "Ship it anyway");
-        assert_eq!(value["description"], "Why the queue fell over.");
+        // Not drawn, so not sent: the card is the headline alone.
+        assert!(value.get("description").is_none(), "{value}");
         assert_eq!(value["kicker"], "saaga");
         assert_eq!(value["theme"], "light");
         assert_eq!(value["focus"], 0.32);
@@ -328,7 +328,10 @@ mod tests {
             &page[..80.min(page.len())]
         );
         assert!(page.contains("Ship it anyway"));
-        assert!(page.contains("Why the queue fell over."));
+        assert!(
+            !page.contains("Why the queue fell over."),
+            "the description is not drawn under the title"
+        );
         // The light theme's inner arc, so the theme reached the layout rather
         // than being defaulted somewhere in the middle.
         assert!(page.contains("#FDEEE6"), "the light theme did not arrive");

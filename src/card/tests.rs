@@ -157,10 +157,6 @@ fn the_fingerprint_moves_on_an_edit_and_not_on_whitespace() {
             ..card()
         },
         Card {
-            description: "Else.".into(),
-            ..card()
-        },
-        Card {
             kicker: String::new(),
             ..card()
         },
@@ -176,6 +172,12 @@ fn the_fingerprint_moves_on_an_edit_and_not_on_whitespace() {
     ] {
         assert_ne!(edited.fingerprint(), card().fingerprint(), "{edited:?}");
     }
+    // The description is not drawn, so it does not retire a finished set.
+    let described = Card {
+        description: "Else.".into(),
+        ..card()
+    };
+    assert_eq!(described.fingerprint(), card().fingerprint());
 }
 
 /// A card with nothing typed in it is refused before `bun` is started, so the
