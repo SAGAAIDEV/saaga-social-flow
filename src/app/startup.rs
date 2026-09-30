@@ -348,6 +348,7 @@ pub fn run_record_session(
         publish_tx,
         publish_rx,
         publish_busy: false,
+        youtube_draft: None,
         open_edit_chapter: None,
         last_report: None,
         clock: crate::app::clock::RecordClock::default(),
@@ -394,6 +395,7 @@ pub fn run_record_session(
         posts_pick,
         posts_prompt: cfg.posts_prompt.clone().unwrap_or_default(),
         posts_manifest: None,
+        team: Default::default(),
         short_pick: 0,
     };
     // Fills `geometry` and both Split regions from the selected display, so the

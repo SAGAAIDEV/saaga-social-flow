@@ -18,12 +18,13 @@
 </style>
 <h1>YouTube</h1>
 <p class="sub">Save the video details, choose visibility above, then upload. Next: Blog (Strapi).</p>
+{% if youtube %}<p class="sub">This video is on YouTube: saving the details also changes its title and description there.</p>{% endif %}
 <form id="youtube-details">
   <p><label for="youtube-title">Title</label></p>
   <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%">
   <p><label for="youtube-description">Description</label></p>
   <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit">{{ metadata.description }}</textarea>
-  <div class="bar"><button type="submit">Save video details</button></div>
+  <div class="bar"><button type="submit">Save video details</button>{% if unsaved %} <span class="sub">Unsaved edits — Upload shows them and saves them first.</span>{% endif %}</div>
 </form>
 {% if youtube or short %}
 <div class="links">
@@ -43,11 +44,35 @@
   {% endif %}
 </div>
 {% endif %}
+{% if team %}
+<form id="team-footer" class="links">
+  <h2>Team description footer</h2>
+  <p class="sub">Added to the end of every generated description, for the whole team. <code>{links}</code> becomes the funnel links from Socials → Generate posts, one per line. {{ team.status }}</p>
+  <textarea name="footer" rows="5" maxlength="1500" style="width:100%;box-sizing:border-box;padding:10px;background:#0e1116;color:var(--text);border:1px solid var(--line);border-radius:6px;font:inherit" placeholder="Start here:&#10;{links}">{{ team.footer }}</textarea>
+  <div class="bar"><button type="submit"{% if not team.loaded %} disabled{% endif %}>Save for team</button></div>
+</form>
+{% endif %}
 <pre style="white-space:pre-wrap;font:inherit">{{ info }}</pre>
 <script>
+// Every edit is reported as a draft, so a repaint keeps it and Upload shows
+// it. Debounced: a message per keystroke would be noise.
+(function () {
+  var form = document.getElementById('youtube-details'), timer = null;
+  form.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      send({type: 'youtubeDraft', fields: {title: form.elements.title.value, description: form.elements.description.value}});
+    }, 250);
+  });
+})();
 document.getElementById('youtube-details').addEventListener('submit', function(event) {
   event.preventDefault();
   send({type: 'saveYoutube', fields: {title: this.elements.title.value, description: this.elements.description.value}});
+});
+var teamFooter = document.getElementById('team-footer');
+if (teamFooter) teamFooter.addEventListener('submit', function(event) {
+  event.preventDefault();
+  send({type: 'saveTeamFooter', footer: this.elements.footer.value});
 });
 </script>
 {% endblock %}

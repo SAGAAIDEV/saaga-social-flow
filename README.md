@@ -124,6 +124,15 @@ file, the optional `S3_REGION`, `S3_PREFIX`, `S3_PUBLIC_BASE_URL`,
 AWS profile — `AWS_PROFILE=dev` in `.env` plus `aws sso login --profile dev`.
 Every AWS call falls back to the `dev` profile when `AWS_PROFILE` is unset.
 
+### The team template
+
+Funnel links (Socials → Generate posts) and the YouTube description footer (YouTube tab) are shared by the whole team through S3, at `team/templates.json` in the same bucket. That file sits outside the public prefix and is saved without a public ACL.
+- **Where they're used:** every post generation reads the links fresh, and the footer is added to each generated description, with `{links}` replaced by those links.
+- **Two people saving at once:** a save only goes through if the file hasn't changed since you loaded it. If a teammate saved in between, nothing is overwritten; you're asked to reload.
+- **Offline:** a copy is kept in `~/.stream-recorder/team/` and used when S3 can't be read. Saving needs the S3 file itself, so it waits for `aws sso login --profile dev`.
+
+Saving the video details on the YouTube tab also updates the title and description on YouTube once the video is up. It uses the same "Manage your YouTube account" permission as changing visibility.
+
 ### Render on AWS GPU
 
 Tick **Render on AWS GPU** above the Render button to draw the renders on GPU

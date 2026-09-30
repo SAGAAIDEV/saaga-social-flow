@@ -192,6 +192,14 @@ pub enum UiEvent {
     PostsModelSelected(usize),
     PostsProviderSelected(usize),
     PostsPromptChanged(String),
+    /// Save for team, with the links box's text.
+    SaveTeamLinks(String),
+    /// Reload the team links from S3, dropping unsaved edits in the box.
+    ReloadTeamLinks,
+    /// Save for team on the YouTube tab, with the footer box's text.
+    SaveTeamFooter(String),
+    /// The YouTube tab's title and description as typed, before a save.
+    YoutubeDraft(std::collections::BTreeMap<String, String>),
     VersionSelected(u32),
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].
@@ -462,6 +470,8 @@ pub struct ControlTargetIvars {
     posts_model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     posts_provider_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     posts_prompt_view: RefCell<Option<Retained<NSTextView>>>,
+    /// The team's funnel links, one per line — see [`crate::posts::links`].
+    team_links_view: RefCell<Option<Retained<NSTextView>>>,
     posts_status: RefCell<Option<Retained<NSTextField>>>,
 
     // YouTube tab
@@ -804,6 +814,23 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::SavePosts));
         }
 
+        #[unsafe(method(onSaveTeamLinks:))]
+        fn on_save_team_links(&self, _sender: Option<&AnyObject>) {
+            let text = self
+                .ivars()
+                .team_links_view
+                .borrow()
+                .as_ref()
+                .map(|view| view.string().to_string())
+                .unwrap_or_default();
+            let _ = self.ivars().tx.send(UiEvent::SaveTeamLinks(text));
+        }
+
+        #[unsafe(method(onReloadTeamLinks:))]
+        fn on_reload_team_links(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::ReloadTeamLinks);
+        }
+
         #[unsafe(method(onDistribute:))]
         fn on_distribute(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Distribute));
@@ -938,6 +965,7 @@ impl ControlTarget {
             posts_model_popup: RefCell::new(None),
             posts_provider_popup: RefCell::new(None),
             posts_prompt_view: RefCell::new(None),
+            team_links_view: RefCell::new(None),
             posts_status: RefCell::new(None),
             distribute_status: RefCell::new(None),
             schedule_status: RefCell::new(None),
@@ -1115,6 +1143,74 @@ impl ControlTarget {
             "Remove recordings from {} project(s)",
             stale.len()
         )));
+        alert.runModal() == 1001
+    }
+
+    /// Ask before an upload, showing exactly what YouTube will get: each
+    /// video's title and full description as sent, and who will see it.
+    /// `unsaved` means the copy shown is edits still on the YouTube tab, which
+    /// the confirming button saves first. Cancel is the default, so a stray
+    /// Return does not upload.
+    pub fn confirm_upload(
+        &self,
+        previews: &[crate::publish::UploadPreview],
+        unsaved: bool,
+    ) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let alert = NSAlert::new(mtm);
+        alert.setMessageText(&NSString::from_str(match previews.len() {
+            1 => "Upload this to YouTube?",
+            _ => "Upload these to YouTube?",
+        }));
+        let mut info = previews
+            .iter()
+            .map(|preview| {
+                format!(
+                    "{}, {}",
+                    preview.video,
+                    preview.privacy.label().to_lowercase()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if unsaved {
+            info.push_str(
+                "\n\nThis is the copy on the YouTube tab, which has not been saved yet — \
+                 uploading saves it first.",
+            );
+        }
+        if previews.iter().any(|p| p.title_cut || p.description_cut) {
+            info.push_str("\n\nSome copy is over YouTube's limit and will be cut, as shown below.");
+        }
+        alert.setInformativeText(&NSString::from_str(&info));
+        let text = upload_preview_text(previews);
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(540.0, 300.0));
+        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), frame);
+        scroll.setHasVerticalScroller(true);
+        scroll.setBorderType(NSBorderType::BezelBorder);
+        let view = NSTextView::initWithFrame(NSTextView::alloc(mtm), frame);
+        view.setEditable(false);
+        view.setRichText(false);
+        view.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+        view.setString(&NSString::from_str(&text));
+        view.setVerticallyResizable(true);
+        view.setHorizontallyResizable(false);
+        view.setMaxSize(NSSize::new(f64::MAX, f64::MAX));
+        unsafe {
+            if let Some(container) = view.textContainer() {
+                container.setWidthTracksTextView(true);
+            }
+        }
+        scroll.setDocumentView(Some(&view));
+        alert.setAccessoryView(Some(&scroll));
+        alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+        alert.addButtonWithTitle(&NSString::from_str(if unsaved {
+            "Save and upload"
+        } else {
+            "Upload"
+        }));
         alert.runModal() == 1001
     }
 
@@ -1536,6 +1632,13 @@ impl ControlTarget {
     pub fn set_posts_status(&self, text: &str) {
         if let Some(field) = self.ivars().posts_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// Replace the links box's text — a load or a save that reformatted it.
+    pub fn set_team_links_text(&self, text: &str) {
+        if let Some(view) = self.ivars().team_links_view.borrow().as_ref() {
+            view.setString(&NSString::from_str(text));
         }
     }
 
@@ -2084,6 +2187,33 @@ fn layout_plan(width: f64, height: f64, strip: &PlanStrip) {
         NSPoint::new(PAD, PAD),
         NSSize::new(content_w, (y - GAP - PAD).max(60.0)),
     ));
+}
+
+/// The upload confirmation's scrolling text: each video's title and
+/// description as YouTube will get them, with their lengths against the limits.
+fn upload_preview_text(previews: &[crate::publish::UploadPreview]) -> String {
+    previews
+        .iter()
+        .map(|preview| {
+            let cut = |was: bool| if was { " — cut to fit" } else { "" };
+            format!(
+                "{} ({})\n\nTitle ({}/100{}):\n{}\n\nDescription ({}/5000{}):\n{}",
+                preview.video.to_uppercase(),
+                preview.privacy.label(),
+                preview.title.chars().count(),
+                cut(preview.title_cut),
+                preview.title,
+                preview.description.chars().count(),
+                cut(preview.description_cut),
+                if preview.description.trim().is_empty() {
+                    "(empty)"
+                } else {
+                    &preview.description
+                },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n────────────\n\n")
 }
 
 /// The group's rows: every button its own row, except a run of buttons tagged
@@ -3143,11 +3273,96 @@ pub fn attach_controls(
     post_view.addSubview(&posts_status);
     *target.ivars().posts_status.borrow_mut() = Some(posts_status.clone());
 
+    // The team's funnel links, under the run's own controls: they are not this
+    // project's, they are everyone's, so they get a save of their own rather
+    // than riding on Save Edits. See `crate::posts::links`.
+    let links_label = NSTextField::labelWithString(
+        &NSString::from_str(
+            "Funnel links for the whole team, saved to S3 — one per line:              Label — https://… — when to send people there",
+        ),
+        mtm,
+    );
+    links_label.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 214.0),
+        NSSize::new(700.0, LABEL_H),
+    ));
+    pin_top_left(&links_label);
+    post_view.addSubview(&links_label);
+
+    let save_links_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Save for team"),
+            Some(&target),
+            Some(sel!(onSaveTeamLinks:)),
+            mtm,
+        )
+    };
+    save_links_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 254.0),
+        NSSize::new(180.0, 32.0),
+    ));
+    pin_top_left(&save_links_btn);
+    post_view.addSubview(&save_links_btn);
+
+    let reload_links_btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str("Reload"),
+            Some(&target),
+            Some(sel!(onReloadTeamLinks:)),
+            mtm,
+        )
+    };
+    reload_links_btn.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 290.0),
+        NSSize::new(180.0, 32.0),
+    ));
+    pin_top_left(&reload_links_btn);
+    post_view.addSubview(&reload_links_btn);
+
+    let links_x = PAD * 2.0 + 190.0;
+    let links_w = (bounds.size.width - PAD * 2.0 - links_x).max(280.0);
+    let links_scroll = NSScrollView::initWithFrame(
+        NSScrollView::alloc(mtm),
+        NSRect::new(
+            NSPoint::new(links_x, bounds.size.height - 294.0),
+            NSSize::new(links_w, 76.0),
+        ),
+    );
+    links_scroll.setHasVerticalScroller(true);
+    links_scroll.setBorderType(NSBorderType::BezelBorder);
+    pin_top(&links_scroll);
+    let team_links_view = NSTextView::initWithFrame(
+        NSTextView::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(links_w, 76.0)),
+    );
+    team_links_view.setEditable(true);
+    // Plain text, and no smart substitutions: a URL pasted here has to come
+    // back out byte for byte.
+    team_links_view.setRichText(false);
+    team_links_view.setAutomaticLinkDetectionEnabled(false);
+    team_links_view.setAutomaticQuoteSubstitutionEnabled(false);
+    team_links_view.setAutomaticDashSubstitutionEnabled(false);
+    team_links_view.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+    team_links_view.setMinSize(NSSize::new(0.0, 0.0));
+    team_links_view.setMaxSize(NSSize::new(f64::MAX, f64::MAX));
+    team_links_view.setVerticallyResizable(true);
+    team_links_view.setHorizontallyResizable(false);
+    team_links_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
+    team_links_view.setString(&NSString::from_str("Loading the team's links…"));
+    unsafe {
+        if let Some(container) = team_links_view.textContainer() {
+            container.setWidthTracksTextView(true);
+        }
+    }
+    links_scroll.setDocumentView(Some(&team_links_view));
+    post_view.addSubview(&links_scroll);
+    *target.ivars().team_links_view.borrow_mut() = Some(team_links_view.clone());
+
     let post_scroll_frame = NSRect::new(
         NSPoint::new(PAD * 2.0, PAD * 2.0),
         NSSize::new(
             bounds.size.width - PAD * 4.0,
-            (bounds.size.height - 216.0).max(80.0),
+            (bounds.size.height - 310.0).max(80.0),
         ),
     );
     let posts_form = crate::posts::PostsForm::attach(&post_view, mtm);
@@ -3788,7 +4003,7 @@ mod settings_pane_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::common_ancestor;
+    use super::{common_ancestor, upload_preview_text};
     use std::path::{Path, PathBuf};
 
     /// The scope the thumbnail pane needs: the project holds the stills and
@@ -3821,5 +4036,34 @@ mod tests {
             common_ancestor(Path::new("/Users/andrew/x"), Path::new("/Volumes/refs")),
             PathBuf::from("/")
         );
+    }
+
+    #[test]
+    fn the_upload_preview_text_shows_each_video_its_lengths_and_any_cut() {
+        let previews = [
+            crate::publish::UploadPreview {
+                video: "The full video",
+                title: "Ship it".into(),
+                description: "What it shows.".into(),
+                title_cut: false,
+                description_cut: false,
+                privacy: crate::publish::youtube::Privacy::Public,
+            },
+            crate::publish::UploadPreview {
+                video: "The Short",
+                title: "t".repeat(100),
+                description: String::new(),
+                title_cut: true,
+                description_cut: false,
+                privacy: crate::publish::youtube::Privacy::Unlisted,
+            },
+        ];
+        let text = upload_preview_text(&previews);
+        assert!(text.starts_with("THE FULL VIDEO (Public)"), "{text}");
+        assert!(text.contains("Title (7/100):\nShip it"));
+        assert!(text.contains("Description (14/5000):\nWhat it shows."));
+        assert!(text.contains("THE SHORT (Unlisted)"));
+        assert!(text.contains("Title (100/100 — cut to fit)"));
+        assert!(text.contains("(empty)"));
     }
 }

@@ -68,6 +68,7 @@ mod settings;
 mod shorts;
 mod stage;
 mod substack;
+mod team;
 mod thumbnail;
 mod timesync;
 mod titles;

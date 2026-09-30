@@ -22,6 +22,7 @@ mod plan_recording;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
+mod team;
 mod video_brief;
 
 pub use startup::run_record_session;
@@ -187,6 +188,11 @@ pub struct App {
     /// uploading a video and queueing social posts are different systems that
     /// happen to be reachable from the same window.
     publish_busy: bool,
+    /// Title and description typed on the YouTube tab and not saved yet, as
+    /// the page last reported them. The page is redrawn from this rather than
+    /// the saved copy, so a repaint never throws typing away, and Upload shows
+    /// it and saves it before sending — see [`App::run_youtube_upload`].
+    youtube_draft: Option<crate::publish::metadata::Metadata>,
     /// Which chapter the Edit tab has open. View state, not project state — nothing on
     /// disk records it, and reopening the app lands on the first chapter.
     open_edit_chapter: Option<u32>,
@@ -291,6 +297,8 @@ pub struct App {
     posts_pick: crate::notes::Picker,
     posts_prompt: String,
     posts_manifest: Option<crate::posts::PostsManifest>,
+    /// The team template and the YouTube details push — see `app::team`.
+    team: team::TeamState,
     /// Which short Start Short records: 0 for a freeform one, else the
     /// suggestion at `short_pick - 1` in the project's list — see
     /// [`crate::shorts`]. View state, like `open_edit_chapter`.
@@ -931,6 +939,18 @@ impl App {
             }
             UiEvent::SaveVideoBrief { fields, apply } => self.save_video_brief(&fields, apply),
             UiEvent::GenerateVideoCopy(fields) => self.generate_video_copy(&fields),
+            UiEvent::YoutubeDraft(fields) => {
+                let draft = crate::publish::metadata::Metadata {
+                    title: fields.get("title").cloned().unwrap_or_default(),
+                    description: fields.get("description").cloned().unwrap_or_default(),
+                };
+                // Typed back to what is saved is no draft at all.
+                let saved = crate::publish::metadata::load(&self.session);
+                self.youtube_draft = (draft != saved).then_some(draft);
+            }
+            UiEvent::SaveTeamLinks(text) => self.save_team_links(&text),
+            UiEvent::ReloadTeamLinks => self.load_team_template(),
+            UiEvent::SaveTeamFooter(footer) => self.save_team_footer(&footer),
             UiEvent::SaveYoutube(fields) => {
                 let metadata = crate::publish::metadata::Metadata {
                     title: fields.get("title").cloned().unwrap_or_default(),
@@ -938,12 +958,15 @@ impl App {
                 };
                 match crate::publish::metadata::save(&self.session, &metadata) {
                     Ok(()) => {
+                        self.youtube_draft = None;
                         self.update_publish_summary();
                         self.sync_controls();
                         if let Some(live) = &self.live {
                             live.control_target
                                 .set_publish_status("Video details saved.");
                         }
+                        // Already up: the edit is the video's now, on YouTube too.
+                        self.push_youtube_details(&metadata);
                     }
                     Err(err) => {
                         if let Some(live) = &self.live {
@@ -1112,6 +1135,8 @@ impl App {
     /// before it runs, then wrote that copy into the new version as though it had
     /// been generated there.
     fn refresh_version_views(&mut self) {
+        // Typed for the version being left; this one has its own copy.
+        self.youtube_draft = None;
         self.reload_deck();
         self.preselect_planned_layout();
         if let Some(live) = self.live.as_ref() {
@@ -3275,10 +3300,44 @@ impl App {
         self.sync_controls();
     }
 
+    /// Upload, once the person pressing it has seen what goes up: every video's
+    /// title and description exactly as YouTube will get them — see
+    /// [`crate::ui::ControlTarget::confirm_upload`]. Copy typed on the YouTube
+    /// tab and not saved is what is shown, and confirming saves it first, so
+    /// nothing goes up that was not on screen.
     fn run_youtube_upload(&mut self) {
         if self.publish_busy {
             self.set_publish_status("An upload is already running…");
             return;
+        }
+        let unsaved = self.youtube_draft.clone();
+        let copy = unsaved
+            .clone()
+            .unwrap_or_else(|| crate::publish::metadata::load(&self.session));
+        let previews = match crate::publish::upload_preview(&self.session, &copy) {
+            Ok(previews) => previews,
+            Err(err) => {
+                self.set_publish_status(&format!("Not uploading: {err:#}"));
+                return;
+            }
+        };
+        let confirmed = self.live.as_ref().is_some_and(|live| {
+            live.control_target
+                .confirm_upload(&previews, unsaved.is_some())
+        });
+        if !confirmed {
+            self.set_publish_status("Upload cancelled — nothing was sent.");
+            return;
+        }
+        if let Some(draft) = unsaved {
+            if let Err(err) = crate::publish::metadata::save(&self.session, &draft) {
+                self.set_publish_status(&format!(
+                    "Not uploading — the edits did not save: {err:#}"
+                ));
+                return;
+            }
+            self.youtube_draft = None;
+            self.update_publish_summary();
         }
         self.publish_busy = true;
         self.set_publish_status("Uploading the longform to YouTube…");
@@ -3804,8 +3863,13 @@ impl App {
             &ui::render::page(
                 "youtube.html",
                 minijinja::context! {
-                    metadata => crate::publish::metadata::load(&self.session), info => info,
+                    metadata => self
+                        .youtube_draft
+                        .clone()
+                        .unwrap_or_else(|| crate::publish::metadata::load(&self.session)),
+                    unsaved => self.youtube_draft.is_some(), info => info,
                     youtube => youtube, short => short, both => both,
+                    team => self.footer_view(),
                 },
             ),
             &self.session.root,
@@ -4244,6 +4308,9 @@ impl ApplicationHandler for App {
                 // After `next_chapter` is known, so the plan teleprompter opens
                 // on the chapter the first press will record.
                 self.reload_deck();
+                // S3, on a thread: the links box and the YouTube footer fill in
+                // when it lands.
+                self.load_team_template();
                 self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
@@ -4324,6 +4391,7 @@ impl ApplicationHandler for App {
         self.drain_render();
         self.drain_deps();
         self.drain_posts();
+        self.drain_team();
         self.drain_substack();
         self.drain_blog();
         self.drain_titles();

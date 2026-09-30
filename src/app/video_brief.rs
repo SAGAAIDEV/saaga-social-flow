@@ -115,11 +115,18 @@ impl App {
         let status = source.status();
         let model = self.notes_pick.model().to_string();
         let provider = self.notes_pick.provider().map(str::to_string);
+        // The team's footer ends every generated description — see
+        // `crate::team`. As last read: a save made since is on screen already.
+        let team = self.team_template();
         let (tx, rx) = mpsc::channel();
         match std::thread::Builder::new()
             .name("video-copy".into())
             .spawn(move || {
                 let result = video_brief::generate(&source, &model, provider.as_deref())
+                    .map(|metadata| crate::publish::metadata::Metadata {
+                        description: crate::team::with_footer(&metadata.description, &team),
+                        ..metadata
+                    })
                     .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(result);
             }) {

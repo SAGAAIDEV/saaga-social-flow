@@ -88,6 +88,14 @@ pub enum WebEvent {
     SaveYoutube {
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// The YouTube tab's title and description as typed, not saved.
+    YoutubeDraft {
+        fields: std::collections::BTreeMap<String, String>,
+    },
+    /// The team's YouTube description footer — see [`crate::team`].
+    SaveTeamFooter {
+        footer: String,
+    },
     SaveCard {
         fields: std::collections::BTreeMap<String, String>,
     },
@@ -270,6 +278,8 @@ impl WebEvent {
             WebEvent::SaveVideoBrief { fields, apply } => UiEvent::SaveVideoBrief { fields, apply },
             WebEvent::GenerateVideoCopy { fields } => UiEvent::GenerateVideoCopy(fields),
             WebEvent::SaveYoutube { fields } => UiEvent::SaveYoutube(fields),
+            WebEvent::SaveTeamFooter { footer } => UiEvent::SaveTeamFooter(footer),
+            WebEvent::YoutubeDraft { fields } => UiEvent::YoutubeDraft(fields),
             WebEvent::SelectThumbnail { id } => UiEvent::SelectThumbnail(id),
             WebEvent::ThumbnailModel { value } => UiEvent::ThumbnailModelSelected(value),
             WebEvent::ToggleReference { name, value } => UiEvent::ToggleReference { name, value },
@@ -831,6 +841,28 @@ mod tests {
             r#"{"type":"approvePlan","root":"/p","value":true}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_youtube_draft_reaches_the_ui_event() {
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"youtubeDraft","fields":{"title":"Draft","description":"Typed"}}"#,
+        )
+        .unwrap();
+        let UiEvent::YoutubeDraft(fields) = event.into_ui_event() else {
+            panic!("expected YoutubeDraft");
+        };
+        assert_eq!(fields["title"], "Draft");
+    }
+
+    #[test]
+    fn the_team_footer_message_reaches_the_ui_event() {
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"saveTeamFooter","footer":"More: {links}"}"#).unwrap();
+        let UiEvent::SaveTeamFooter(footer) = event.into_ui_event() else {
+            panic!("expected SaveTeamFooter");
+        };
+        assert_eq!(footer, "More: {links}");
     }
 
     #[test]
