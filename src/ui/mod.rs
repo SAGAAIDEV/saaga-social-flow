@@ -157,6 +157,7 @@ pub fn copy_to_pasteboard(text: &str) -> bool {
     }
 }
 
+pub mod menu;
 pub mod planning;
 mod preview;
 pub mod render;
