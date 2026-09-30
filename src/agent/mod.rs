@@ -7,6 +7,7 @@ pub mod plan;
 pub mod prompt;
 pub mod reflect;
 pub mod shorts;
+pub mod summary;
 pub mod titles;
 pub mod trace;
 

@@ -88,6 +88,10 @@ pub enum WebEvent {
     SaveYoutube {
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// Summarize again, with the project the page was drawn for.
+    SummarizeVideo {
+        root: String,
+    },
     /// The YouTube tab's title and description as typed, not saved.
     YoutubeDraft {
         fields: std::collections::BTreeMap<String, String>,
@@ -280,6 +284,7 @@ impl WebEvent {
             WebEvent::SaveYoutube { fields } => UiEvent::SaveYoutube(fields),
             WebEvent::SaveTeamFooter { footer } => UiEvent::SaveTeamFooter(footer),
             WebEvent::YoutubeDraft { fields } => UiEvent::YoutubeDraft(fields),
+            WebEvent::SummarizeVideo { root } => UiEvent::SummarizeVideo(root),
             WebEvent::SelectThumbnail { id } => UiEvent::SelectThumbnail(id),
             WebEvent::ThumbnailModel { value } => UiEvent::ThumbnailModelSelected(value),
             WebEvent::ToggleReference { name, value } => UiEvent::ToggleReference { name, value },
@@ -841,6 +846,16 @@ mod tests {
             r#"{"type":"approvePlan","root":"/p","value":true}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn summarize_again_carries_the_project() {
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"summarizeVideo","root":"/tmp/p"}"#).unwrap();
+        let UiEvent::SummarizeVideo(root) = event.into_ui_event() else {
+            panic!("expected SummarizeVideo");
+        };
+        assert_eq!(root, "/tmp/p");
     }
 
     #[test]

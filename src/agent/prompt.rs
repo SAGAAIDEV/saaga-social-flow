@@ -35,6 +35,9 @@ pub const SHORTS: &str = "shorts.suggestions";
 /// a section of [`NOTES`]: notes tighten a rehearsal that already happened,
 /// this plans a video before any of it is recorded.
 pub const PLAN: &str = "plan.video";
+/// The summary of the final video — see [`crate::summary`]. Its own id: it
+/// describes what was said, where the blog and posts are written to be read.
+pub const SUMMARY: &str = "video.summary";
 pub const POSTS: &str = "posts.social";
 pub const SUBSTACK: &str = "substack.notes";
 pub const BLOG: &str = "blog.article";
@@ -108,6 +111,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
         TITLES => Some(super::titles::SYSTEM),
         OUTLINE => Some(super::outline::SYSTEM),
         PLAN => Some(super::plan::SYSTEM),
+        SUMMARY => Some(super::summary::SYSTEM),
         SHORTS => Some(super::shorts::SYSTEM),
         POSTS => Some(crate::posts::generate::SYSTEM_PROMPT),
         SUBSTACK => Some(crate::substack::generate::SYSTEM_PROMPT),

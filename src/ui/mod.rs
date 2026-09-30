@@ -200,6 +200,8 @@ pub enum UiEvent {
     SaveTeamFooter(String),
     /// The YouTube tab's title and description as typed, before a save.
     YoutubeDraft(std::collections::BTreeMap<String, String>),
+    /// Summarize again on Video details, for the project the page was drawn for.
+    SummarizeVideo(String),
     VersionSelected(u32),
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].

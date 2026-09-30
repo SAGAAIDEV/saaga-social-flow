@@ -22,6 +22,7 @@ mod plan_recording;
 pub(crate) mod pointer;
 pub(crate) mod resolve;
 mod startup;
+mod summary;
 mod team;
 mod video_brief;
 
@@ -142,6 +143,8 @@ pub struct App {
     card_tx: mpsc::Sender<crate::card::raster::RasterEvent>,
     card_rx: Receiver<crate::card::raster::RasterEvent>,
     video_copy_job: Option<video_brief::CopyJob>,
+    /// The Summary card's job — see `app::summary`.
+    summary_job: Option<summary::SummaryJob>,
     /// The offscreen web view while a card is being photographed. Its presence
     /// *is* the busy flag — there is exactly one at a time — and holding it is
     /// what keeps the navigation delegate alive, which `WKWebView` does not.
@@ -947,6 +950,12 @@ impl App {
                 // Typed back to what is saved is no draft at all.
                 let saved = crate::publish::metadata::load(&self.session);
                 self.youtube_draft = (draft != saved).then_some(draft);
+            }
+            UiEvent::SummarizeVideo(root) => {
+                // A click on a page drawn for another project is not for this one.
+                if self.session.root.to_str() == Some(root.as_str()) {
+                    self.summarize_video();
+                }
             }
             UiEvent::SaveTeamLinks(text) => self.save_team_links(&text),
             UiEvent::ReloadTeamLinks => self.load_team_template(),
@@ -2809,6 +2818,8 @@ impl App {
                         &self.session.root,
                         self.geometry.map(|geometry| geometry.scale()),
                     ),
+                    // What the final cut says — see `app::summary`.
+                    summary => self.summary_view(),
                 },
             ),
             &self.session.root,
@@ -4102,6 +4113,8 @@ impl App {
                     // title and description are written from. The artwork and
                     // the upload follow from wherever that step ends.
                     self.write_copy_after_render();
+                    // Beside the chain, not in it: nothing waits on the summary.
+                    self.summarize_after_render();
                     self.update_render_summary();
                     // The cut moved, so the Edit tab's per-chapter figures did too.
                     self.update_edit_view();
@@ -4404,6 +4417,7 @@ impl ApplicationHandler for App {
         self.drain_figure();
         self.drain_card();
         self.drain_video_copy();
+        self.drain_summary();
         // `None` means never scanned, so the first tick after launch paints the
         // queue immediately rather than leaving it blank for a minute.
         if self
