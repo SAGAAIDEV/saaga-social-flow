@@ -67,6 +67,10 @@ pub type BufferRect = (f64, f64, f64, f64);
 /// tracking on changes nothing" property would quietly stop being true.
 const SETTLED: f64 = 1e-3;
 
+/// The most a chosen multiplier may tighten: a frame a quarter of the region's
+/// width is already four times upscaled at the sharp limit's worst.
+pub const MAX_PUNCH_ZOOM: f64 = 4.0;
+
 /// The sub-rect of the capture this frame shows.
 ///
 /// - `rest` is the operator's authored region: the frame's size and aspect at
@@ -80,6 +84,10 @@ const SETTLED: f64 = 1e-3;
 ///   is the authored rect, `1.0` is as tight as the floor allows and as far
 ///   across as `bounds` permits.
 /// - `floor` is the smallest the frame may get, in the same units again.
+/// - `zoom` is the operator's multiplier for a full punch-in: `Some(2.0)`
+///   tightens to half the region, whatever the floor — past the sharp limit
+///   that upscales, and it is their call. `None` is as far as `floor` allows,
+///   which is the default and the original behaviour.
 ///
 /// Returns `rest` unchanged for any input it cannot make sense of, rather than
 /// a rect that is merely arithmetically defensible. This runs per frame on a
@@ -91,6 +99,7 @@ pub fn tracked_crop(
     pointer: (f64, f64),
     punch: f64,
     floor: (f64, f64),
+    zoom: Option<f64>,
 ) -> BufferRect {
     let (x, y, w, h) = rest;
     // Comparisons rather than `<= 0.0`, so a NaN side reads as no area too.
@@ -110,7 +119,10 @@ pub fn tracked_crop(
     // `min(1.0)` handles a `rest` already smaller than the slot: there is no
     // room to tighten, so the punched frame is the same size as the resting
     // one and only its position moves.
-    let tightest = (floor.0 / w).max(floor.1 / h).min(1.0);
+    let tightest = match zoom.filter(|m| m.is_finite() && *m > 1.0) {
+        Some(m) => 1.0 / m.min(MAX_PUNCH_ZOOM),
+        None => (floor.0 / w).max(floor.1 / h).min(1.0),
+    };
     let tight = (w * tightest, h * tightest);
 
     // The envelope is the capture *unioned with* the authored rect. Normally

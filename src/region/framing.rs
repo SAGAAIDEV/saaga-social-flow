@@ -107,6 +107,11 @@ pub struct Track {
     /// [`crate::region::track::tracked_crop`] — travel and punch-in are the
     /// same quantity, so this is also "how far the frame is free to move".
     pub punch: f64,
+    /// The operator's zoom multiplier for a full punch-in, or `None` for as
+    /// far as stays sharp — see [`crate::config::MouseTracking::punch_zoom`].
+    /// Carried with the reading so the recording and the overlay use the same
+    /// one on the same frame.
+    pub zoom: Option<f64>,
 }
 
 /// The latest tracked framing, shared between the pointer tracker and the

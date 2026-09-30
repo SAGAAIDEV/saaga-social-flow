@@ -63,7 +63,7 @@ fn at_rest_the_crop_is_the_authored_rect_bit_for_bit() {
     let rest = roomy();
     for pointer in probes() {
         assert_eq!(
-            tracked_crop(rest, capture(), pointer, 0.0, SLOT),
+            tracked_crop(rest, capture(), pointer, 0.0, SLOT, None),
             rest,
             "an unpunched frame moved for a pointer at {pointer:?} — enabling \
              tracking would visibly jump the frame",
@@ -80,12 +80,12 @@ fn at_rest_the_crop_is_the_authored_rect_bit_for_bit() {
 fn releasing_returns_the_frame_to_rest() {
     let rest = roomy();
     let far = (capture().2 * 0.95, 900.0);
-    let travelled = tracked_crop(rest, capture(), far, 1.0, SLOT);
+    let travelled = tracked_crop(rest, capture(), far, 1.0, SLOT, None);
     assert_ne!(travelled, rest, "fixture is useless: nothing travelled");
 
     for spent in [0.0, 1e-6, 9e-4] {
         assert_eq!(
-            tracked_crop(rest, capture(), far, spent, SLOT),
+            tracked_crop(rest, capture(), far, spent, SLOT, None),
             rest,
             "a spent punch of {spent} left the frame away from rest",
         );
@@ -101,7 +101,7 @@ fn a_punched_in_frame_travels_outside_its_own_region() {
     let right_edge = rest.0 + rest.2;
     let far_right = (capture().2 - 10.0, 900.0);
 
-    let (x, _, w, _) = tracked_crop(rest, capture(), far_right, 1.0, SLOT);
+    let (x, _, w, _) = tracked_crop(rest, capture(), far_right, 1.0, SLOT, None);
     assert!(
         x + w > right_edge,
         "the frame stopped at its own region's edge ({right_edge}) instead of \
@@ -110,7 +110,7 @@ fn a_punched_in_frame_travels_outside_its_own_region() {
     );
 
     let far_left = (10.0, 900.0);
-    let (x, _, _, _) = tracked_crop(rest, capture(), far_left, 1.0, SLOT);
+    let (x, _, _, _) = tracked_crop(rest, capture(), far_left, 1.0, SLOT, None);
     assert!(
         x < rest.0,
         "the frame would not travel left of its region: got {x}, region starts \
@@ -131,7 +131,7 @@ fn the_crop_never_leaves_the_capture() {
     let cap = capture();
     for pointer in probes() {
         for punch in PUNCHES {
-            let (x, y, w, h) = tracked_crop(rest, cap, pointer, punch, SLOT);
+            let (x, y, w, h) = tracked_crop(rest, cap, pointer, punch, SLOT, None);
             assert!(
                 x >= cap.0 - 1e-9
                     && y >= cap.1 - 1e-9
@@ -154,7 +154,7 @@ fn every_punch_keeps_the_authored_aspect() {
     let want = rest.2 / rest.3;
     for pointer in probes() {
         for punch in PUNCHES {
-            let (_, _, w, h) = tracked_crop(rest, capture(), pointer, punch, SLOT);
+            let (_, _, w, h) = tracked_crop(rest, capture(), pointer, punch, SLOT, None);
             assert!(
                 (w / h - want).abs() < 1e-12,
                 "pointer {pointer:?} at punch {punch} changed the aspect: \
@@ -171,7 +171,7 @@ fn every_punch_keeps_the_authored_aspect() {
 fn the_punch_in_stops_at_one_buffer_pixel_per_output_pixel() {
     let rest = roomy();
     for punch in [1.0, 1.5, 4.0, f64::MAX] {
-        let (_, _, w, h) = tracked_crop(rest, capture(), (1200.0, 900.0), punch, SLOT);
+        let (_, _, w, h) = tracked_crop(rest, capture(), (1200.0, 900.0), punch, SLOT, None);
         // Neither axis below the floor — that is the upscale this prevents...
         assert!(
             w >= SLOT.0 - 1e-6 && h >= SLOT.1 - 1e-6,
@@ -203,7 +203,7 @@ fn the_punch_in_stops_at_one_buffer_pixel_per_output_pixel() {
 fn a_region_with_no_room_to_tighten_can_still_travel() {
     let cramped = (400.0, 0.0, 911.0, 1080.0);
     let cap = (0.0, 0.0, 1920.0, 1080.0);
-    let (x, _, w, h) = tracked_crop(cramped, cap, (1800.0, 540.0), 1.0, SLOT);
+    let (x, _, w, h) = tracked_crop(cramped, cap, (1800.0, 540.0), 1.0, SLOT, None);
 
     assert!(
         (w - cramped.2).abs() < 1e-9 && (h - cramped.3).abs() < 1e-9,
@@ -228,7 +228,7 @@ fn the_origin_lands_on_whole_pixels() {
     // and rounding that only works for round numbers is not rounding.
     for step in 0..40 {
         let pointer = (300.0 + step as f64 * 37.317, 500.0 + step as f64 * 11.71);
-        let (x, y, _, _) = tracked_crop(rest, capture(), pointer, 1.0, SLOT);
+        let (x, y, _, _) = tracked_crop(rest, capture(), pointer, 1.0, SLOT, None);
         assert!(
             x.fract().abs() < 1e-9 && y.fract().abs() < 1e-9,
             "pointer {pointer:?} produced a fractional origin ({x}, {y}) — \
@@ -244,13 +244,13 @@ fn a_pointer_beyond_the_capture_shows_its_edge() {
     let rest = roomy();
     let cap = capture();
 
-    let (x, _, _, _) = tracked_crop(rest, cap, (-4000.0, 900.0), 1.0, SLOT);
+    let (x, _, _, _) = tracked_crop(rest, cap, (-4000.0, 900.0), 1.0, SLOT, None);
     assert!(
         (x - cap.0).abs() < 1e-9,
         "did not stop at the left edge: {x}"
     );
 
-    let (x, _, w, _) = tracked_crop(rest, cap, (cap.2 + 4000.0, 900.0), 1.0, SLOT);
+    let (x, _, w, _) = tracked_crop(rest, cap, (cap.2 + 4000.0, 900.0), 1.0, SLOT, None);
     assert!(
         ((x + w) - (cap.0 + cap.2)).abs() < 1.0,
         "did not stop at the right edge: {} vs {}",
@@ -277,7 +277,7 @@ fn a_nonsense_pointer_or_punch_returns_the_authored_rect() {
         ((500.0, 500.0), f64::NEG_INFINITY),
     ] {
         assert_eq!(
-            tracked_crop(rest, capture(), pointer, punch, SLOT),
+            tracked_crop(rest, capture(), pointer, punch, SLOT, None),
             rest,
             "pointer {pointer:?} at punch {punch} produced a rect instead of \
              falling back to the authored one",
@@ -285,7 +285,7 @@ fn a_nonsense_pointer_or_punch_returns_the_authored_rect() {
     }
     for degenerate in [(0.0, 0.0, 0.0, 100.0), (0.0, 0.0, 100.0, -5.0)] {
         assert_eq!(
-            tracked_crop(degenerate, capture(), (500.0, 500.0), 0.5, SLOT),
+            tracked_crop(degenerate, capture(), (500.0, 500.0), 0.5, SLOT, None),
             degenerate,
             "a zero-or-negative region produced a rect",
         );
@@ -305,9 +305,9 @@ fn a_punched_in_frame_actually_follows_the_pointer() {
     let rest = roomy();
     let cap = capture();
     let y = 900.0;
-    let left = tracked_crop(rest, cap, (100.0, y), 1.0, SLOT);
-    let middle = tracked_crop(rest, cap, (cap.2 / 2.0, y), 1.0, SLOT);
-    let right = tracked_crop(rest, cap, (cap.2 - 100.0, y), 1.0, SLOT);
+    let left = tracked_crop(rest, cap, (100.0, y), 1.0, SLOT, None);
+    let middle = tracked_crop(rest, cap, (cap.2 / 2.0, y), 1.0, SLOT, None);
+    let right = tracked_crop(rest, cap, (cap.2 - 100.0, y), 1.0, SLOT, None);
 
     assert!(
         left.0 < middle.0 && middle.0 < right.0,
@@ -324,4 +324,65 @@ fn a_punched_in_frame_actually_follows_the_pointer() {
         right.0 - left.0,
         cap.2 - SLOT.0,
     );
+}
+
+/// Sharpest (`None`) stops where one buffer pixel is one output pixel — the
+/// slot — as the punch-in always did.
+#[test]
+fn sharpest_stops_at_the_slot() {
+    let rest = roomy();
+    let centre = (capture().2 * 0.5, capture().3 * 0.5);
+    let (_, _, w, h) = tracked_crop(rest, capture(), centre, 1.0, SLOT, None);
+    assert!(
+        (w - SLOT.0).abs() <= 1.0 && (h - SLOT.1).abs() <= 1.0,
+        "{w}x{h}"
+    );
+}
+
+/// A chosen multiplier is the zoom: 2× shows half the region, past the sharp
+/// limit included, and half a punch is half way there.
+#[test]
+fn a_multiplier_sets_how_far_the_punch_in_goes() {
+    let rest = roomy();
+    let centre = (capture().2 * 0.5, capture().3 * 0.5);
+    let (_, _, w, h) = tracked_crop(rest, capture(), centre, 1.0, SLOT, Some(2.0));
+    assert!((w - rest.2 / 2.0).abs() <= 1.0, "{w} vs {}", rest.2 / 2.0);
+    assert!((h - rest.3 / 2.0).abs() <= 1.0);
+    assert!(
+        w < SLOT.0,
+        "2× on this region is past the sharp limit, and allowed"
+    );
+
+    let gentle = tracked_crop(rest, capture(), centre, 1.0, SLOT, Some(1.25)).2;
+    assert!((gentle - rest.2 / 1.25).abs() <= 1.0);
+    assert!(gentle > SLOT.0, "1.25× stops short of the sharp limit");
+
+    let half = tracked_crop(rest, capture(), centre, 0.5, SLOT, Some(2.0)).2;
+    assert!((half - (rest.2 + rest.2 / 2.0) / 2.0).abs() <= 1.0);
+}
+
+/// Nonsense multipliers fall back to Sharpest; an enormous one is capped.
+#[test]
+fn a_multiplier_out_of_range_is_ignored_or_capped() {
+    let rest = roomy();
+    let centre = (capture().2 * 0.5, capture().3 * 0.5);
+    let sharpest = tracked_crop(rest, capture(), centre, 1.0, SLOT, None);
+    for odd in [Some(1.0), Some(0.5), Some(f64::NAN), Some(-2.0)] {
+        assert_eq!(
+            tracked_crop(rest, capture(), centre, 1.0, SLOT, odd),
+            sharpest,
+            "{odd:?}"
+        );
+    }
+    let capped = tracked_crop(rest, capture(), centre, 1.0, SLOT, Some(40.0)).2;
+    let max = tracked_crop(
+        rest,
+        capture(),
+        centre,
+        1.0,
+        SLOT,
+        Some(crate::region::track::MAX_PUNCH_ZOOM),
+    )
+    .2;
+    assert_eq!(capped, max);
 }

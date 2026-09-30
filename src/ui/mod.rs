@@ -176,6 +176,8 @@ pub enum UiEvent {
     FaceTrackToggled(bool),
     /// The Track Mouse checkbox moved.
     MouseTrackToggled(bool),
+    /// The Zoom popup moved, as an index into [`crate::pointer::PUNCH_ZOOMS`].
+    PunchZoomSelected(usize),
     /// The Show App checkbox moved.
     ShowAppToggled(bool),
     /// The Hide Mouse checkbox moved.
@@ -394,6 +396,8 @@ pub struct ControlTargetIvars {
     /// The Track Mouse switch, beside it. Same kind of decision, one fewer
     /// state — there is nothing to load, so it is never disabled.
     mouse_checkbox: RefCell<Option<Retained<NSButton>>>,
+    /// How far ⌃⌥⇧ punches in — see [`crate::pointer::PUNCH_ZOOMS`].
+    zoom_popup: RefCell<Option<Retained<NSPopUpButton>>>,
     /// The Show App switch, beside those: whether this app's own windows are
     /// in the screen recording. The same kind of decision again — what the
     /// recorded frame contains — and set for a take rather than during one,
@@ -611,6 +615,16 @@ define_class!(
             if let Some(checkbox) = self.ivars().mouse_checkbox.borrow().as_ref() {
                 let on = checkbox.state() == NSControlStateValueOn;
                 let _ = self.ivars().tx.send(UiEvent::MouseTrackToggled(on));
+            }
+        }
+
+        #[unsafe(method(onPunchZoomChanged:))]
+        fn on_punch_zoom_changed(&self, _sender: Option<&AnyObject>) {
+            if let Some(popup) = self.ivars().zoom_popup.borrow().as_ref() {
+                let idx = popup.indexOfSelectedItem();
+                if idx >= 0 {
+                    let _ = self.ivars().tx.send(UiEvent::PunchZoomSelected(idx as usize));
+                }
             }
         }
 
@@ -932,6 +946,7 @@ impl ControlTarget {
             pair_popup: RefCell::new(None),
             face_checkbox: RefCell::new(None),
             mouse_checkbox: RefCell::new(None),
+            zoom_popup: RefCell::new(None),
             show_app_checkbox: RefCell::new(None),
             hide_mouse_checkbox: RefCell::new(None),
             render_target_boxes: RefCell::new(Vec::new()),
@@ -1360,6 +1375,13 @@ impl ControlTarget {
         };
         button.setTitle(&NSString::from_str(title));
         button.setEnabled(has_screen);
+    }
+
+    /// Show the saved punch-in multiplier in the Zoom popup.
+    pub fn set_punch_zoom(&self, zoom: Option<f64>) {
+        if let Some(popup) = self.ivars().zoom_popup.borrow().as_ref() {
+            popup.selectItemAtIndex(crate::pointer::zoom_index(zoom) as isize);
+        }
     }
 
     /// Show `pair` in the Layout popup. A click is the only thing that used to
@@ -2658,6 +2680,25 @@ pub fn attach_controls(
     });
     *target.ivars().mouse_checkbox.borrow_mut() = Some(mouse_checkbox.clone());
 
+    // How far ⌃⌥⇧ punches in, beside the switch that turns the punch-in on.
+    // Drawn on Sharpest; the App selects the saved one once the window is up.
+    let zoom_label = NSTextField::labelWithString(&NSString::from_str("Zoom"), mtm);
+    let zoom_popup = make_popup(
+        mtm,
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(120.0, CONTROL_H)),
+        crate::pointer::PUNCH_ZOOMS
+            .iter()
+            .map(|zoom| crate::pointer::zoom_label(*zoom)),
+        0,
+        &target,
+        sel!(onPunchZoomChanged:),
+    );
+    zoom_popup.setToolTip(Some(&NSString::from_str(
+        "How far ⌃⌥⇧ punches in. Sharpest stops where the screen stays pixel-sharp; \
+         a bigger number zooms further and upscales the screen past that.",
+    )));
+    *target.ivars().zoom_popup.borrow_mut() = Some(zoom_popup.clone());
+
     let show_app_checkbox = unsafe {
         NSButton::buttonWithTitle_target_action(
             &NSString::from_str("Show App"),
@@ -2929,6 +2970,7 @@ pub fn attach_controls(
         pair_popup,
         face_checkbox,
         mouse_checkbox,
+        (zoom_label, zoom_popup),
         show_app_checkbox,
         hide_mouse_checkbox,
     );

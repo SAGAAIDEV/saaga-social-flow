@@ -306,6 +306,27 @@ impl App {
 
     /// Persist the whole block, so a config predating a field gains it with
     /// its default the first time the switch is used.
+    /// The Zoom popup: how far ⌃⌥⇧ punches in. Saved with the rest of the
+    /// mouse-tracking settings, and handed to a running tracker at once, so a
+    /// change shows on the next punch-in — mid-take too.
+    pub(super) fn set_punch_zoom(&mut self, idx: usize) {
+        let Some(zoom) = crate::pointer::PUNCH_ZOOMS.get(idx).copied() else {
+            return;
+        };
+        if self.pointer_config.punch_zoom == zoom {
+            return;
+        }
+        self.pointer_config.punch_zoom = zoom;
+        if let Some(tracker) = self.pointer_tracker.as_ref() {
+            tracker.set_zoom(zoom);
+        }
+        self.save_mouse_config();
+        println!(
+            "stream-recorder: ⌃⌥⇧ punch-in zoom → {}",
+            crate::pointer::zoom_label(zoom)
+        );
+    }
+
     fn save_mouse_config(&self) {
         let mut cfg = crate::config::load();
         cfg.mouse_tracking = self.pointer_config;

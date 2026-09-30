@@ -42,6 +42,9 @@ const MOUSE_W: f64 = 110.0;
 const APP_W: f64 = 90.0;
 /// "Hide Mouse" — single state, sized to its title like Track Mouse.
 const HIDE_W: f64 = 100.0;
+/// The Zoom popup's label and the popup, after Track Mouse.
+const ZOOM_LABEL_W: f64 = 40.0;
+const ZOOM_W: f64 = 100.0;
 
 pub struct PreviewHost {
     wrap: Retained<NSView>,
@@ -51,6 +54,8 @@ pub struct PreviewHost {
     /// contains.
     face_checkbox: Retained<NSButton>,
     mouse_checkbox: Retained<NSButton>,
+    /// How far the mouse's punch-in goes, beside the switch that enables it.
+    zoom: (Retained<NSTextField>, Retained<NSPopUpButton>),
     show_app_checkbox: Retained<NSButton>,
     hide_mouse_checkbox: Retained<NSButton>,
     split: Retained<NSSplitView>,
@@ -81,6 +86,7 @@ impl PreviewHost {
         layout_popup: Retained<NSPopUpButton>,
         face_checkbox: Retained<NSButton>,
         mouse_checkbox: Retained<NSButton>,
+        zoom: (Retained<NSTextField>, Retained<NSPopUpButton>),
         show_app_checkbox: Retained<NSButton>,
         hide_mouse_checkbox: Retained<NSButton>,
     ) -> PreviewHost {
@@ -92,6 +98,8 @@ impl PreviewHost {
         wrap.addSubview(&layout_popup);
         wrap.addSubview(&face_checkbox);
         wrap.addSubview(&mouse_checkbox);
+        wrap.addSubview(&zoom.0);
+        wrap.addSubview(&zoom.1);
         wrap.addSubview(&show_app_checkbox);
         wrap.addSubview(&hide_mouse_checkbox);
 
@@ -116,6 +124,7 @@ impl PreviewHost {
             layout_popup,
             face_checkbox,
             mouse_checkbox,
+            zoom,
             show_app_checkbox,
             hide_mouse_checkbox,
             split,
@@ -136,9 +145,21 @@ impl PreviewHost {
         // The popup takes what the switches leave, floored so a very narrow
         // window shrinks the popup rather than pushing a switch off the
         // edge — both have to stay reachable at any width.
-        let popup_w =
-            (w - LABEL_W - GAP - FACE_W - GAP - MOUSE_W - GAP - APP_W - GAP - HIDE_W - GAP)
-                .max(80.0);
+        let popup_w = (w
+            - LABEL_W
+            - GAP
+            - FACE_W
+            - GAP
+            - MOUSE_W
+            - GAP
+            - ZOOM_LABEL_W
+            - ZOOM_W
+            - GAP
+            - APP_W
+            - GAP
+            - HIDE_W
+            - GAP)
+            .max(80.0);
         self.layout_popup.setFrame(NSRect::new(
             NSPoint::new(LABEL_W + GAP, (h - BAR_H).max(0.0)),
             NSSize::new(popup_w, BAR_H),
@@ -153,7 +174,16 @@ impl PreviewHost {
             NSPoint::new(mouse_x, (h - BAR_H).max(0.0)),
             NSSize::new(MOUSE_W, BAR_H),
         ));
-        let app_x = mouse_x + MOUSE_W + GAP;
+        let zoom_x = mouse_x + MOUSE_W + GAP;
+        self.zoom.0.setFrame(NSRect::new(
+            NSPoint::new(zoom_x, (h - BAR_H).max(0.0)),
+            NSSize::new(ZOOM_LABEL_W, BAR_H),
+        ));
+        self.zoom.1.setFrame(NSRect::new(
+            NSPoint::new(zoom_x + ZOOM_LABEL_W, (h - BAR_H).max(0.0)),
+            NSSize::new(ZOOM_W, BAR_H),
+        ));
+        let app_x = zoom_x + ZOOM_LABEL_W + ZOOM_W + GAP;
         self.show_app_checkbox.setFrame(NSRect::new(
             NSPoint::new(app_x, (h - BAR_H).max(0.0)),
             NSSize::new(APP_W, BAR_H),
