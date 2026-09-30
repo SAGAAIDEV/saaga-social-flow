@@ -191,7 +191,7 @@ pub fn run(
     crate::agent::trace::write_step(&plan_dir, &session.root, &step)?;
     // Approving is what makes it the speaking notes — the teleprompter, the
     // cards and the deck — and un-approves the plan it replaced.
-    crate::plan::approve(&plan_dir, written.number, &session.notes_dir()?)?;
+    crate::plan::approve_for(session, written.number)?;
     critique.plan_written = Some(written.number);
     save(session, &critique)?;
     Ok(critique)

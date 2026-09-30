@@ -250,7 +250,10 @@ fn chapter_contexts(session_dir: &Path, notes: Option<&NotesData>) -> Vec<VideoC
     crate::notes::closed_chapter_numbers(session_dir)
         .into_iter()
         .map(|n| {
-            let ch_notes = notes.and_then(|d| d.chapters.get(n.saturating_sub(1) as usize));
+            // A chapter the deck has no words for is a gap in it, not a title.
+            let ch_notes = notes
+                .and_then(|d| d.chapters.get(n.saturating_sub(1) as usize))
+                .filter(|c| !c.title.trim().is_empty() || !c.points.is_empty());
             let transcript_path = session_dir.join(format!("chapter-{n:02}.transcript.json"));
             VideoContext {
                 id: format!("chapter-{n:02}"),

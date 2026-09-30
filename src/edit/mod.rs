@@ -388,10 +388,9 @@ fn existing_cut_numbers(edit_root: &Path) -> Vec<u32> {
 
 pub(crate) fn chapter_titles(session: &Session, numbers: &[u32]) -> Vec<(u32, String)> {
     let titles = crate::titles::load(&session.titles_dir()).ok();
-    let notes = session
-        .notes_dir()
-        .ok()
-        .and_then(|dir| crate::notes::load_notes(&dir).ok());
+    // This version's notes: each chapter's plan binding, else the copy the
+    // version was recorded with, else the project's — see `plan::resolved_deck`.
+    let notes = crate::plan::resolved_deck(session);
     numbers
         .iter()
         .map(|&n| {

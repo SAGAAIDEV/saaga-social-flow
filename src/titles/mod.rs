@@ -45,10 +45,9 @@ fn run(
     tx: &Sender<TitlesEvent>,
 ) -> Result<(PathBuf, TitlesManifest)> {
     let _ = tx.send(TitlesEvent::Status("Gathering chapter transcripts…".into()));
-    let notes = session
-        .notes_dir()
-        .ok()
-        .and_then(|dir| crate::notes::load_notes(&dir).ok());
+    // This version's notes: each chapter's plan binding, else the copy the
+    // version was recorded with, else the project's — see `plan::resolved_deck`.
+    let notes = crate::plan::resolved_deck(session);
     let closed = crate::notes::closed_chapter_numbers(&session.dir);
     if closed.is_empty() {
         bail!("no closed chapters to title");

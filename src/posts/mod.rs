@@ -69,10 +69,9 @@ fn run_posts_generation(
         "Gathering project transcripts & render outputs…".into(),
     ));
 
-    let notes = session
-        .notes_dir()
-        .ok()
-        .and_then(|dir| crate::notes::load_notes(&dir).ok());
+    // This version's notes: each chapter's plan binding, else the copy the
+    // version was recorded with, else the project's — see `plan::resolved_deck`.
+    let notes = crate::plan::resolved_deck(session);
 
     let mut contexts = collect_video_contexts(&session.dir, notes.as_ref());
     // The approved plan's CTA chapter is never rendered as a short, so it is
