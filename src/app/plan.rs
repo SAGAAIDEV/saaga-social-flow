@@ -483,10 +483,7 @@ impl App {
         }
         let dir = self.plan_dir();
         if value {
-            let written = self
-                .session
-                .notes_dir()
-                .and_then(|notes| crate::plan::approve(&dir, n, &notes));
+            let written = crate::plan::approve_for(&self.session, n);
             match written {
                 Ok(_) => {
                     self.recording_plan_changed();

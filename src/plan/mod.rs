@@ -291,6 +291,139 @@ pub fn rehearsal_wrote_deck(dir: &Path) -> Result<()> {
     }
 }
 
+/// [`approve`], for a project with recordings already in it.
+///
+/// Approving overwrites the speaking notes — that is the point: the
+/// teleprompter, the chapter cards and the deck move to the new plan. But the
+/// deck is the project's, read by chapter number, and a take already recorded
+/// against the old one would have its blog sections and posts relabelled from
+/// the new plan's chapters. So before the overwrite, every recording version
+/// with chapters the old deck speaks for keeps a copy of it — see
+/// [`freeze_decks`] — and [`resolved_deck`] reads that copy for that version.
+pub fn approve_for(session: &Session, n: u32) -> Result<PathBuf> {
+    let frozen = freeze_decks(session)?;
+    if frozen > 0 {
+        eprintln!(
+            "stream-recorder: kept the speaking notes {frozen} recording version(s) were made with"
+        );
+    }
+    approve(&dir(session), n, &session.notes_dir()?)
+}
+
+/// The version's own copy of the speaking notes it was recorded with, beside
+/// its takes. Absent for a version recorded under the current deck.
+pub const VERSION_DECK: &str = "notes.json";
+
+/// Every recording folder in the project: `drafts/vN` for each version, or
+/// `drafts` itself for a project that never had versions.
+fn recording_dirs(session: &Session) -> Vec<PathBuf> {
+    let drafts = session.root.join("drafts");
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&drafts)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_prefix('v'))
+                .is_some_and(|n| n.parse::<u32>().is_ok())
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    if dirs.is_empty() && !crate::notes::closed_chapter_numbers(&drafts).is_empty() {
+        dirs.push(drafts);
+    }
+    dirs.sort();
+    dirs
+}
+
+/// Copy the project's speaking notes into every recording version that has a
+/// chapter recorded without a plan binding and no copy of its own yet — the
+/// versions whose chapters the deck, by position, is speaking for. A version
+/// whose every chapter is bound needs no copy: [`resolved_deck`] reads its
+/// chapters from their bindings. Returns how many copies were made.
+pub fn freeze_decks(session: &Session) -> Result<usize> {
+    let project_deck = session.notes_dir()?.join(crate::notes::NOTES_JSON);
+    if !project_deck.is_file() {
+        return Ok(0);
+    }
+    let mut frozen = 0;
+    for dir in recording_dirs(session) {
+        let copy = dir.join(VERSION_DECK);
+        if copy.exists() {
+            continue;
+        }
+        let unbound = crate::notes::closed_chapter_numbers(&dir)
+            .into_iter()
+            .any(|n| binding::load(&dir, n).is_none());
+        if unbound {
+            std::fs::copy(&project_deck, &copy)
+                .with_context(|| format!("keeping the speaking notes in {}", copy.display()))?;
+            frozen += 1;
+        }
+    }
+    Ok(frozen)
+}
+
+/// The speaking notes for `session`'s recording version, one entry per
+/// recorded chapter by position — what the blog, the posts, the chapter cards
+/// and the titles read.
+///
+/// Each chapter from the plan chapter it was recorded for when it has a
+/// binding; otherwise from the version's own copy of the deck (see
+/// [`freeze_decks`]), else the project's deck. `None` when there is neither a
+/// deck nor a binding.
+pub fn resolved_deck(session: &Session) -> Option<crate::notes::NotesData> {
+    let base = crate::notes::load_notes(&session.dir).ok().or_else(|| {
+        session
+            .notes_dir()
+            .ok()
+            .and_then(|dir| crate::notes::load_notes(&dir).ok())
+    });
+    let closed = crate::notes::closed_chapter_numbers(&session.dir);
+    let bound: Vec<(u32, schema::PlanChapter)> = closed
+        .iter()
+        .filter_map(|&n| Some((n, bound_chapter(session, n)?)))
+        .collect();
+    if bound.is_empty() {
+        return base;
+    }
+    let base_len = base.as_ref().map_or(0, |deck| deck.chapters.len());
+    let last = closed.iter().copied().max().unwrap_or(0) as usize;
+    let chapters = (1..=last.max(base_len))
+        .map(|n| match bound.iter().find(|(m, _)| *m as usize == n) {
+            Some((_, chapter)) => crate::notes::Chapter {
+                title: chapter.title.clone(),
+                points: chapter.points.clone(),
+                verbatim: chapter.verbatim.clone(),
+                cues: chapter.cues.clone(),
+            },
+            None => base
+                .as_ref()
+                .and_then(|deck| deck.chapters.get(n - 1).cloned())
+                .unwrap_or_else(|| crate::notes::Chapter {
+                    title: String::new(),
+                    points: Vec::new(),
+                    verbatim: None,
+                    cues: Vec::new(),
+                }),
+        })
+        .collect();
+    let title = base
+        .as_ref()
+        .map(|deck| deck.title.clone())
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| plan_for_recording(session).map(|plan| plan.body.working_title))
+        .unwrap_or_default();
+    Some(crate::notes::NotesData {
+        title,
+        version: session.version,
+        chapters,
+    })
+}
+
 /// Lift the lock. The deck stays as it was: it was written from this plan,
 /// and nothing has replaced it yet.
 pub fn unapprove(dir: &Path, n: u32) -> Result<()> {
@@ -590,7 +723,7 @@ pub fn run_headless(request: Headless) -> Result<()> {
     let session = Session::open_root(project.to_path_buf())?;
     let dir = dir(&session);
     if let Some(n) = approve_n {
-        let html = approve(&dir, n, &session.notes_dir()?)?;
+        let html = approve_for(&session, n)?;
         println!("Plan {n} approved; the deck is {}", html.display());
         return Ok(());
     }
@@ -1073,5 +1206,106 @@ mod tests {
         approve(&dir(&session), 2, &session.root.join("notes")).unwrap();
         assert_eq!(plan_for_recording(&session).unwrap().number, 1);
         assert_eq!(bound_chapter(&session, 1).unwrap().title, "Open");
+    }
+
+    fn deck(title: &str, chapters: &[&str]) -> crate::notes::NotesData {
+        crate::notes::NotesData {
+            title: title.into(),
+            version: None,
+            chapters: chapters
+                .iter()
+                .map(|t| crate::notes::Chapter {
+                    title: (*t).into(),
+                    points: vec![format!("{t} point")],
+                    verbatim: None,
+                    cues: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    /// A take recorded before plans keeps the notes it was made with: the new
+    /// plan overwrites the speaking notes, and that take's blog and posts still
+    /// read its own chapters, not the new plan's by position.
+    #[test]
+    fn approving_over_an_old_take_keeps_its_notes_and_overwrites_the_speaking_notes() {
+        let session = project("freeze-old");
+        let notes = session.notes_dir().unwrap();
+        crate::notes::write_deck(
+            &notes,
+            &deck("Rehearsal", &["One", "Two", "Three"]),
+            "Chapter",
+        )
+        .unwrap();
+        for n in 1..=3 {
+            record(&session, n);
+        }
+        save_new(&dir(&session), plan("New")).unwrap();
+        approve_for(&session, 1).unwrap();
+
+        // The speaking notes are the new plan's.
+        let speaking = crate::notes::load_notes(&notes).unwrap();
+        assert_eq!(speaking.title, "New");
+        assert_eq!(speaking.chapters[0].title, "Open");
+        // The old take reads the notes it was recorded with.
+        let kept = resolved_deck(&session).unwrap();
+        assert_eq!(kept.title, "Rehearsal");
+        let titles: Vec<_> = kept.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["One", "Two", "Three"]);
+
+        // A second approval does not replace the copy with a later deck.
+        save_new(&dir(&session), plan("Newer")).unwrap();
+        approve_for(&session, 2).unwrap();
+        assert_eq!(resolved_deck(&session).unwrap().title, "Rehearsal");
+    }
+
+    /// A take recorded with the teleprompter needs no copy: its chapters read
+    /// from their plan bindings, so a new plan does not relabel them.
+    #[test]
+    fn a_bound_take_reads_its_own_plan_chapters_after_a_new_plan() {
+        let session = project("bound");
+        let first = save_new(&dir(&session), plan("First")).unwrap();
+        approve_for(&session, first.number).unwrap();
+        for n in 1..=3 {
+            record(&session, n);
+            binding::bind(&session.dir, n, Some(&first)).unwrap();
+        }
+        let mut second = plan("Second");
+        second.body.chapters[1].title = "Reorganized middle".into();
+        let second = save_new(&dir(&session), second).unwrap();
+        assert_eq!(freeze_decks(&session).unwrap(), 0, "every chapter is bound");
+        approve_for(&session, second.number).unwrap();
+        let deck = resolved_deck(&session).unwrap();
+        assert_eq!(
+            deck.chapters[1].title, "Middle",
+            "the plan it was recorded against"
+        );
+        assert!(!session.dir.join(VERSION_DECK).exists());
+    }
+
+    /// A version with some chapters bound and some not: the bound ones from
+    /// their plan, the rest from the deck the version kept.
+    #[test]
+    fn a_mixed_take_takes_bound_chapters_from_the_plan_and_the_rest_from_its_copy() {
+        let session = project("mixed");
+        crate::notes::write_deck(
+            &session.notes_dir().unwrap(),
+            &deck("Rehearsal", &["One", "Two", "Three"]),
+            "Chapter",
+        )
+        .unwrap();
+        for n in 1..=3 {
+            record(&session, n);
+        }
+        let plan = save_new(&dir(&session), plan("Plan")).unwrap();
+        binding::bind(&session.dir, 2, Some(&plan)).unwrap();
+        approve_for(&session, plan.number).unwrap();
+        let titles: Vec<String> = resolved_deck(&session)
+            .unwrap()
+            .chapters
+            .into_iter()
+            .map(|c| c.title)
+            .collect();
+        assert_eq!(titles, ["One", "Middle", "Three"]);
     }
 }

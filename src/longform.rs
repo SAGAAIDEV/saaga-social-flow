@@ -71,10 +71,9 @@ pub struct Longform {
 }
 
 pub fn build(session: &Session) -> Longform {
-    let notes = session
-        .notes_dir()
-        .ok()
-        .and_then(|dir| crate::notes::load_notes(&dir).ok());
+    // This version's notes: each chapter's plan binding, else the copy the
+    // version was recorded with, else the project's — see `plan::resolved_deck`.
+    let notes = crate::plan::resolved_deck(session);
     let titles = crate::titles::load(&session.titles_dir()).ok();
 
     let mut chapters: Vec<ChapterContext> = crate::notes::collect_completed(&session.dir)
