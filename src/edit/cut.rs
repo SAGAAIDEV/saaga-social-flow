@@ -25,6 +25,13 @@ use super::compute::Edit;
 const DELIVERABLE_CRF: &str = "12";
 const DELIVERABLE_PRESET: &str = "medium";
 
+/// How long each segment's audio ramps in and out. A hard cut leaves the
+/// waveform wherever it was at the join, and the jump to the next segment's first
+/// sample is a click; a ramp brings both sides to silence first. 8 ms is too short
+/// to hear as a fade, and it happens inside the segment, so the audio stays exactly
+/// as long as the video.
+const EDGE_FADE_SECONDS: f64 = 0.008;
+
 pub fn cut_file(source: &Path, dest: &Path, edits: &[Edit]) -> Result<()> {
     if edits.is_empty() {
         bail!("no keep-segments to cut from {}", source.display());
@@ -111,7 +118,14 @@ fn cut_segment(source: &Path, dest: &Path, edit: &Edit, fps: f64, audio: bool) -
         .args(["-vf", &vf, "-frames:v", &n_frames.to_string()])
         .args(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "0"]);
     if audio {
-        let af = format!("atrim=end={exact:.6},asetpts=PTS-STARTPTS");
+        // A one-frame segment is shorter than two fades; halve them so they meet
+        // rather than overlap.
+        let fade = EDGE_FADE_SECONDS.min(exact / 2.0);
+        let fade_out_at = exact - fade;
+        let af = format!(
+            "atrim=end={exact:.6},asetpts=PTS-STARTPTS,\
+             afade=t=in:d={fade:.6},afade=t=out:st={fade_out_at:.6}:d={fade:.6}"
+        );
         cmd.args(["-af", &af, "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"]);
     } else {
         cmd.arg("-an");
@@ -527,6 +541,72 @@ mod tests {
         cut_file(&src, &dest, &[edit(0, 500), edit(1000, 1500)]).expect("cut");
         assert!(dest.exists());
         assert!(dest.metadata().unwrap().len() > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A segment starting and ending mid-cycle on a loud tone must still begin and
+    /// end at silence, or the join between two segments clicks.
+    #[test]
+    fn segment_audio_ramps_to_silence_at_both_edges() {
+        if !ffmpeg_ok() {
+            return;
+        }
+        let dir =
+            std::env::temp_dir().join(format!("stream-recorder-cut-fade-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.mp4");
+        let seg = dir.join("seg.mp4");
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=3:size=320x240:rate=30",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "pcm_s16le",
+                "-shortest",
+            ])
+            .arg(&src)
+            .status()
+            .expect("ffmpeg generate");
+        assert!(status.success());
+        // 440 Hz at 1.012 s and 1.512 s is about a quarter-cycle past zero: a
+        // hard cut there lands near the tone's peak.
+        cut_segment(&src, &seg, &edit(1012, 1512), 30.0, true).expect("cut segment");
+        let out = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&seg)
+            .args(["-f", "s16le", "-ac", "1", "-ar", "48000", "-"])
+            .output()
+            .expect("ffmpeg decode");
+        assert!(out.status.success());
+        let samples: Vec<i16> = out
+            .stdout
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect();
+        assert!(samples.len() > 1000);
+        let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap();
+        assert!(
+            peak > 2000,
+            "the tone itself survived the cut (peak {peak})"
+        );
+        let first = samples[0].unsigned_abs();
+        let last = samples[samples.len() - 1].unsigned_abs();
+        assert!(first < 100, "first sample {first} of peak {peak}");
+        assert!(last < 100, "last sample {last} of peak {peak}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
