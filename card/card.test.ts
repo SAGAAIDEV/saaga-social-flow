@@ -38,9 +38,16 @@ describe("thumbnail formats", () => {
     expect(page({ title: "Square", description: "", width: 1000, height: 1000 })).toContain('transform:scale(0.78125)');
   });
   test("user text is escaped", () => {
-    const html = page(parsePayload({ title: '<script>alert("x")</script>', description: "A & B" }));
+    const html = page(parsePayload({ title: '<script>alert("x")</script> A & B', kicker: "C & D" }));
     expect(html).not.toContain('<script>');
     expect(html).toContain('A &amp; B');
+    expect(html).toContain('C &amp; D');
+  });
+  /** Only the headline: a description, if one arrives, is not drawn. */
+  test("nothing is drawn under the title", () => {
+    const html = page(parsePayload({ title: "The headline", description: "Small print nobody can read" }));
+    expect(html).toContain("The headline");
+    expect(html).not.toContain("Small print nobody can read");
   });
   test("malformed inputs fail at the boundary", () => {
     for (const bad of [null, [], {}, { title: "" }, { title: "x", width: "720" }, { title: "x", height: Infinity }, { title: "x", description: {} }, { title: "x", format: "square" }, { title: "x", focus: NaN }, { title: "x", focusY: "0.3" }, { title: "x", photoSize: [1920] }, { title: "x", photoSize: [0, 1080] }, { title: "x", og: "yes" }]) {

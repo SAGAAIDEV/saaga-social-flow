@@ -113,10 +113,6 @@ mod tests {
                 ..card()
             },
             Card {
-                description: "Something else.".into(),
-                ..card()
-            },
-            Card {
                 kicker: String::new(),
                 ..card()
             },
@@ -132,6 +128,12 @@ mod tests {
         ] {
             assert_ne!(id(&edited, "abc"), base, "{edited:?} drew the old card");
         }
+        // The description is not drawn, so editing it is the same picture.
+        let described = Card {
+            description: "Something else.".into(),
+            ..card()
+        };
+        assert_eq!(id(&described, "abc"), base);
     }
 
     /// Moving the focus slider is the one edit whose whole point is that the

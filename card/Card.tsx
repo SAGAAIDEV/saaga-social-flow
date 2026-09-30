@@ -21,7 +21,7 @@ export interface CardProps {
   og?: boolean;
 }
 export function Card(props: CardProps): string {
-  const { title, description, photo, kicker = "" } = props;
+  const { title, photo, kicker = "" } = props;
   const t = THEMES[props.theme ?? "light"] ?? THEMES.light;
   const l = layout(props.format ?? "horizontal", Boolean(photo));
   const clamp = (v: number | undefined): number => (Number.isFinite(v) ? Math.max(0, Math.min(1, v!)) : 0.5);
@@ -33,7 +33,7 @@ export function Card(props: CardProps): string {
     <div style={box(l.panel) + `background:${l.vertical ? t.portraitPanel : t.panel};`} />
     {!l.vertical && Arcs(l.panel, t)}
     {photo && <div style={box(l.seam) + `background:${t.accent};`} />}
-    {TextPanel(title, description, kicker, t, l.text, l.vertical ? 300 : 261)}
+    {TextPanel(title, kicker, t, l.text, l.vertical ? 300 : 261)}
   </div>;
 }
 export { page } from "./page";

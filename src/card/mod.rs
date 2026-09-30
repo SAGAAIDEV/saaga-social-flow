@@ -123,8 +123,8 @@ impl Default for Card {
 pub const THEMES: [&str; 2] = ["light", "dark"];
 
 impl Card {
-    /// Nothing to draw. The title alone is enough — a card is a headline with a
-    /// picture, and the description is the optional half.
+    /// Nothing to draw. The title is all a card needs — it is a headline with a
+    /// picture; the description is kept for the record but not drawn.
     pub fn is_empty(&self) -> bool {
         self.title.trim().is_empty()
     }
@@ -144,6 +144,8 @@ impl Card {
     /// `object-position`, which moves the crop for every value but 0.5.
     /// v6: the chapter card's styling — Booton, the arcs, the rule above the
     /// title — so every set drawn in the old type is the wrong picture.
+    /// v7: no description under the title — too small to read at thumbnail
+    /// size — so it is also no longer part of what the picture is.
     ///
     /// `format` is deliberately *not*. The set is always all three destinations
     /// and each one composes on its own artboard — see `assets::Kind` — so the
@@ -152,9 +154,8 @@ impl Card {
     /// only real effect is on the prompt sent to an image model.
     pub fn fingerprint(&self) -> String {
         format!(
-            "card-v6\n{}\n{}\n{}\n{}\n{:.4}\n{:.4}",
+            "card-v7\n{}\n{}\n{}\n{:.4}\n{:.4}",
             self.title.trim(),
-            self.description.trim(),
             self.kicker.trim(),
             self.theme.trim(),
             self.focus,

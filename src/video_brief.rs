@@ -226,6 +226,9 @@ pub fn generate(source: &Source, model: &str, provider: Option<&str>) -> Result<
 /// description. Asked for in the prompt, and *not* enforced — see
 /// [`validate_generated`].
 pub const ARTWORK_TITLE: usize = 60;
+/// The description budget the copy prompt states. No longer drawn on the card,
+/// so nothing checks copy against it; the tests hold the prompt to it.
+#[cfg(test)]
 pub const ARTWORK_DESCRIPTION: usize = 140;
 
 fn validate_generated(copy: Generated) -> Result<Metadata> {
@@ -250,19 +253,15 @@ fn validate_generated(copy: Generated) -> Result<Metadata> {
 /// How the copy sits against the artwork limits, or `None` when it fits.
 ///
 /// A note for the pane, never an error. Nothing downstream refuses copy for
-/// being long; the description simply gets tight on the card.
+/// being long. Only the title is on the card — the description under it was
+/// dropped as unreadable at thumbnail size — so only the title has an artwork
+/// limit to be over.
 pub fn artwork_note(metadata: &Metadata) -> Option<String> {
     let title = metadata.title.chars().count();
-    let description = metadata.description.chars().count();
     let mut over: Vec<String> = Vec::new();
     if title > ARTWORK_TITLE {
         over.push(format!(
             "title is {title} characters (artwork fits {ARTWORK_TITLE})"
-        ));
-    }
-    if description > ARTWORK_DESCRIPTION {
-        over.push(format!(
-            "description is {description} (artwork fits {ARTWORK_DESCRIPTION})"
         ));
     }
     if metadata.description.is_empty() {
