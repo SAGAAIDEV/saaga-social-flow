@@ -3321,45 +3321,66 @@ impl App {
         self.sync_controls();
     }
 
-    /// Upload, once the person pressing it has seen what goes up: every video's
-    /// title and description exactly as YouTube will get them — see
-    /// [`crate::ui::ControlTarget::confirm_upload`]. Copy typed on the YouTube
-    /// tab and not saved is what is shown, and confirming saves it first, so
-    /// nothing goes up that was not on screen.
+    /// Upload, once the person pressing it has seen — and can still change —
+    /// the title and description: the dialog holds them in boxes (see
+    /// [`crate::ui::ControlTarget::confirm_upload`]), starting from the YouTube
+    /// tab's copy, saved or not. What is in the boxes on Upload is saved and
+    /// sent, so nothing goes up that was not on screen. The Short shares them,
+    /// with `#Shorts` added.
     fn run_youtube_upload(&mut self) {
         if self.publish_busy {
             self.set_publish_status("An upload is already running…");
             return;
         }
-        let unsaved = self.youtube_draft.clone();
-        let copy = unsaved
-            .clone()
-            .unwrap_or_else(|| crate::publish::metadata::load(&self.session));
-        let previews = match crate::publish::upload_preview(&self.session, &copy) {
-            Ok(previews) => previews,
+        let plan = match crate::publish::upload_plan(&self.session) {
+            Ok(plan) => plan,
             Err(err) => {
                 self.set_publish_status(&format!("Not uploading: {err:#}"));
                 return;
             }
         };
-        let confirmed = self.live.as_ref().is_some_and(|live| {
-            live.control_target
-                .confirm_upload(&previews, unsaved.is_some())
-        });
-        if !confirmed {
-            self.set_publish_status("Upload cancelled — nothing was sent.");
-            return;
-        }
-        if let Some(draft) = unsaved {
-            if let Err(err) = crate::publish::metadata::save(&self.session, &draft) {
+        let saved = crate::publish::metadata::load(&self.session);
+        let mut unsaved = self.youtube_draft.is_some();
+        let mut copy = self.youtube_draft.clone().unwrap_or_else(|| saved.clone());
+        let mut error: Option<String> = None;
+        // Asked again, with the text kept, until the copy is one YouTube will
+        // take or the author cancels — a refusal after the press would lose
+        // what they just typed.
+        let edited = loop {
+            let answer = self.live.as_ref().and_then(|live| {
+                live.control_target
+                    .confirm_upload(&plan, &copy, unsaved, error.as_deref())
+            });
+            let Some((upload, edited)) = answer else {
+                return;
+            };
+            if !upload {
+                // What was typed in the dialog is kept for the next press, as
+                // unsaved edits on the YouTube tab.
+                self.youtube_draft = (edited != saved).then_some(edited);
+                self.update_publish_summary();
+                self.set_publish_status("Upload cancelled — nothing was sent.");
+                return;
+            }
+            match edited.validate() {
+                Ok(()) => break edited,
+                Err(err) => {
+                    error = Some(format!("{err:#}"));
+                    unsaved = edited != saved;
+                    copy = edited;
+                }
+            }
+        };
+        if edited != saved {
+            if let Err(err) = crate::publish::metadata::save(&self.session, &edited) {
                 self.set_publish_status(&format!(
                     "Not uploading — the edits did not save: {err:#}"
                 ));
                 return;
             }
-            self.youtube_draft = None;
-            self.update_publish_summary();
         }
+        self.youtube_draft = None;
+        self.update_publish_summary();
         self.publish_busy = true;
         self.set_publish_status("Uploading the longform to YouTube…");
         crate::publish::spawn_upload(self.session.clone(), self.publish_tx.clone());

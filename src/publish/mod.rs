@@ -724,35 +724,28 @@ fn meta_from(
     })
 }
 
-/// One video as the next Upload press would send it — what the confirmation
-/// shows before anything goes up.
+/// The videos the next Upload press would send, in order, and who will see
+/// them — what the upload dialog lists above the title and description it
+/// lets the author edit. The same checks as [`run`], so a press that would
+/// fail says why before the dialog opens.
 #[derive(Debug, Clone, PartialEq)]
-pub struct UploadPreview {
-    /// "The full video" or "The Short".
-    pub video: &'static str,
-    /// The title and description exactly as sent, after YouTube's limits.
-    pub title: String,
-    pub description: String,
-    /// Whether the copy had to be cut to fit, which the dialog warns about.
-    pub title_cut: bool,
-    pub description_cut: bool,
+pub struct UploadPlan {
+    /// "The full video", "The Short".
+    pub videos: Vec<&'static str>,
+    /// Whether the Short is among them — it shares the full video's title and
+    /// description, with `#Shorts` added, and the dialog says so.
+    pub has_short: bool,
     pub privacy: youtube::Privacy,
 }
 
-/// Every video the next Upload press would send, with `metadata` as its copy,
-/// in the order it would send them — the same checks as [`run`], so a press
-/// that would fail says why here instead of after a confirmation.
-pub fn upload_preview(
-    session: &Session,
-    metadata: &metadata::Metadata,
-) -> Result<Vec<UploadPreview>> {
+pub fn upload_plan(session: &Session) -> Result<UploadPlan> {
     let vertical = session.render_dir().join("vertical/longform.mp4");
     let mut videos = Vec::new();
     if session.is_short() {
         if !vertical.is_file() {
             bail!("the short is not rendered yet — run Render first");
         }
-        videos.push(("The Short", Orientation::Vertical));
+        videos.push("The Short");
     } else {
         let targets = crate::config::render_targets(session);
         if !targets.horizontal {
@@ -768,33 +761,16 @@ pub fn upload_preview(
         {
             bail!("no longform rendered yet — run Render first");
         }
-        videos.push(("The full video", Orientation::Horizontal));
+        videos.push("The full video");
         if vertical.is_file() && targets.vertical && short_block(&vertical).is_none() {
-            videos.push(("The Short", Orientation::Vertical));
+            videos.push("The Short");
         }
     }
-    videos
-        .into_iter()
-        .map(|(video, orientation)| {
-            let meta = meta_from(metadata, orientation)?;
-            let body = meta.body();
-            let sent = |key: &str| {
-                body["snippet"][key]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string()
-            };
-            let (title, description) = (sent("title"), sent("description"));
-            Ok(UploadPreview {
-                video,
-                title_cut: title != meta.title,
-                description_cut: description != meta.description,
-                title,
-                description,
-                privacy: meta.privacy,
-            })
-        })
-        .collect()
+    Ok(UploadPlan {
+        has_short: videos.contains(&"The Short"),
+        videos,
+        privacy: crate::config::load().youtube_privacy,
+    })
 }
 
 /// First letter up, for a reason written to read mid-sentence and shown alone.
@@ -1156,13 +1132,7 @@ mod tests {
     #[test]
     fn the_preview_refuses_what_the_upload_would_refuse() {
         let root = temp("preview-none");
-        let copy = metadata::Metadata {
-            title: "A video".into(),
-            description: "What it shows.".into(),
-        };
-        let err = upload_preview(&session(&root), &copy)
-            .unwrap_err()
-            .to_string();
+        let err = upload_plan(&session(&root)).unwrap_err().to_string();
         assert!(
             err.contains("run Render first") || err.contains("switched off"),
             "{err}"
