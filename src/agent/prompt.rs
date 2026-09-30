@@ -38,6 +38,9 @@ pub const PLAN: &str = "plan.video";
 /// The summary of the final video — see [`crate::summary`]. Its own id: it
 /// describes what was said, where the blog and posts are written to be read.
 pub const SUMMARY: &str = "video.summary";
+/// The critique of a recorded take — see [`crate::critique`]. Its own id: it
+/// coaches the author, where every other prompt writes for a viewer.
+pub const CRITIQUE: &str = "recording.critique";
 pub const POSTS: &str = "posts.social";
 pub const SUBSTACK: &str = "substack.notes";
 pub const BLOG: &str = "blog.article";
@@ -112,6 +115,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
         OUTLINE => Some(super::outline::SYSTEM),
         PLAN => Some(super::plan::SYSTEM),
         SUMMARY => Some(super::summary::SYSTEM),
+        CRITIQUE => Some(super::critique::SYSTEM),
         SHORTS => Some(super::shorts::SYSTEM),
         POSTS => Some(crate::posts::generate::SYSTEM_PROMPT),
         SUBSTACK => Some(crate::substack::generate::SYSTEM_PROMPT),

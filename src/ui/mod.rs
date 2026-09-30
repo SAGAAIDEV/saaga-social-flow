@@ -202,6 +202,12 @@ pub enum UiEvent {
     YoutubeDraft(std::collections::BTreeMap<String, String>),
     /// Summarize again on Video details, for the project the page was drawn for.
     SummarizeVideo(String),
+    /// Critique the take and rewrite the speaking notes, with the author's
+    /// direction for the next take.
+    CritiqueTake {
+        root: String,
+        direction: String,
+    },
     VersionSelected(u32),
     /// The Record group's chapter menu: which chapter the next Start Recording
     /// press should open — see [`NextTake`].

@@ -46,6 +46,40 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr 110px; gap: 0 10px; }
   .take .row button { padding: 2px 10px; font-size: 12px; }
   [hidden] { display: none !important; }
+  .views { display: flex; gap: 4px; margin-top: 10px; }
+  .views button { padding: 3px 14px; font-size: 12px; border-radius: 999px; }
+  .views button.on { color: #fff; border-color: var(--accent); }
+  /* The pages: the teleprompter's look, one page at a time. */
+  .pages { max-width: 900px; margin-top: 10px; }
+  .page { display: none; min-height: 320px; padding: 20px 22px; background: #0b0d10;
+    border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+  .page.active { display: block; }
+  .page header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 14px; }
+  .page .kind { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; color: var(--accent); }
+  .page.hook .kind { color: #f5b35b; } .page.cta .kind { color: #6fd39a; }
+  .page .meta { color: var(--dim); font-size: 12px; }
+  .page h1 { font-size: 26px; line-height: 1.15; margin: 0 0 8px; }
+  .page .goal { color: var(--dim); font-size: 14px; margin: 0 0 12px; }
+  .page .goal b { color: var(--text); font-weight: 600; }
+  .page .say { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid var(--accent); background: #12161b;
+    font-size: 17px; font-weight: 600; line-height: 1.35; }
+  .page.hook .say { border-color: #f5b35b; } .page.cta .say { border-color: #6fd39a; }
+  .page .say .label { display: block; color: var(--dim); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 4px; }
+  .page .points { list-style: none; padding: 0; margin: 0; }
+  .page .points li { font-size: 17px; line-height: 1.3; font-weight: 500; padding-left: 1.2em; text-indent: -1.2em; margin-bottom: 8px; }
+  .page .points li::before { content: "—"; color: var(--accent); padding-right: .4em; }
+  .page ol.arc { counter-reset: beat; }
+  .page ol.arc li::before { counter-increment: beat; content: counter(beat) "."; }
+  .page .show { margin-top: 12px; color: var(--dim); font-size: 13px; }
+  .page .show b { color: var(--text); }
+  .page .cues { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .page .cues span { color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .pagebar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .pagebar .dots { display: flex; gap: 6px; flex: 1; justify-content: center; flex-wrap: wrap; }
+  .pagebar .dot { width: 9px; height: 9px; padding: 0; border-radius: 50%; min-width: 0; }
+  .pagebar .dot.on { background: var(--accent); border-color: var(--accent); }
+  .pagebar .count { color: var(--dim); font-size: 12px; min-width: 48px; text-align: right; }
 </style>
 
 {% macro field(label, key, value, lock, multiline=false, rows=1, hint="") %}
@@ -151,6 +185,60 @@
     {% if plan.sources %}Built from {{ plan.sources | join(", ") }}.{% endif %}
     {% if plan.est_total %}About {{ plan.est_total }} long.{% endif %}
   </p>
+  <div class="views" role="tablist">
+    <button type="button" data-view="pages" class="on">Pages</button>
+    <button type="button" data-view="edit">Edit</button>
+  </div>
+</div>
+
+{#
+  The plan as pages, the way the speaking notes read on the Record tab: an
+  overview, one page per chapter, and what to have ready. Click the page or
+  use the arrows to turn it; the dots jump. Edit is the same plan as boxes.
+#}
+{% set pages = plan.chapters | length + 2 %}
+<div id="plan-pages" class="pages" data-view-panel="pages">
+  <section class="page overview" data-page="0">
+    <header><span class="kind">Overview</span><span class="meta">{% if plan.est_total %}~{{ plan.est_total }}{% endif %}</span></header>
+    <h1>{{ plan.working_title or "Untitled plan" }}</h1>
+    {% if plan.audience %}<p class="goal"><b>For:</b> {{ plan.audience }}</p>{% endif %}
+    {% if plan.promise %}<p class="goal"><b>Promise:</b> {{ plan.promise }}</p>{% endif %}
+    {% if plan.hook_line %}<blockquote class="say"><span class="label">Open with</span>{{ plan.hook_line }}</blockquote>{% endif %}
+    {% if plan.outline %}<ol class="points arc">{% for beat in plan.outline %}<li>{{ beat }}</li>{% endfor %}</ol>{% endif %}
+  </section>
+  {% for chapter in plan.chapters %}
+  <section class="page {{ chapter.kind }}" data-page="{{ loop.index }}">
+    <header>
+      <span class="kind">Chapter {{ chapter.n }} of {{ plan.chapters | length }} · {{ chapter.kind_label }}</span>
+      <span class="meta">{% if chapter.layout %}{{ chapter.layout }}{% endif %}{% if chapter.layout and chapter.est %} · {% endif %}{% if chapter.est %}~{{ chapter.est }}{% endif %}</span>
+    </header>
+    <h1>{{ chapter.title }}</h1>
+    {% if chapter.goal %}<p class="goal">{{ chapter.goal }}</p>{% endif %}
+    {% if chapter.verbatim %}<blockquote class="say"><span class="label">Say exactly</span>{{ chapter.verbatim }}</blockquote>
+    {% elif chapter.kind == "hook" and plan.hook_line %}<blockquote class="say"><span class="label">Open with</span>{{ plan.hook_line }}</blockquote>
+    {% elif chapter.kind == "cta" and plan.cta_line %}<blockquote class="say"><span class="label">The ask</span>{{ plan.cta_line }}</blockquote>{% endif %}
+    {% if chapter.points %}<ul class="points">{% for point in chapter.points %}<li>{{ point }}</li>{% endfor %}</ul>{% endif %}
+    {% if chapter.show %}<p class="show">On screen: <b>{{ chapter.show }}</b></p>{% endif %}
+    {% if chapter.cues %}<div class="cues">{% for cue in chapter.cues %}<span>{{ cue }}</span>{% endfor %}</div>{% endif %}
+  </section>
+  {% endfor %}
+  <section class="page ready" data-page="{{ pages - 1 }}">
+    <header><span class="kind">Before you record</span><span class="meta">{{ plan.chapters | length }} chapters</span></header>
+    <h1>What to have ready</h1>
+    {% if plan.instructions %}<ul class="points">{% for line in plan.instructions %}<li>{{ line }}</li>{% endfor %}</ul>
+    {% else %}<p class="goal">No recording instructions in this plan.</p>{% endif %}
+    {% if plan.cta_placement %}<p class="goal"><b>The ask lands:</b> {{ plan.cta_placement }}</p>{% endif %}
+  </section>
+  <div class="pagebar">
+    <button type="button" data-turn="-1" aria-label="Previous page">‹ Prev</button>
+    <span class="dots">{% for i in range(pages) %}<button type="button" class="dot" data-to="{{ i }}" aria-label="Page {{ i + 1 }}"></button>{% endfor %}</span>
+    <span class="count" id="page-count">1 / {{ pages }}</span>
+    <button type="button" data-turn="1" aria-label="Next page">Next ›</button>
+  </div>
+</div>
+
+<div id="plan-edit" data-view-panel="edit" hidden>
+<div class="card">
   {{ field("Working title", "working_title", plan.working_title, lock) }}
   {{ field("Audience", "audience", plan.audience, lock) }}
   {{ field("Promise — what the viewer walks away with", "promise", plan.promise, lock, multiline=true) }}
@@ -210,6 +298,7 @@
 <h2>Recording instructions</h2>
 <div class="card">
   {{ field("Setup, what to have open, delivery — one per line", "instructions", plan.instructions | join("\n"), lock, multiline=true, rows=3) }}
+</div>
 </div>
 </div>
 {% endif %}
@@ -314,6 +403,59 @@
         window.name = KEY + ROOT + '|' + Math.round(window.scrollY);
       }, 100);
     });
+  })();
+</script>
+<script>
+  // Pages | Edit, and the pages themselves. The view and the page on screen
+  // are kept per project across redraws where the web view allows storage.
+  (function () {
+    const pages = Array.from(document.querySelectorAll('#plan-pages .page'));
+    const panels = document.querySelectorAll('[data-view-panel]');
+    if (!panels.length) return;
+    const KEY = 'plan-view:' + {{ root | tojson }} + ':' + {{ (plan.n if plan else 0) | tojson }};
+    let state = { view: 'pages', page: 0 };
+    try { state = Object.assign(state, JSON.parse(sessionStorage.getItem(KEY) || '{}')); } catch (e) {}
+    function keep() { try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+    function view(name) {
+      state.view = name;
+      panels.forEach(function (p) { p.hidden = p.dataset.viewPanel !== name; });
+      document.querySelectorAll('.views [data-view]').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.view === name);
+      });
+      keep();
+    }
+    function show(n) {
+      if (!pages.length) return;
+      state.page = Math.max(0, Math.min(pages.length - 1, n));
+      pages.forEach(function (p, k) { p.classList.toggle('active', k === state.page); });
+      document.querySelectorAll('#plan-pages .dot').forEach(function (d, k) {
+        d.classList.toggle('on', k === state.page);
+      });
+      const count = document.getElementById('page-count');
+      if (count) count.textContent = (state.page + 1) + ' / ' + pages.length;
+      keep();
+    }
+    document.addEventListener('click', function (event) {
+      const tab = event.target.closest('.views [data-view]');
+      if (tab) { view(tab.dataset.view); return; }
+      const turn = event.target.closest('[data-turn]');
+      if (turn) { show(state.page + Number(turn.dataset.turn)); return; }
+      const dot = event.target.closest('[data-to]');
+      if (dot) { show(Number(dot.dataset.to)); return; }
+      // A click on the page turns it: the right two thirds forward, the left back.
+      const page = event.target.closest('#plan-pages .page');
+      if (page) {
+        const box = page.getBoundingClientRect();
+        show(state.page + (event.clientX - box.left < box.width / 3 ? -1 : 1));
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (state.view !== 'pages' || event.target.closest('textarea, input, select')) return;
+      if (event.key === 'ArrowRight' || event.key === 'PageDown') { event.preventDefault(); show(state.page + 1); }
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); show(state.page - 1); }
+    });
+    view(state.view === 'edit' ? 'edit' : 'pages');
+    show(state.page);
   })();
 </script>
 {% endblock %}

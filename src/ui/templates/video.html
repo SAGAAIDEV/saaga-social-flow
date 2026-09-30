@@ -593,9 +593,67 @@
 </style>
 {% endif %}
 
+<!-- 6. Critique the take, and rewrite the notes for the next one -->
+{% if critique %}
+<section class="card" id="critique-card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Critique &amp; next take</h2>
+      <p class="card-desc">Critiques every chapter of this take, then rewrites the plan from what you said, the critique and your direction — and makes it the speaking notes for the next take. The plan it replaces stays on the Plan tab.</p>
+    </div>
+    {% if critique.busy %}<span class="badge outline">Writing…</span>
+    {% elif critique.critique and critique.critique.plan_written %}<span class="badge secondary">Plan {{ critique.critique.plan_written }}</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    <label class="critique-label" for="critique-direction">Your direction for the next take (optional)</label>
+    <textarea id="critique-direction" rows="2" placeholder="Lead with the demo; merge chapters 2 and 3; cut the history."
+      {% if critique.busy %}disabled{% endif %}>{{ critique.critique.direction if critique.critique else "" }}</textarea>
+    <div class="bar">
+      <button type="button" id="critique-run"{% if critique.busy or critique.blocked %} disabled{% endif %}>Critique and rewrite the notes</button>
+      {% if critique.text %}<button type="button" class="copy" data-send='{{ {"type": "copyText", "text": critique.text} | tojson }}'>Copy critique</button>{% endif %}
+    </div>
+    {% if critique.blocked %}<p class="card-desc">{{ critique.blocked }}</p>{% endif %}
+    {% if critique.critique %}
+      {% set c = critique.critique %}
+      <p class="summary-text">{{ c.overall }}</p>
+      {% for ch in c.chapters %}
+      <div class="critique-ch">
+        <b>Chapter {{ ch.n }}{% if ch.title %} — {{ ch.title }}{% endif %}</b>
+        {% if ch.worked %}<p><span class="keep">Keep</span> {{ ch.worked }}</p>{% endif %}
+        {% if ch.fix %}<p><span class="change">Change</span> {{ ch.fix }}</p>{% endif %}
+      </div>
+      {% endfor %}
+      {% if c.reorganize %}<h3 class="summary-h">Reorganize</h3><p class="summary-text">{{ c.reorganize }}</p>{% endif %}
+      {% if c.plan_written %}<p class="card-desc">Plan {{ c.plan_written }} was written from this and is now the speaking notes. Read it on the Plan tab, then New Version to record the next take.</p>{% endif %}
+    {% endif %}
+  </div>
+</section>
+<style>
+  .critique-label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  #critique-direction { width: 100%; box-sizing: border-box; padding: 8px; background: #0e1116; color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .critique-ch { border-top: 1px solid var(--line); padding: 8px 0; }
+  .critique-ch p { margin: 4px 0 0; line-height: 1.45; }
+  .critique-ch .keep, .critique-ch .change { display: inline-block; min-width: 56px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .critique-ch .keep { color: var(--ok, #6fd39a); }
+  .critique-ch .change { color: var(--warn, #f5b35b); }
+</style>
+<script>
+  (function () {
+    var run = document.getElementById('critique-run');
+    if (!run) return;
+    run.addEventListener('click', function () {
+      if (run.disabled) return;
+      run.disabled = true;
+      send({type: 'critiqueTake', root: {{ root | tojson }}, direction: document.getElementById('critique-direction').value});
+    });
+  })();
+</script>
+{% endif %}
+
 {% if youtube or short or hosted %}
 <!--
-  6. Published: one link per cut, so the Short's does not stand in for both —
+  7. Published: one link per cut, so the Short's does not stand in for both —
   and the S3 upload beside them, since the tab that used to list it is gone.
 -->
 <section class="card">

@@ -345,6 +345,7 @@ pub fn run_record_session(
         card_pending: None,
         video_copy_job: None,
         summary_job: None,
+        critique_job: None,
         analytics_busy: false,
         publish_tx,
         publish_rx,

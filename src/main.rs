@@ -38,6 +38,7 @@ mod capture;
 mod card;
 mod cli;
 mod config;
+mod critique;
 mod deps;
 mod distribute;
 mod edit;
