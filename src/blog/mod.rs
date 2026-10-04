@@ -164,13 +164,41 @@ pub fn chosen_author(cfg: &crate::config::Config, library: &library::Library) ->
 /// pointed at an `education-categories` collection that has since been retired —
 /// which meant every post this pipeline made named a dead relation and carried
 /// no live taxonomy at all.
-pub fn chosen_category(cfg: &crate::config::Config, library: &library::Library) -> Chosen {
-    Chosen::resolve(
-        &library.categories,
-        cfg.blog_category_id,
-        cfg.blog_category_name.clone(),
-        "BLOG_CATEGORY",
-    )
+///
+/// The project's category (see [`crate::category`]) wins over the standing
+/// pick in config, which is now only the default for a project that has none.
+/// The project names a slug, not an id — ids are per CMS — so it is matched in
+/// the cached list, and left to be looked up by name at publish when the list
+/// does not have it yet.
+pub fn chosen_category(
+    cfg: &crate::config::Config,
+    library: &library::Library,
+    project: Option<&crate::category::Choice>,
+) -> Chosen {
+    let Some(project) = project.filter(|_| env("BLOG_CATEGORY").is_none()) else {
+        return Chosen::resolve(
+            &library.categories,
+            cfg.blog_category_id,
+            cfg.blog_category_name.clone(),
+            "BLOG_CATEGORY",
+        );
+    };
+    match library::Library::by_name(&library.categories, &project.slug)
+        .or_else(|| library::Library::by_name(&library.categories, &project.name))
+    {
+        Some(entry) => Chosen {
+            id: Some(entry.id),
+            name: None,
+            label: entry.name.clone(),
+            remembered: Some(entry.name.clone()),
+        },
+        None => Chosen {
+            id: None,
+            name: Some(project.name.clone()),
+            label: project.name.clone(),
+            remembered: None,
+        },
+    }
 }
 
 fn env(key: &str) -> Option<String> {
@@ -265,16 +293,23 @@ pub fn select_author(id: &str) -> Result<String> {
     })
 }
 
-pub fn select_category(id: &str) -> Result<String> {
+/// Files the project under the picked category — the same choice as the
+/// Project tab's, so the playlist and the hashtags follow it. Clearing it falls
+/// back to the standing default in config, when there is one.
+pub fn select_category(root: &std::path::Path, id: &str) -> Result<String> {
     let library = library::load();
     let entry = id.parse::<i64>().ok().and_then(|id| library.category(id));
-    let mut cfg = crate::config::load();
-    cfg.blog_category_id = entry.map(|entry| entry.id);
-    cfg.blog_category_name = entry.map(|entry| entry.name.clone());
-    crate::config::save(&cfg).context("saving the blog category")?;
+    let choice = entry.map(|entry| crate::category::Choice {
+        slug: entry.slug.clone(),
+        name: entry.name.clone(),
+    });
+    crate::category::save(root, choice.as_ref()).context("saving the project's category")?;
     Ok(match entry {
-        Some(entry) => format!("Filing under {}.", entry.name),
-        None => "No category — the post will not appear under any filter.".to_string(),
+        Some(entry) => format!("Filing this project under {}.", entry.name),
+        None => match crate::config::load().blog_category_name {
+            Some(default) => format!("No category for this project — the default, {default}."),
+            None => "No category — the post will not appear under any filter.".to_string(),
+        },
     })
 }
 
@@ -487,7 +522,8 @@ pub fn write_payload(session: &Session) -> Result<PathBuf> {
         // API on publish, and this path makes no calls — so an override that
         // the cache cannot match is left off rather than looked up.
         author_id: chosen_author(&cfg, &cached).id,
-        category_id: chosen_category(&cfg, &cached).id,
+        category_id: chosen_category(&cfg, &cached, crate::category::load(&session.root).as_ref())
+            .id,
         figures,
         article,
     };
@@ -593,7 +629,8 @@ fn run(
     let cfg = crate::config::load();
     let cached = library::load();
     let chosen_author = chosen_author(&cfg, &cached);
-    let chosen_category = chosen_category(&cfg, &cached);
+    let chosen_category =
+        chosen_category(&cfg, &cached, crate::category::load(&session.root).as_ref());
     if chosen_author.name.is_some() || chosen_category.name.is_some() {
         status("Looking up the author and category…".into());
     }
@@ -1262,6 +1299,7 @@ mod tests {
         let chosen = chosen_category(
             &crate::config::Config::default(),
             &library::Library::default(),
+            None,
         );
         assert_eq!(chosen.id, None);
         assert!(!chosen.is_set());

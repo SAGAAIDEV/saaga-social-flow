@@ -279,6 +279,24 @@ impl App {
         }
     }
 
+    /// Take a template saved elsewhere — a category set up — as the one last
+    /// read, so the next save here is conditional on it.
+    pub(super) fn adopt_team_template(&mut self, loaded: Loaded) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target
+                .set_team_links_text(&team::to_lines(&loaded.template.links));
+        }
+        self.team.loaded = Some(loaded);
+    }
+
+    /// Whether the template came from S3 and so can be saved over.
+    pub(super) fn team_is_saveable(&self) -> bool {
+        self.team
+            .loaded
+            .as_ref()
+            .is_some_and(|loaded| matches!(loaded.source, Source::Team))
+    }
+
     /// The team template as last read, for the copy the render writes.
     pub(super) fn team_template(&self) -> TeamTemplate {
         self.team
@@ -320,6 +338,7 @@ mod tests {
                     })
                     .collect(),
                 youtube_footer: String::new(),
+                categories: Vec::new(),
                 updated_by: "andrew".into(),
                 updated_at: "2026-09-29T10:00:00-07:00".into(),
             },

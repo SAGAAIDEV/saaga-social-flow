@@ -629,6 +629,8 @@ fn upload_one(
                 ),
             }
         }
+        // A category picked after the upload reaches the playlist on this press.
+        file_in_playlist(session, &prior.video_id, status);
         return Ok(prior);
     }
 
@@ -666,7 +668,27 @@ fn upload_one(
             upload = record_poster(session, upload)?;
         }
     }
+    file_in_playlist(session, &video_id, status);
     Ok(upload)
+}
+
+/// Puts the video in its category's playlist, when the project has a category
+/// with one. Never fails the upload: the video is up, and the playlist is a
+/// shelf it sits on — said on the status line and in the log, and the next
+/// press tries again ([`youtube::add_to_playlist`] skips a video already there).
+fn file_in_playlist(session: &Session, video_id: &str, status: &dyn Fn(String)) {
+    let Some((playlist_id, name)) = crate::category::playlist(&session.root) else {
+        return;
+    };
+    status(format!("Adding the video to the {name} playlist…"));
+    if let Err(err) = youtube::access_token()
+        .and_then(|token| youtube::add_to_playlist(&token, &playlist_id, video_id))
+    {
+        eprintln!("stream-recorder: {video_id} not added to playlist {playlist_id}: {err:#}");
+        status(format!(
+            "The video is up, but not in the {name} playlist: {err:#}. Press Upload again to retry."
+        ));
+    }
 }
 
 /// Sets the poster, and says whether it took.

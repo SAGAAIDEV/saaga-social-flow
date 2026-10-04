@@ -207,6 +207,57 @@ impl Strapi {
         self.list(CATEGORIES_PATH, "category", "description")
     }
 
+    /// Creates a published category and returns it as the picker lists it.
+    ///
+    /// Strapi derives the slug from the name; the one it settled on (it
+    /// appends `-1` on a clash) is read back rather than assumed, since the slug
+    /// is what a project and the team template file a category under.
+    pub fn create_category(&self, name: &str) -> Result<Entry> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("a category needs a name");
+        }
+        if name.chars().count() > 255 {
+            bail!("keep the category name under 255 characters");
+        }
+        let url = format!("{}{CATEGORIES_PATH}", self.base);
+        let response = ureq::post(&url)
+            .set("Authorization", &self.bearer())
+            .set("Content-Type", "application/json")
+            .query(STATUS, PUBLISHED)
+            .timeout(LOOKUP_TIMEOUT)
+            .send_json(serde_json::json!({ "data": { "name": name, "slug": super::schema::slugify(name, 80) } }));
+        let body: serde_json::Value = match response {
+            Ok(response) => response
+                .into_json()
+                .context("parsing the created category")?,
+            Err(ureq::Error::Status(code, response)) => {
+                let detail = response.into_string().unwrap_or_default();
+                bail!(
+                    "strapi refused the new category ({code}){}: {}",
+                    match code {
+                        401 | 403 => " — check STRAPI_API_TOKEN has `create` on Category",
+                        _ => "",
+                    },
+                    detail.trim()
+                );
+            }
+            Err(err) => return Err(err).context("creating the category on strapi"),
+        };
+        let row = &body["data"];
+        Ok(Entry {
+            id: row["id"]
+                .as_i64()
+                .context("strapi created the category but named no id")?,
+            name: row["name"].as_str().unwrap_or(name).trim().to_string(),
+            slug: row["slug"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| super::schema::slugify(name, 80)),
+            detail: None,
+        })
+    }
+
     /// One page of 100, which is well past what either collection holds and
     /// keeps this to a single request. A collection that outgrows it truncates
     /// rather than paginating, so it says so.

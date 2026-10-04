@@ -146,7 +146,7 @@ pub fn build(
 ) -> Pane {
     let article = schema::load(dir).ok();
     let author = super::chosen_author(cfg, library);
-    let category = super::chosen_category(cfg, library);
+    let category = super::chosen_category(cfg, library, crate::category::load(root).as_ref());
     let fixes = article.as_ref().map(fixes_view).unwrap_or_default();
     Pane {
         blocked: blocked.or_else(|| {

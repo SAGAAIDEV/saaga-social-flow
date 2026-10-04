@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% import "components.html" as ui %}
 {#
-  The Project tab: where the open project stands. Read-only — picking, naming,
+  The Project tab: where the open project stands, and the category it is filed
+  under — the one thing set here. Otherwise read-only: picking, naming,
   starting and cleaning up projects are the native controls above this pane,
   and every card here is a summary of files another tab writes.
 #}
@@ -41,6 +42,61 @@
     {% else %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written from a rehearsal.{% endif %}
   </p>
 </div>
+
+{% if category %}
+<!--
+  The category files the project everywhere at once: the blog post's category
+  in Strapi, the YouTube playlist the upload goes into, and the hashtags the
+  social posts end with. The playlist and the hashtags are the team's, so a
+  Save here changes them for every project in the category.
+-->
+<h2>Category</h2>
+<div class="card">
+  <div class="row">
+    <select data-send-change='{{ {"type": "projectCategory", "root": root} | tojson }}'{% if category.busy %} disabled{% endif %}>
+      {% for option in category.options %}
+      <option value="{{ option.slug }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if category.current %}
+  <div class="link"><span class="name">Blog</span><span>Filed under {{ category.current.name }}</span></div>
+  <div class="link"><span class="name">YouTube</span>{% if category.current.playlist_url %}<a href="{{ category.current.playlist_url }}">{{ category.current.playlist_url }}</a>{% else %}<span class="muted">No playlist yet — Save makes one</span>{% endif %}</div>
+  <form id="category-edit" class="link">
+    <span class="name">Hashtags</span>
+    <input name="hashtags" value="{{ category.current.hashtags }}" placeholder="#SEO #AIAgents" style="flex:1">
+    <button type="submit"{% if category.busy or not category.can_save %} disabled{% endif %}>Save</button>
+  </form>
+  {% elif category.fallback %}
+  <p class="why">No category for this project — the blog post files under the default, {{ category.fallback }}, with no playlist and no hashtags.</p>
+  {% else %}
+  <p class="why">No category — the blog post files under none, the video goes in no playlist, and the posts carry no category hashtags.</p>
+  {% endif %}
+</div>
+<form id="category-new" class="card">
+  <div class="row">
+    <input name="name" placeholder="New category, e.g. SEO Agents" style="flex:1">
+    <input name="hashtags" placeholder="#SEO #AIAgents" style="flex:1">
+    <button type="submit"{% if category.busy or not category.can_save %} disabled{% endif %}>Create category</button>
+  </div>
+  <p class="why">Makes the blog category in Strapi and a public YouTube playlist, saves the hashtags for the team, and files this project under it. A name Strapi already has is reused, not duplicated.{% if not category.can_save %} Off until the team template loads from S3 (aws sso login).{% endif %}</p>
+</form>
+{% if category.status %}<p class="why">{{ category.status }}</p>{% endif %}
+<script>
+(function () {
+  var root = {{ root | tojson }};
+  var edit = document.getElementById('category-edit');
+  if (edit) edit.addEventListener('submit', function (event) {
+    event.preventDefault();
+    send({type: 'setUpCategory', root: root, slug: {{ (category.current.slug if category.current else "") | tojson }}, hashtags: this.elements.hashtags.value});
+  });
+  document.getElementById('category-new').addEventListener('submit', function (event) {
+    event.preventDefault();
+    send({type: 'setUpCategory', root: root, name: this.elements.name.value, hashtags: this.elements.hashtags.value});
+  });
+})();
+</script>
+{% endif %}
 
 <h2>Recordings</h2>
 <table>

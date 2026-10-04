@@ -31,6 +31,9 @@ const SET_THUMBNAIL: &str = "https://www.googleapis.com/upload/youtube/v3/thumbn
 const UPLOAD_VIDEO: &str = "https://www.googleapis.com/upload/youtube/v3/videos";
 /// `videos.list` and `videos.update`: the metadata endpoint, not the upload one.
 const VIDEOS: &str = "https://www.googleapis.com/youtube/v3/videos";
+/// A category's playlist, and the videos in it. Both need `youtube.force-ssl`.
+const PLAYLISTS: &str = "https://www.googleapis.com/youtube/v3/playlists";
+const PLAYLIST_ITEMS: &str = "https://www.googleapis.com/youtube/v3/playlistItems";
 
 /// The scopes under which `videos.update` is allowed. `youtube.upload` is not
 /// one of them — it uploads and sets thumbnails and nothing else — so a grant
@@ -600,9 +603,120 @@ pub fn set_thumbnail(token: &str, video_id: &str, jpeg: &[u8]) -> Result<()> {
     }
 }
 
+/// Creates a public playlist on the channel and returns its id — what a new
+/// category gets, so its videos collect in one place on the channel.
+pub fn create_playlist(token: &str, title: &str, description: &str) -> Result<String> {
+    if grant_allows_update() == Some(false) {
+        bail!("{RECONNECT_FOR_UPDATE}");
+    }
+    let response = ureq::post(PLAYLISTS)
+        .query("part", "snippet,status")
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .send_json(playlist_body(title, description));
+    let body: serde_json::Value = match response {
+        Ok(response) => response
+            .into_json()
+            .context("parsing the playlists.insert response")?,
+        Err(ureq::Error::Status(code, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!("youtube refused the playlist ({code}): {}", detail.trim());
+        }
+        Err(err) => return Err(err).context("calling youtube playlists.insert"),
+    };
+    body.get("id")
+        .and_then(|id| id.as_str())
+        .map(str::to_string)
+        .context("youtube created the playlist but named no id")
+}
+
+fn playlist_body(title: &str, description: &str) -> serde_json::Value {
+    serde_json::json!({
+        // YouTube's limits on a playlist: 150 for the title, 5000 the description.
+        "snippet": {
+            "title": truncate(title, 150),
+            "description": truncate(description, 5000),
+        },
+        "status": { "privacyStatus": "public" },
+    })
+}
+
+/// Adds `video_id` to `playlist_id`, unless it is there already.
+///
+/// Checked first because `playlistItems.insert` is not idempotent — a second
+/// press would list the video twice — and a press on an upload that is already
+/// up is how a category picked after the upload reaches YouTube.
+pub fn add_to_playlist(token: &str, playlist_id: &str, video_id: &str) -> Result<()> {
+    let listed: serde_json::Value = match ureq::get(PLAYLIST_ITEMS)
+        .query("part", "id")
+        .query("playlistId", playlist_id)
+        .query("videoId", video_id)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .call()
+    {
+        Ok(response) => response
+            .into_json()
+            .context("parsing the playlistItems.list response")?,
+        Err(ureq::Error::Status(code, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to read playlist {playlist_id} ({code}): {}",
+                detail.trim()
+            );
+        }
+        Err(err) => return Err(err).context("calling youtube playlistItems.list"),
+    };
+    if listed["items"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        return Ok(());
+    }
+    let response = ureq::post(PLAYLIST_ITEMS)
+        .query("part", "snippet")
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(60))
+        .send_json(playlist_item_body(playlist_id, video_id));
+    match response {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::Status(code, response)) => {
+            let detail = response.into_string().unwrap_or_default();
+            bail!(
+                "youtube refused to add the video to playlist {playlist_id} ({code}): {}",
+                detail.trim()
+            );
+        }
+        Err(err) => Err(err).context("calling youtube playlistItems.insert"),
+    }
+}
+
+fn playlist_item_body(playlist_id: &str, video_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": { "kind": "youtube#video", "videoId": video_id },
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_category_playlist_is_public_and_an_item_names_the_video() {
+        let body = playlist_body(&"x".repeat(200), "");
+        assert_eq!(body["status"]["privacyStatus"], "public");
+        assert_eq!(
+            body["snippet"]["title"].as_str().unwrap().chars().count(),
+            150
+        );
+        let item = playlist_item_body("PL1", "abc");
+        assert_eq!(item["snippet"]["playlistId"], "PL1");
+        assert_eq!(item["snippet"]["resourceId"]["kind"], "youtube#video");
+        assert_eq!(item["snippet"]["resourceId"]["videoId"], "abc");
+    }
 
     fn stored(refresh: &str) -> token_store::Token {
         token_store::Token {

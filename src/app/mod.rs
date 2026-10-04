@@ -12,6 +12,7 @@
 //! 9. Reflect: read every step, propose and validate better prompts.
 
 pub(crate) mod card;
+mod category;
 pub(crate) mod clock;
 mod critique;
 mod devices;
@@ -305,6 +306,8 @@ pub struct App {
     posts_manifest: Option<crate::posts::PostsManifest>,
     /// The team template and the YouTube details push — see `app::team`.
     team: team::TeamState,
+    /// The project's category and setting one up — see `app::category`.
+    category: category::CategoryState,
     /// Which short Start Short records: 0 for a freeform one, else the
     /// suggestion at `short_pick - 1` in the project's list — see
     /// [`crate::shorts`]. View state, like `open_edit_chapter`.
@@ -996,6 +999,13 @@ impl App {
             UiEvent::SelectThumbnail(id) => self.select_thumbnail(&id),
             UiEvent::BlogAuthorSelected(id) => self.select_blog_author(&id),
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
+            UiEvent::ProjectCategory { root, value } => self.select_project_category(&root, &value),
+            UiEvent::SetUpCategory {
+                root,
+                slug,
+                name,
+                hashtags,
+            } => self.set_up_category(&root, &slug, &name, &hashtags),
             UiEvent::SaveBlogFields(fields) => self.save_blog_fields(&fields),
             UiEvent::RepairBlog => self.run_repair_blog(),
             UiEvent::RenderTarget { name, value } => self.set_render_target(&name, value),
@@ -1105,8 +1115,10 @@ impl App {
     /// file reads, and a stale summary is the one thing it must not be.
     fn update_project_view(&self) {
         if let Some(live) = self.live.as_ref() {
-            live.project_pane
-                .show(&ui::planning::project_page(&self.session));
+            live.project_pane.show(&ui::planning::project_page(
+                &self.session,
+                self.category_view(),
+            ));
         }
     }
 
@@ -2011,11 +2023,12 @@ impl App {
     }
 
     fn select_blog_category(&mut self, id: &str) {
-        match crate::blog::select_category(id) {
+        match crate::blog::select_category(&self.session.root, id) {
             Ok(message) => self.set_blog_status(&message),
             Err(err) => self.set_blog_status(&format!("Could not save the category: {err:#}")),
         }
         self.update_blog_view();
+        self.update_project_view();
     }
 
     /// Remembers a Render output box. Config, not the project: which outputs you
@@ -4441,6 +4454,7 @@ impl ApplicationHandler for App {
         self.drain_deps();
         self.drain_posts();
         self.drain_team();
+        self.drain_category();
         self.drain_substack();
         self.drain_blog();
         self.drain_titles();

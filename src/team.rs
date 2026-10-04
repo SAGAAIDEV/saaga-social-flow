@@ -63,6 +63,91 @@ pub struct Link {
     pub note: String,
 }
 
+/// One category, as the rest of the funnel sees it.
+///
+/// The blog category in Strapi is the category itself; this is what it drives
+/// everywhere else — the YouTube playlist its videos go into, and the hashtags
+/// its social posts carry. Keyed by the Strapi slug rather than the id: ids are
+/// rows in one database, and a slug reads the same on every CMS.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Category {
+    pub slug: String,
+    pub name: String,
+    /// The YouTube playlist id; empty for none yet.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub playlist_id: String,
+    /// With the `#`, in the order typed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hashtags: Vec<String>,
+}
+
+/// Enough to say what a post is about; past this it reads as spam.
+pub const MAX_HASHTAGS: usize = 5;
+
+impl TeamTemplate {
+    pub fn category(&self, slug: &str) -> Option<&Category> {
+        self.categories
+            .iter()
+            .find(|category| category.slug.eq_ignore_ascii_case(slug))
+    }
+
+    /// The template with `category` added, or replacing the one with its slug.
+    pub fn with_category(mut self, category: Category) -> TeamTemplate {
+        match self
+            .categories
+            .iter_mut()
+            .find(|existing| existing.slug.eq_ignore_ascii_case(&category.slug))
+        {
+            Some(existing) => *existing = category,
+            None => self.categories.push(category),
+        }
+        self
+    }
+}
+
+/// Hashtags as typed — spaces or commas between, `#` optional — normalised to
+/// `#Word` with nothing but letters, digits and underscores, duplicates dropped.
+pub fn parse_hashtags(text: &str) -> std::result::Result<Vec<String>, String> {
+    let mut tags: Vec<String> = Vec::new();
+    for word in text.split([',', ' ', '\n', '\t']) {
+        let word = word.trim().trim_start_matches('#');
+        if word.is_empty() {
+            continue;
+        }
+        if !word.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
+            return Err(format!(
+                "#{word} — a hashtag is one word: letters, digits and _ only"
+            ));
+        }
+        let tag = format!("#{word}");
+        if !tags.iter().any(|seen| seen.eq_ignore_ascii_case(&tag)) {
+            tags.push(tag);
+        }
+    }
+    if tags.len() > MAX_HASHTAGS {
+        return Err(format!(
+            "{} hashtags — keep it to {MAX_HASHTAGS}",
+            tags.len()
+        ));
+    }
+    Ok(tags)
+}
+
+/// The copywriter's section for the project's category, or nothing without
+/// hashtags. In the user prompt for the reason [`prompt_section`] gives.
+pub fn hashtag_section(category: Option<&Category>) -> String {
+    let Some(category) = category.filter(|category| !category.hashtags.is_empty()) else {
+        return String::new();
+    };
+    format!(
+        "Category: {}. End every post with these hashtags, exactly as written and in this \
+         order: {}. Add no other hashtags. Where a platform's length limit is tight, shorten \
+         the post, not the hashtags.\n\n",
+        category.name,
+        category.hashtags.join(" ")
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TeamTemplate {
     #[serde(default)]
@@ -71,6 +156,9 @@ pub struct TeamTemplate {
     /// module docs. Empty for none.
     #[serde(default)]
     pub youtube_footer: String,
+    /// What each blog category drives beyond the blog — see [`Category`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<Category>,
     /// Who saved it last, and when, so the pane can say.
     #[serde(default)]
     pub updated_by: String,
@@ -483,6 +571,57 @@ mod tests {
         assert!(once.starts_with("What the video shows.\n\nMore: Newsletter"));
         assert_eq!(with_footer(&once, &team), once, "not added twice");
         assert_eq!(with_footer("Plain.", &template("")), "Plain.");
+    }
+
+    #[test]
+    fn hashtags_are_normalised_and_policed() {
+        assert_eq!(
+            parse_hashtags("SEO, #AIAgents  seo\n#GEO").unwrap(),
+            ["#SEO", "#AIAgents", "#GEO"]
+        );
+        assert_eq!(parse_hashtags("  ").unwrap(), Vec::<String>::new());
+        assert!(parse_hashtags("#go-to-market")
+            .unwrap_err()
+            .contains("one word"));
+        assert!(parse_hashtags("a b c d e f")
+            .unwrap_err()
+            .contains("keep it to 5"));
+    }
+
+    #[test]
+    fn a_category_is_found_and_replaced_by_slug() {
+        let seo = Category {
+            slug: "seo-agents".into(),
+            name: "SEO Agents".into(),
+            playlist_id: "PL1".into(),
+            hashtags: vec!["#SEO".into()],
+        };
+        let team = TeamTemplate::default().with_category(seo.clone());
+        assert_eq!(team.category("SEO-Agents"), Some(&seo));
+        let team = team.with_category(Category {
+            playlist_id: "PL2".into(),
+            ..seo
+        });
+        assert_eq!(team.categories.len(), 1);
+        assert_eq!(team.category("seo-agents").unwrap().playlist_id, "PL2");
+    }
+
+    #[test]
+    fn the_prompt_carries_the_category_hashtags() {
+        assert_eq!(hashtag_section(None), "");
+        let gtm = Category {
+            slug: "gtm".into(),
+            name: "GTM".into(),
+            ..Category::default()
+        };
+        assert_eq!(hashtag_section(Some(&gtm)), "", "no hashtags, no section");
+        let gtm = Category {
+            hashtags: vec!["#GTM".into(), "#B2B".into()],
+            ..gtm
+        };
+        let section = hashtag_section(Some(&gtm));
+        assert!(section.contains("Category: GTM."), "{section}");
+        assert!(section.contains("#GTM #B2B"), "{section}");
     }
 
     #[test]

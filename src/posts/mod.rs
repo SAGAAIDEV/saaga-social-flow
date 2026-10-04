@@ -99,6 +99,7 @@ fn run_posts_generation(
     // in this one; the local copy stands in when S3 cannot be read.
     let team = crate::team::load();
     let funnel = team.template.links.clone();
+    let category = crate::category::team_entry(&session.root, &team.template);
     let _ = tx.send(PostsEvent::Status(format!(
         "Generating posts for {} video(s) via {model}{}…",
         contexts.len(),
@@ -118,6 +119,7 @@ fn run_posts_generation(
         provider,
         custom_prompt,
         &funnel,
+        category.as_ref(),
         Some(&session.root),
         None,
     )?;

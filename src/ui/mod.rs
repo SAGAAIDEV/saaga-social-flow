@@ -253,6 +253,18 @@ pub enum UiEvent {
     /// A Strapi relation id, or empty for none.
     BlogAuthorSelected(String),
     BlogCategorySelected(String),
+    /// See [`web::WebEvent::ProjectCategory`].
+    ProjectCategory {
+        root: String,
+        value: String,
+    },
+    /// See [`web::WebEvent::SetUpCategory`].
+    SetUpCategory {
+        root: String,
+        slug: String,
+        name: String,
+        hashtags: String,
+    },
     /// The Blog tab's "Needs fixing" card, saved: [`crate::blog::limits::Target`]
     /// key → the edited text.
     SaveBlogFields(std::collections::BTreeMap<String, String>),

@@ -36,6 +36,7 @@ mod applog;
 mod blog;
 mod capture;
 mod card;
+mod category;
 mod cli;
 mod config;
 mod critique;

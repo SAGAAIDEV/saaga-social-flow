@@ -174,6 +174,24 @@ pub enum WebEvent {
     BlogCategory {
         value: String,
     },
+    /// The category picked on the Project tab, as a Strapi slug; empty for
+    /// none. Carries the project the page was drawn for, like the Plan events.
+    ProjectCategory {
+        root: String,
+        value: String,
+    },
+    /// Set a category up everywhere it drives — see [`crate::category::set_up`].
+    /// `slug` names an existing Strapi category; empty makes or finds one by
+    /// `name`.
+    SetUpCategory {
+        root: String,
+        #[serde(default)]
+        slug: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        hashtags: String,
+    },
     /// A Render output box above the Render button: `horizontal`,
     /// `vertical` or `shorts`, and whether it is now ticked.
     RenderTarget {
@@ -316,6 +334,18 @@ impl WebEvent {
             }
             WebEvent::BlogAuthor { value } => UiEvent::BlogAuthorSelected(value),
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
+            WebEvent::ProjectCategory { root, value } => UiEvent::ProjectCategory { root, value },
+            WebEvent::SetUpCategory {
+                root,
+                slug,
+                name,
+                hashtags,
+            } => UiEvent::SetUpCategory {
+                root,
+                slug,
+                name,
+                hashtags,
+            },
             WebEvent::SaveBlogFields { fields } => UiEvent::SaveBlogFields(fields),
             WebEvent::RenderTarget { name, value } => UiEvent::RenderTarget { name, value },
             WebEvent::RepairBlog => UiEvent::RepairBlog,
@@ -895,6 +925,32 @@ mod tests {
             panic!("expected YoutubeDraft");
         };
         assert_eq!(fields["title"], "Draft");
+    }
+
+    #[test]
+    fn category_messages_carry_the_project_root() {
+        let event: WebEvent = serde_json::from_str(
+            r##"{"type":"setUpCategory","root":"/p","name":"SEO Agents","hashtags":"#SEO"}"##,
+        )
+        .unwrap();
+        let UiEvent::SetUpCategory {
+            root,
+            slug,
+            name,
+            hashtags,
+        } = event.into_ui_event()
+        else {
+            panic!("expected SetUpCategory");
+        };
+        assert_eq!((root.as_str(), slug.as_str()), ("/p", ""));
+        assert_eq!((name.as_str(), hashtags.as_str()), ("SEO Agents", "#SEO"));
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"projectCategory","root":"/p","value":"gtm"}"#)
+                .unwrap();
+        let UiEvent::ProjectCategory { value, .. } = event.into_ui_event() else {
+            panic!("expected ProjectCategory");
+        };
+        assert_eq!(value, "gtm");
     }
 
     #[test]

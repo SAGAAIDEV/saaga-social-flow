@@ -91,6 +91,7 @@ fn generate_with(
         // only be one more thing that differs between the two runs.
         &[],
         None,
+        None,
         Some(&rewrite.preamble),
     )?;
     Ok(check(&manifest))

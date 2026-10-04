@@ -403,6 +403,7 @@ pub fn run_record_session(
         posts_prompt: cfg.posts_prompt.clone().unwrap_or_default(),
         posts_manifest: None,
         team: Default::default(),
+        category: Default::default(),
         short_pick: 0,
     };
     // Fills `geometry` and both Split regions from the selected display, so the

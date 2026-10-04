@@ -64,6 +64,97 @@ pub struct ProjectView {
     pub deck: Option<usize>,
     pub deck_from_plan: bool,
     pub links: Vec<Link>,
+    /// The Category card. Filled by the app, which holds the team template;
+    /// `None` in a view built from disk alone, and the card is left out.
+    pub category: Option<CategoryView>,
+}
+
+/// One option in the Project tab's category dropdown.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CategoryOption {
+    pub slug: String,
+    pub label: String,
+    pub selected: bool,
+}
+
+/// The project's category, as the card spells out what it drives.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CurrentCategory {
+    pub slug: String,
+    pub name: String,
+    /// The playlist on YouTube, empty when there is none yet.
+    pub playlist_url: String,
+    /// As the box shows them: `#SEO #AIAgents`.
+    pub hashtags: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CategoryView {
+    pub options: Vec<CategoryOption>,
+    pub current: Option<CurrentCategory>,
+    /// The standing blog default a project with no category still files under.
+    pub fallback: Option<String>,
+    /// A set-up is running: the buttons are off.
+    pub busy: bool,
+    /// The team template came from S3, so a set-up can save to it.
+    pub can_save: bool,
+    pub status: String,
+}
+
+/// The Category card for the project at `root`.
+///
+/// The options are the Strapi categories as last read, plus the project's own
+/// when the list does not have it — set up by a teammate since this Mac read
+/// the list — so the dropdown never shows a different category from the one
+/// the project is filed under.
+pub fn category_view(
+    root: &Path,
+    library: &crate::blog::library::Library,
+    team: &crate::team::TeamTemplate,
+    fallback: Option<String>,
+    busy: bool,
+    can_save: bool,
+    status: &str,
+) -> CategoryView {
+    let choice = crate::category::load(root);
+    let selected = choice.as_ref().map(|choice| choice.slug.as_str());
+    let mut options: Vec<CategoryOption> = std::iter::once(CategoryOption {
+        slug: String::new(),
+        label: "— none —".into(),
+        selected: selected.is_none(),
+    })
+    .chain(library.categories.iter().map(|entry| CategoryOption {
+        slug: entry.slug.clone(),
+        label: entry.name.clone(),
+        selected: selected == Some(entry.slug.as_str()),
+    }))
+    .collect();
+    if let Some(choice) = &choice {
+        if !options.iter().any(|option| option.selected) {
+            options.push(CategoryOption {
+                slug: choice.slug.clone(),
+                label: choice.name.clone(),
+                selected: true,
+            });
+        }
+    }
+    let current = crate::category::team_entry(root, team).map(|category| CurrentCategory {
+        playlist_url: match category.playlist_id.as_str() {
+            "" => String::new(),
+            id => format!("https://www.youtube.com/playlist?list={id}"),
+        },
+        hashtags: category.hashtags.join(" "),
+        slug: category.slug,
+        name: category.name,
+    });
+    CategoryView {
+        options,
+        fallback: fallback.filter(|_| current.is_none()),
+        current,
+        busy,
+        can_save,
+        status: status.to_string(),
+    }
 }
 
 /// The plan's standing in one line. The approved version is named first
@@ -194,12 +285,19 @@ pub fn project_view(session: &Session) -> ProjectView {
         deck,
         deck_from_plan: plan::deck_from_plan(&plan_dir),
         links,
+        category: None,
     }
 }
 
 /// The Project tab's pane.
-pub fn project_page(session: &Session) -> String {
-    super::render::page("project.html", project_view(session))
+pub fn project_page(session: &Session, category: CategoryView) -> String {
+    super::render::page(
+        "project.html",
+        ProjectView {
+            category: Some(category),
+            ..project_view(session)
+        },
+    )
 }
 
 /// What the Plan pane shows that is not on disk: the idea take being
@@ -693,6 +791,69 @@ mod tests {
         }
     }
 
+    /// The dropdown shows the category the project is filed under even when
+    /// this Mac's Strapi list has not read it yet, and the card spells out
+    /// the playlist and the hashtags the team saved for it.
+    #[test]
+    fn the_category_card_shows_what_the_category_drives() {
+        let session = project("category");
+        let library = crate::blog::library::Library {
+            categories: vec![crate::blog::library::Entry {
+                id: 14,
+                name: "GTM".into(),
+                slug: "gtm".into(),
+                detail: None,
+            }],
+            ..Default::default()
+        };
+        let team = crate::team::TeamTemplate::default();
+        let none = category_view(
+            &session.root,
+            &library,
+            &team,
+            Some("AI Literacy".into()),
+            false,
+            true,
+            "",
+        );
+        assert!(none.options[0].selected && none.current.is_none());
+        assert_eq!(none.fallback.as_deref(), Some("AI Literacy"));
+
+        crate::category::save(
+            &session.root,
+            Some(&crate::category::Choice {
+                slug: "seo-agents".into(),
+                name: "SEO Agents".into(),
+            }),
+        )
+        .unwrap();
+        let team = team.with_category(crate::team::Category {
+            slug: "seo-agents".into(),
+            name: "SEO Agents".into(),
+            playlist_id: "PL7".into(),
+            hashtags: vec!["#SEO".into(), "#AIAgents".into()],
+        });
+        let view = category_view(
+            &session.root,
+            &library,
+            &team,
+            Some("AI Literacy".into()),
+            false,
+            true,
+            "",
+        );
+        let picked: Vec<_> = view.options.iter().filter(|o| o.selected).collect();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].slug, "seo-agents");
+        assert_eq!(view.fallback, None);
+        let current = view.current.unwrap();
+        assert_eq!(
+            current.playlist_url,
+            "https://www.youtube.com/playlist?list=PL7"
+        );
+        assert_eq!(current.hashtags, "#SEO #AIAgents");
+    }
+
     #[test]
     fn a_project_with_no_plan_says_how_to_start_one() {
         let session = project("no-plan");
@@ -701,7 +862,19 @@ mod tests {
         assert!(view.plan.text.contains("Plan tab"));
         assert_eq!(view.deck, None);
         assert!(view.links.is_empty());
-        let html = project_page(&session);
+        let html = project_page(
+            &session,
+            category_view(
+                &session.root,
+                &crate::blog::library::Library::default(),
+                &crate::team::TeamTemplate::default(),
+                None,
+                false,
+                true,
+                "",
+            ),
+        );
+        assert!(html.contains("category-new"), "{html}");
         assert!(!html.contains("template error"), "{html}");
     }
 
