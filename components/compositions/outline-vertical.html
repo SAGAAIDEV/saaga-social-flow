@@ -7,7 +7,8 @@
     {&quot;id&quot;:&quot;outlinePoints&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Talking Points (JSON)&quot;,&quot;default&quot;:&quot;{\&quot;points\&quot;:[{\&quot;text\&quot;:\&quot;Why the retry storm happened\&quot;,\&quot;at\&quot;:3},{\&quot;text\&quot;:\&quot;Two config lines that fix it\&quot;,\&quot;at\&quot;:5},{\&quot;text\&quot;:\&quot;What to watch after the deploy\&quot;,\&quot;at\&quot;:7}]}&quot;},
     {&quot;id&quot;:&quot;focusY&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Face height in the frame (0 top, 1 bottom)&quot;,&quot;default&quot;:0.4,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01},
     {&quot;id&quot;:&quot;audioSrc&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Chapter Audio&quot;,&quot;default&quot;:&quot;assets/placeholder-audio.mp3&quot;},
-    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;}
+    {&quot;id&quot;:&quot;durationSeconds&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;Chapter Duration&quot;,&quot;default&quot;:10,&quot;min&quot;:1,&quot;max&quot;:900,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;s&quot;},
+    {&quot;id&quot;:&quot;holdCard&quot;,&quot;type&quot;:&quot;number&quot;,&quot;label&quot;:&quot;1: card from the start, held to the cut (the plan's outline chapter)&quot;,&quot;default&quot;:0,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:1}
   ]">
   <head>
     <meta charset="UTF-8">
@@ -421,8 +422,16 @@
               return isFinite(at) ? at : NaN;
             });
             var firstBeat = beats.filter(isFinite).reduce(function (a, b) { return Math.min(a, b); }, Infinity);
-            var cardIn = Math.max(0.2, (isFinite(firstBeat) ? firstBeat : LEAD + 0.2) - LEAD);
-            var cardOut = D - OUTRO;
+            /* holdCard is the plan's outline chapter: it follows the hook's
+               talking head, so the push is the chapter's opening move rather
+               than something to wait for, and the card stays to the cut — the
+               next thing on screen is chapter 01's card. A few seconds of
+               listing what is coming would otherwise spend most of its length
+               sliding in and out. */
+            var hold = Number(vars.holdCard) === 1;
+            var cardIn = hold ? 0.2
+              : Math.max(0.2, (isFinite(firstBeat) ? firstBeat : LEAD + 0.2) - LEAD);
+            var cardOut = hold ? D : D - OUTRO;
             var card = document.getElementById('olv-card');
             var camera = document.getElementById('olv-camera-wrap');
             var CARD_TRAVEL = 1284;
@@ -439,8 +448,10 @@
             if (hasCard) {
               tl.to(card, { y: 0, duration: SLIDE, ease: 'power3.inOut' }, cardIn);
               tl.to(camera, { y: CAMERA_SHIFT, duration: SLIDE, ease: 'power3.inOut' }, cardIn);
-              tl.to(card, { y: -CARD_TRAVEL, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
-              tl.to(camera, { y: 0, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
+              if (!hold) {
+                tl.to(card, { y: -CARD_TRAVEL, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
+                tl.to(camera, { y: 0, duration: SLIDE, ease: 'power3.inOut' }, cardOut);
+              }
             }
 
             /* Each point whips in from below on its beat — never before the
@@ -449,7 +460,7 @@
                is the one that reads. Every tween declares both ends, so a seek to any frame
                lands on the same picture. */
             var landed = cardIn + SLIDE;
-            var lastCall = cardOut - 0.3;
+            var lastCall = cardOut - (hold ? 0.5 : 0.3);
             var lastBeat = -Infinity;
             items.forEach(function (item, i) {
               if (!hasCard) { return; }

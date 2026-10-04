@@ -41,6 +41,10 @@ pub const MIN_GAP_SECONDS: f64 = 1.0;
 /// `outline-*` compositions. A point earlier than this would have the card
 /// arriving over the chapter's first frame, with no talking head to open on.
 pub const FIRST_POINT_SECONDS: f64 = 2.6;
+/// The earliest a point may appear in the plan's outline chapter, whose card
+/// slides in at 0.2 s and has landed 0.8 s later — the `holdCard` mode of the
+/// `outline-*` compositions.
+pub const HELD_FIRST_POINT_SECONDS: f64 = 1.0;
 /// Where the face sits when nothing recorded it: a little above the middle,
 /// where a seated speaker's is. A fraction of the frame's height.
 pub const DEFAULT_FACE_Y: f64 = 0.4;
@@ -163,6 +167,9 @@ pub fn prepare(
     }
 
     // Placement, for every requested chapter, against the cut as it is now.
+    // The plan's outline chapter holds its card from the start, so its points
+    // may land sooner.
+    let intro = crate::plan::outline_chapter_of(session);
     let mut placed = Vec::with_capacity(numbers.len());
     for (n, transcript) in &transcripts {
         let outline = manifest.chapter(*n).cloned().unwrap_or(ChapterOutline {
@@ -176,7 +183,11 @@ pub fn prepare(
             .map(|t| t.words.as_slice())
             .unwrap_or(&[]);
         let edits = load_edits(edit_root, *n);
-        let points = place::place(&outline.points, words, &edits);
+        let first = match intro == Some(*n) {
+            true => HELD_FIRST_POINT_SECONDS,
+            false => FIRST_POINT_SECONDS,
+        };
+        let points = place::place_from(&outline.points, words, &edits, first);
         // Kept once set, so a value corrected by hand in the manifest stands.
         let face_y = outline.face_y.or_else(|| face_y_of(&session.dir, *n));
         let outline = ChapterOutline {

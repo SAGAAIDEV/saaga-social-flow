@@ -288,6 +288,7 @@ pub fn prepare_targets(
                         seconds,
                         outline,
                         Orientation::Horizontal,
+                        intro == Some(*n),
                     )?));
                 }
                 // The cut itself, straight into the longform. Nothing is copied into
@@ -311,6 +312,7 @@ pub fn prepare_targets(
                     seconds,
                     outline,
                     Orientation::Vertical,
+                    intro == Some(*n),
                 )?,
                 None => write_v_chapter(&vertical, *n, title, seconds)?,
             });
@@ -517,6 +519,8 @@ fn write_outline_chapter(
     seconds: f64,
     outline: &crate::outline::ChapterOutline,
     orientation: Orientation,
+    // The plan's outline chapter: card in from the start and held to the cut.
+    hold: bool,
 ) -> Result<Job> {
     let (id, block, kind, size, camera) = match orientation {
         Orientation::Horizontal => (
@@ -542,10 +546,12 @@ fn write_outline_chapter(
         Orientation::Horizontal => serde_json::json!({
             "outlinePoints": outline.variable_json(),
             "focusX": 0.5,
+            "holdCard": u8::from(hold),
         }),
         Orientation::Vertical => serde_json::json!({
             "outlinePoints": outline.variable_json(),
             "focusY": outline.face_y.unwrap_or(crate::outline::DEFAULT_FACE_Y),
+            "holdCard": u8::from(hold),
         }),
     };
     write_footage_chapter(

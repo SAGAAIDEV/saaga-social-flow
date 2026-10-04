@@ -16,7 +16,9 @@ use crate::edit::compute::Edit;
 use crate::notes::TranscriptWord;
 
 use super::schema::OutlinePoint;
-use super::{FIRST_POINT_SECONDS, MIN_GAP_SECONDS};
+#[cfg(test)]
+use super::FIRST_POINT_SECONDS;
+use super::MIN_GAP_SECONDS;
 
 /// Anchor tokens considered, from the front. The model is asked for 4–8; a
 /// longer quote only makes a match harder to find.
@@ -34,10 +36,25 @@ const TAIL: f64 = 0.5;
 /// `edits` are the kept spans in playing order, raw-take milliseconds; their
 /// durations sum to the cut's length. With no edits at all — a chapter that
 /// somehow has words but no keep-list — the raw times are used as they are.
+///
+/// A body chapter's floor; the render calls [`place_from`], which takes it.
+#[cfg(test)]
 pub fn place(
     points: &[OutlinePoint],
     words: &[TranscriptWord],
     edits: &[Edit],
+) -> Vec<OutlinePoint> {
+    place_from(points, words, edits, FIRST_POINT_SECONDS)
+}
+
+/// [`place`], with the earliest a point may appear given: the plan's outline
+/// chapter holds its card from the start, so its first point can land as soon
+/// as the card has — see [`super::HELD_FIRST_POINT_SECONDS`].
+pub fn place_from(
+    points: &[OutlinePoint],
+    words: &[TranscriptWord],
+    edits: &[Edit],
+    first: f64,
 ) -> Vec<OutlinePoint> {
     let tokens: Vec<String> = words.iter().map(|word| normalise(&word.text)).collect();
     let total = cut_length_seconds(edits, words);
@@ -77,8 +94,8 @@ pub fn place(
 
     // Pass three: never before the heading has arrived, never before the point
     // before it, never in the last moments of the chapter.
-    let ceiling = (total - TAIL).max(FIRST_POINT_SECONDS);
-    let mut floor = FIRST_POINT_SECONDS;
+    let ceiling = (total - TAIL).max(first);
+    let mut floor = first;
     points
         .iter()
         .zip(placed)
@@ -233,6 +250,32 @@ mod tests {
 
     /// The core of it: a verbatim anchor lands on its word, and the time is
     /// that word's start.
+    /// The outline chapter's card is in from the start, so a point said in
+    /// the first seconds lands there instead of being pushed to 2.6 s — which
+    /// on a six-second chapter pushed the last point off the card.
+    #[test]
+    fn a_held_card_takes_points_as_early_as_it_lands() {
+        let w = words("so who we filter the steps the ramp");
+        let points = [
+            point("Who", "who we filter"),
+            point("Steps", "the steps"),
+            point("Ramp", "the ramp"),
+        ];
+        let held = place_from(
+            &points,
+            &w,
+            &keep_all(&w),
+            crate::outline::HELD_FIRST_POINT_SECONDS,
+        );
+        assert_eq!(held[0].at, Some(crate::outline::HELD_FIRST_POINT_SECONDS));
+        let usual = place(&points, &w, &keep_all(&w));
+        assert_eq!(usual[0].at, Some(FIRST_POINT_SECONDS));
+        assert_eq!(
+            held[1].at, usual[1].at,
+            "a later point keeps its spoken beat"
+        );
+    }
+
     #[test]
     fn an_anchor_is_placed_where_its_words_begin() {
         let w = words(
