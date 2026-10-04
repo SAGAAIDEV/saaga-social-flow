@@ -1,9 +1,9 @@
 //! `plan/vN.json`: one version of the video's plan.
 //!
-//! Recording chapter *n* is plan chapter *n* — the hook is chapter 1, the CTA
-//! the last chapter, the body everything between — because every consumer of
-//! `notes.json` reads it by position. [`Plan::to_notes`] is the one place a
-//! plan becomes that deck.
+//! Recording chapter *n* is plan chapter *n* — the hook is chapter 1, the
+//! outline chapter 2, the CTA the last chapter, the body everything between —
+//! because every consumer of `notes.json` reads it by position.
+//! [`Plan::to_notes`] is the one place a plan becomes that deck.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,13 +11,17 @@ use serde::{Deserialize, Serialize};
 use crate::layouts::Pair;
 use crate::notes::{Chapter, NotesData};
 
-/// Where a chapter sits in the video's arc. The hook opens it and gets no
-/// chapter card (chapter one never has one); the CTA closes it and gets none
-/// either.
+/// Where a chapter sits in the video's arc: hook, outline, the body chapters,
+/// then the call to action. The hook opens it as a talking head and gets no
+/// chapter card (chapter one never has one). The outline follows it, in the
+/// outline layout, listing the body chapters by title — it introduces the
+/// cards rather than being one, so it gets none and the first body chapter's
+/// card is "01". The CTA closes it and gets none either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChapterKind {
     Hook,
+    Outline,
     Body,
     Cta,
 }
@@ -168,7 +172,7 @@ impl Plan {
                 let line = match chapter.kind {
                     ChapterKind::Hook => Some(body.hook.line.trim()),
                     ChapterKind::Cta => Some(body.cta.line.trim()),
-                    ChapterKind::Body => None,
+                    ChapterKind::Outline | ChapterKind::Body => None,
                 }
                 .filter(|line| !line.is_empty());
                 let mut cues = chapter.cues.clone();

@@ -167,6 +167,33 @@ pub fn cta_chapter_of(session: &Session) -> Option<u32> {
     cta_chapter(Some(&plan.body), &recorded)
 }
 
+/// The recording chapter that carries the plan's outline, which — like the
+/// CTA — gets no chapter card and no short: it introduces the cards, and a
+/// short of a table of contents is not a short.
+///
+/// Read from the bindings, like [`cta_chapter_of`]: the first recorded chapter
+/// bound to the plan's outline. A recording with no bindings at all falls
+/// back to the approved plan: chapter two, when that is the plan's outline
+/// and it has been recorded. `None` for a plan with no outline chapter —
+/// every plan built before there was one — which lays out as it always did.
+pub fn outline_chapter_of(session: &Session) -> Option<u32> {
+    let recorded = crate::notes::closed_chapter_numbers(&session.dir);
+    let bound: Vec<(u32, binding::Binding)> = recorded
+        .iter()
+        .filter_map(|&n| Some((n, binding::load(&session.dir, n)?)))
+        .collect();
+    if !bound.is_empty() {
+        return bound
+            .iter()
+            .filter(|(_, b)| b.kind == ChapterKind::Outline)
+            .map(|(n, _)| *n)
+            .min()
+            .filter(|&n| n > 1);
+    }
+    let plan = approved(&dir(session))?;
+    (plan.body.chapter(2)?.kind == ChapterKind::Outline && recorded.contains(&2)).then_some(2)
+}
+
 /// The plan the recording follows: the approved version, else the newest.
 ///
 /// This is what the teleprompter shows and what New Chapter takes its layout

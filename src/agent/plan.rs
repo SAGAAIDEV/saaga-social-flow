@@ -1,10 +1,14 @@
 //! The extractor behind [`crate::plan`]: an idea talked into the mic (or typed,
 //! or rehearsed) in, a plan for recording it out.
 //!
-//! The model is asked for the plan's *shape* — one hook chapter first, one CTA
-//! chapter last, the body between — and [`clean`] enforces it rather than
-//! trusting it, because recording chapter *n* is plan chapter *n* and a hook
-//! that drifted to position two would put every card title one chapter off.
+//! The model is asked for the plan's *shape* — the hook, then the outline, then
+//! the body chapters, then the call to action — and [`clean`] enforces it
+//! rather than trusting it, because recording chapter *n* is plan chapter *n*
+//! and a hook that drifted to position two would put every card title one
+//! chapter off. The layouts are part of the shape: the hook is always a
+//! talking head, the outline is always the outline layout listing the body
+//! chapters by title, and every other chapter gets a layout that fits what is
+//! on screen when the model left it out.
 
 use anyhow::{bail, Result};
 use schemars::JsonSchema;
@@ -15,8 +19,11 @@ use crate::plan::schema::{ChapterKind, Cta, Hook, Plan, PlanBody, PlanChapter};
 
 use super::prompt;
 
-/// The most body chapters a plan keeps. Past this it is two videos.
-pub const MAX_BODY_CHAPTERS: usize = 12;
+/// The most body chapters a plan keeps — as many as the outline card lists
+/// (see [`crate::outline::MAX_POINTS`]). Past this it is two videos.
+pub const MAX_BODY_CHAPTERS: usize = crate::outline::MAX_POINTS;
+/// The outline chapter's title when the model gives none.
+const OUTLINE_TITLE: &str = "What we'll cover";
 /// The most points a chapter keeps — what the deck shows at a glance.
 pub const MAX_POINTS: usize = 6;
 pub const MAX_OUTLINE: usize = 8;
@@ -35,14 +42,17 @@ Output a JSON object:\n\
 - hook: { line, angle }. line is the opening sentence or two, written to be said out \
 loud; angle is why it holds a viewer.\n\
 - outline: the arc in 3-6 short beats.\n\
-- chapters: in recording order. Exactly one chapter of kind \"hook\" first, exactly \
-one of kind \"cta\" last, and one or more of kind \"body\" between them.\n\
+- chapters: in recording order, always in this shape: one chapter of kind \"hook\" \
+first; then one of kind \"outline\", where the author tells the viewer what the video \
+covers; then two to eight of kind \"body\", one per topic; then one of kind \"cta\" \
+last.\n\
 - cta: { line, placement }. line is the ask, written to be said; placement is what \
 earns it.\n\
 - instructions: 3-8 directions for recording: what to have open, setup, delivery.\n\n\
 Each chapter:\n\
-- kind: \"hook\", \"body\" or \"cta\".\n\
-- title: 2-5 words naming it. No numbering, no trailing punctuation.\n\
+- kind: \"hook\", \"outline\", \"body\" or \"cta\".\n\
+- title: 2-5 words naming it. No numbering, no trailing punctuation. A body chapter's \
+title is its chapter card and its line in the outline, so it names the topic.\n\
 - goal: what the viewer should understand by its end, one sentence.\n\
 - points: the beats to hit, as short fragments a glance is enough for. 2-5, never more \
 than 6.\n\
@@ -53,8 +63,10 @@ than 6.\n\
 points beside the camera).\n\
 - est_seconds: roughly how long it runs.\n\n\
 Keep the author's voice and their examples; tighten, do not invent facts they did not \
-give. The hook chapter is short — the hook and the promise, nothing else. The CTA \
-chapter is short too. When a current plan is given, refine it: keep what works and \
+give. The hook chapter is short — the hook and the promise, nothing else — said to the \
+camera, layout \"talking-head\". The outline chapter is short too: one line per body \
+chapter, in order, layout \"outline\"; its points are the body chapters' titles. The \
+CTA chapter is short, usually \"talking-head\". When a current plan is given, refine it: keep what works and \
 change what the refine note asks.";
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
@@ -228,13 +240,19 @@ pub fn build_plan(
 }
 
 /// The model's plan, trimmed, capped, and put in the one shape the recorder
-/// can use: hook first, CTA last, at least one body chapter between.
+/// can use: hook, outline, body chapters, call to action.
 ///
 /// A hook or CTA chapter the model left out is made from the `hook` / `cta`
 /// line; a second one is kept as a body chapter where it stood rather than
 /// dropped, since it is still something the author said. A plan with no hook
 /// line, no CTA line or no body at all is an error — there is nothing to fill
 /// the gap from.
+///
+/// The outline is built here rather than taken on trust: its points are the
+/// body chapters' titles, in order, so the card on screen promises exactly the
+/// chapters that follow. The model's outline chapter lends only its title and
+/// wording. A plan with a single body chapter has nothing to outline and gets
+/// none. Then the layouts: see [`check_layouts`].
 fn clean(raw: PlanExtraction) -> Result<PlanBody> {
     let mut chapters: Vec<PlanChapter> =
         raw.chapters.into_iter().filter_map(clean_chapter).collect();
@@ -244,6 +262,7 @@ fn clean(raw: PlanExtraction) -> Result<PlanBody> {
 
     let hook = take_kind(&mut chapters, ChapterKind::Hook, true);
     let cta = take_kind(&mut chapters, ChapterKind::Cta, false);
+    let outline = take_kind(&mut chapters, ChapterKind::Outline, true);
     for chapter in &mut chapters {
         chapter.kind = ChapterKind::Body;
     }
@@ -268,11 +287,14 @@ fn clean(raw: PlanExtraction) -> Result<PlanBody> {
     }
     let hook = hook.unwrap_or_else(|| made_chapter(ChapterKind::Hook, "The hook"));
     let cta = cta.unwrap_or_else(|| made_chapter(ChapterKind::Cta, "What to do next"));
+    let outline = (chapters.len() > 1).then(|| outline_chapter(outline, &chapters));
 
-    let mut ordered = Vec::with_capacity(chapters.len() + 2);
+    let mut ordered = Vec::with_capacity(chapters.len() + 3);
     ordered.push(hook);
+    ordered.extend(outline);
     ordered.extend(chapters);
     ordered.push(cta);
+    check_layouts(&mut ordered);
 
     Ok(PlanBody {
         working_title: raw.working_title.trim().to_string(),
@@ -290,6 +312,51 @@ fn clean(raw: PlanExtraction) -> Result<PlanBody> {
         },
         instructions: clean_list(&raw.instructions, MAX_INSTRUCTIONS, 200),
     })
+}
+
+/// The outline chapter: the model's, when it wrote one, with its points
+/// replaced by the body chapters' titles.
+fn outline_chapter(model: Option<PlanChapter>, body: &[PlanChapter]) -> PlanChapter {
+    let mut chapter = model.unwrap_or_else(|| made_chapter(ChapterKind::Outline, OUTLINE_TITLE));
+    if chapter.title.trim().is_empty() {
+        chapter.title = OUTLINE_TITLE.into();
+    }
+    chapter.points = body
+        .iter()
+        .map(|chapter| clip(&chapter.title, crate::outline::MAX_TEXT_CHARS))
+        .collect();
+    chapter.show = "the outline beside the camera".into();
+    chapter
+}
+
+/// Every chapter's layout, checked against its place in the shape.
+///
+/// The hook is a talking head whatever the model said: it is the face that
+/// opens the video. The outline is the outline layout — the layout exists to
+/// show its points. A body or CTA chapter keeps the layout it was given, and
+/// one with none gets the layout its `show` implies: the screen beside the
+/// camera when there is something to show, a talking head when it is the
+/// camera alone.
+fn check_layouts(chapters: &mut [PlanChapter]) {
+    for chapter in chapters {
+        match chapter.kind {
+            ChapterKind::Hook => {
+                chapter.layout = Some(Pair::TalkingHead);
+                chapter.show = "camera".into();
+            }
+            ChapterKind::Outline => chapter.layout = Some(Pair::Outline),
+            ChapterKind::Body | ChapterKind::Cta => {
+                let show = chapter.show.trim();
+                chapter.layout = chapter.layout.or(Some(
+                    if show.is_empty() || show.eq_ignore_ascii_case("camera") {
+                        Pair::TalkingHead
+                    } else {
+                        Pair::Split
+                    },
+                ));
+            }
+        }
+    }
 }
 
 /// Removes and returns the first (`first`) or last chapter of `kind`.
@@ -418,7 +485,7 @@ mod tests {
         body.chapters.iter().map(|c| c.title.as_str()).collect()
     }
 
-    use ChapterKind::{Body, Cta as CtaKind, Hook as HookKind};
+    use ChapterKind::{Body, Cta as CtaKind, Hook as HookKind, Outline as OutlineKind};
 
     #[test]
     fn a_well_formed_plan_keeps_its_order() {
@@ -430,10 +497,16 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(body.working_title, "Ship it");
-        assert_eq!(kinds(&body), [HookKind, Body, Body, CtaKind]);
+        assert_eq!(kinds(&body), [HookKind, OutlineKind, Body, Body, CtaKind]);
         assert_eq!(
             titles(&body),
-            ["The hour", "The cache", "The fix", "Next time"]
+            [
+                "The hour",
+                OUTLINE_TITLE,
+                "The cache",
+                "The fix",
+                "Next time"
+            ]
         );
     }
 
@@ -449,11 +522,96 @@ mod tests {
             chapter(HookKind, "Another hook"),
         ]))
         .unwrap();
-        assert_eq!(kinds(&body), [HookKind, Body, Body, CtaKind]);
+        assert_eq!(kinds(&body), [HookKind, OutlineKind, Body, Body, CtaKind]);
         assert_eq!(
             titles(&body),
-            ["The hour", "The cache", "Another hook", "Next time"]
+            [
+                "The hour",
+                OUTLINE_TITLE,
+                "The cache",
+                "Another hook",
+                "Next time"
+            ]
         );
+    }
+
+    /// The outline lists the body chapters by title, in order, whatever the
+    /// model put in it — and keeps the model's title and wording, moved to
+    /// right after the hook wherever the model put it.
+    #[test]
+    fn the_outline_follows_the_hook_and_lists_the_body_titles() {
+        let body = clean(raw(vec![
+            chapter(HookKind, "The hour"),
+            chapter(Body, "The cache"),
+            ExtractedChapter {
+                points: vec!["Something else entirely".into()],
+                verbatim: Some("Here is the plan.".into()),
+                layout: Some(ExtractedLayout::Split),
+                ..chapter(OutlineKind, "The road map")
+            },
+            chapter(Body, "The fix"),
+            chapter(CtaKind, "Next time"),
+        ]))
+        .unwrap();
+        let outline = &body.chapters[1];
+        assert_eq!(outline.kind, OutlineKind);
+        assert_eq!(outline.title, "The road map");
+        assert_eq!(outline.points, ["The cache", "The fix"]);
+        assert_eq!(outline.verbatim.as_deref(), Some("Here is the plan."));
+        assert_eq!(outline.layout, Some(Pair::Outline));
+    }
+
+    /// One body chapter has nothing to outline.
+    #[test]
+    fn a_single_body_chapter_gets_no_outline() {
+        let body = clean(raw(vec![
+            chapter(HookKind, "The hour"),
+            chapter(OutlineKind, "Coming up"),
+            chapter(Body, "The cache"),
+            chapter(CtaKind, "Next time"),
+        ]))
+        .unwrap();
+        assert_eq!(kinds(&body), [HookKind, Body, CtaKind]);
+    }
+
+    /// The hook is a talking head whatever the model said; a chapter with no
+    /// layout gets the one its `show` implies, and a given one is kept.
+    #[test]
+    fn every_chapter_gets_a_checked_layout() {
+        let body = clean(raw(vec![
+            ExtractedChapter {
+                layout: Some(ExtractedLayout::Split),
+                show: "the dashboard".into(),
+                ..chapter(HookKind, "The hour")
+            },
+            ExtractedChapter {
+                show: "the terminal".into(),
+                ..chapter(Body, "The cache")
+            },
+            ExtractedChapter {
+                show: "camera".into(),
+                ..chapter(Body, "Why it matters")
+            },
+            ExtractedChapter {
+                layout: Some(ExtractedLayout::Outline),
+                ..chapter(Body, "Three rules")
+            },
+            chapter(CtaKind, "Next time"),
+        ]))
+        .unwrap();
+        let layouts: Vec<_> = body.chapters.iter().map(|c| c.layout).collect();
+        assert_eq!(
+            layouts,
+            [
+                Some(Pair::TalkingHead),
+                Some(Pair::Outline),
+                Some(Pair::Split),
+                Some(Pair::TalkingHead),
+                Some(Pair::Outline),
+                Some(Pair::TalkingHead),
+            ]
+        );
+        assert_eq!(body.chapters[0].show, "camera");
     }
 
     #[test]
@@ -530,15 +688,15 @@ mod tests {
         let mut chapters = vec![long, blank];
         chapters.extend(many);
         let body = clean(raw(chapters)).unwrap();
-        let first = &body.chapters[1];
+        let first = &body.chapters[2];
         assert!(first.title.chars().count() <= MAX_TITLE_CHARS);
         assert!(!first.title.ends_with(' '));
         assert_eq!(first.points.len(), MAX_POINTS);
         assert_eq!(first.points[0], "point 0");
         assert_eq!(first.layout, Some(Pair::Outline));
         assert_eq!(first.est_seconds, None, "zero seconds is no estimate");
-        // Hook and CTA are made, plus the body capped.
-        assert_eq!(body.chapters.len(), MAX_BODY_CHAPTERS + 2);
+        // Hook, outline and CTA are made, plus the body capped.
+        assert_eq!(body.chapters.len(), MAX_BODY_CHAPTERS + 3);
         assert!(body.chapters.iter().all(|c| !c.title.trim().is_empty()));
     }
 
@@ -595,7 +753,7 @@ mod tests {
     #[test]
     fn the_schema_names_the_three_kinds_and_layouts() {
         let schema = serde_json::to_string(&schemars::schema_for!(PlanExtraction)).unwrap();
-        for word in ["hook", "body", "cta", "talking-head", "split", "outline"] {
+        for word in ["hook", "outline", "body", "cta", "talking-head", "split"] {
             assert!(schema.contains(&format!("\"{word}\"")), "{word} in schema");
         }
     }

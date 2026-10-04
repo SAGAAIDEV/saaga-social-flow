@@ -161,6 +161,7 @@ pub fn prepare(
         titles,
         &[],
         None,
+        None,
         crate::config::RenderTargets::default(),
     )
 }
@@ -183,6 +184,13 @@ pub fn prepare(
 /// read here, like the titles and outlines, so the layout stays a function of
 /// what it is handed. `None` — no approved plan, or one without a CTA — lays
 /// out every chapter exactly as before plans existed.
+///
+/// `intro` is the chapter recorded for the plan's outline — see
+/// [`crate::plan::outline_chapter_of`]. It follows the hook straight from the
+/// talking head with no card, and the body chapters after it are numbered from
+/// "01", so the cards count the chapters the outline listed. No vertical
+/// either, for the CTA's reason.
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_targets(
     edit_root: &Path,
     compose_root: &Path,
@@ -190,6 +198,7 @@ pub fn prepare_targets(
     titles: &[(u32, String)],
     outlines: &[crate::outline::ChapterOutline],
     cta: Option<u32>,
+    intro: Option<u32>,
     targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
@@ -256,8 +265,14 @@ pub fn prepare_targets(
             //
             // The CTA chapter has none either, and the numbering is unaffected:
             // it is last, so no card after it has a number to shift.
-            if !h_segments.is_empty() && cta != Some(*n) {
-                h_segments.push(Segment::Render(write_card(&horizontal, *n, title)?));
+            //
+            // The outline chapter has none, and the cards after it count from
+            // "01" again: it is one fewer chapter before them with a number.
+            if !h_segments.is_empty() && cta != Some(*n) && intro != Some(*n) {
+                let shown = n
+                    .saturating_sub(1)
+                    .saturating_sub(u32::from(intro.is_some_and(|i| i < *n)));
+                h_segments.push(Segment::Render(write_card(&horizontal, *n, shown, title)?));
             }
             match outline {
                 // An outline chapter is drawn: its footage goes into the
@@ -285,7 +300,7 @@ pub fn prepare_targets(
         // the S3 upload and the schedule enumerate — so leaving the CTA out
         // here is all it takes for neither to see it. The vertical longform is
         // these parts joined, so it ends on the last body chapter.
-        if targets.vertical_parts() && v_src.exists() && cta != Some(*n) {
+        if targets.vertical_parts() && v_src.exists() && cta != Some(*n) && intro != Some(*n) {
             let seconds = cut::probe_duration_seconds(&v_src)?;
             copy_media(&vertical, *n, &v_src, audio.exists().then_some(&audio))?;
             v_jobs.push(match outline {
@@ -418,13 +433,14 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
 /// The card before source chapter `n`, displaying `n - 1`.
 /// Only the display number is offset; source IDs, titles and media are unchanged.
 /// An empty title leaves the label/number alone, with no invented topic.
-fn write_card(workspace: &Path, n: u32, title: &str) -> Result<Job> {
+/// The card in front of recording chapter `n`, reading "Chapter `shown`".
+fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
         &format!("seg-{n:02}-card"),
         serde_json::json!({
             "chapterLabel": "Chapter",
-            "chapterNumber": format!("{:02}", n.saturating_sub(1)),
+            "chapterNumber": format!("{shown:02}"),
             "chapterTopic": title,
             "durationSeconds": CARD_SECONDS,
             // Revealed on a beat, like it always was: a chapter card appears
@@ -907,8 +923,17 @@ mod tests {
 
         let everything = RenderTargets::default();
         assert!(everything.vertical_parts(), "the shorts are in play");
-        let plan =
-            prepare_targets(&edit, &compose, &library, &titles, &[], Some(3), everything).unwrap();
+        let plan = prepare_targets(
+            &edit,
+            &compose,
+            &library,
+            &titles,
+            &[],
+            Some(3),
+            None,
+            everything,
+        )
+        .unwrap();
         assert_eq!(
             ids(&plan),
             [
@@ -927,8 +952,17 @@ mod tests {
             shorts: false,
             cloud: false,
         };
-        let plan =
-            prepare_targets(&edit, &compose, &library, &titles, &[], None, horizontal).unwrap();
+        let plan = prepare_targets(
+            &edit,
+            &compose,
+            &library,
+            &titles,
+            &[],
+            None,
+            None,
+            horizontal,
+        )
+        .unwrap();
         assert_eq!(
             ids(&plan),
             [
@@ -989,7 +1023,7 @@ mod tests {
         }
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
         let plan = |targets: RenderTargets| {
-            prepare_targets(&edit, &compose, &library, &titles, &[], None, targets)
+            prepare_targets(&edit, &compose, &library, &titles, &[], None, None, targets)
         };
 
         // Only the horizontal: cards and bodies, no chapter compositions.
@@ -1039,13 +1073,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
+    /// Hook, outline, body, CTA: the outline follows the hook with no card,
+    /// the first body chapter's card reads "01", and the CTA has none.
+    #[test]
+    fn the_outline_chapter_has_no_card_and_the_body_counts_from_one() {
+        let (library, edit, compose) = fixture("intro");
+        for n in 3..=4 {
+            let chapter = edit.join(format!("chapter-{n:02}"));
+            std::fs::create_dir_all(&chapter).unwrap();
+            std::fs::write(chapter.join(format!("chapter-{n:02}-horizontal.mp4")), b"v").unwrap();
+        }
+        let titles: Vec<(u32, String)> = ["Hook", "What we'll cover", "The fix", "Subscribe"]
+            .iter()
+            .enumerate()
+            .map(|(i, title)| (i as u32 + 1, title.to_string()))
+            .collect();
+        let horizontal = crate::config::RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: false,
+            cloud: false,
+        };
+        let plan = prepare_targets(
+            &edit,
+            &compose,
+            &library,
+            &titles,
+            &[],
+            Some(4),
+            Some(2),
+            horizontal,
+        )
+        .unwrap();
+        let ids: Vec<String> = plan
+            .h_segments
+            .iter()
+            .map(|segment| match segment {
+                Segment::Render(job) => job.id.clone(),
+                Segment::Passthrough(path) => path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "chapter-01-horizontal",
+                "chapter-02-horizontal",
+                "seg-03-card",
+                "chapter-03-horizontal",
+                "chapter-04-horizontal"
+            ]
+        );
+        let card =
+            std::fs::read_to_string(compose.join("horizontal/compositions/seg-03-card.html"))
+                .unwrap();
+        assert!(card.contains(r#""chapterNumber":"01""#), "{card}");
+        assert!(card.contains("The fix"));
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
     #[test]
     fn card_numbers_subtract_one_without_renaming_the_source_chapter() {
         let (library, edit, compose) = fixture("card-number-offset");
         prepare(&edit, &compose, &library, &[]).unwrap();
         let workspace = compose.join("horizontal");
         for (source, display) in [(0, "00"), (1, "00"), (2, "01"), (9, "08")] {
-            let job = write_card(&workspace, source, "Keep this title").unwrap();
+            let job = write_card(
+                &workspace,
+                source,
+                source.saturating_sub(1),
+                "Keep this title",
+            )
+            .unwrap();
             assert_eq!(job.id, format!("seg-{source:02}-card"));
             let card = std::fs::read_to_string(workspace.join(&job.composition)).unwrap();
             assert!(
@@ -1302,6 +1403,7 @@ mod library_tests {
             &components_root(),
             &[(1, "First".into()), (2, "Second".into())],
             &[outline],
+            None,
             None,
             crate::config::RenderTargets::default(),
         )

@@ -319,7 +319,8 @@ fn compose_and_render(
         status,
     )?;
     let cta = crate::plan::cta_chapter_of(session);
-    if let Some(n) = cta {
+    let intro = crate::plan::outline_chapter_of(session);
+    for n in cta.into_iter().chain(intro) {
         drop_cta_short(&session.render_dir(), n)?;
     }
     status("Preparing HyperFrames compositions…");
@@ -330,6 +331,7 @@ fn compose_and_render(
         &titles,
         &outlines,
         cta,
+        intro,
         targets,
     )?;
     if plan.is_empty() {
@@ -347,7 +349,8 @@ fn compose_and_render(
     Ok(render_out)
 }
 
-/// Takes a short of the CTA chapter off disk, if an earlier render left one.
+/// Takes a short of the CTA or outline chapter off disk, if an earlier render
+/// left one.
 ///
 /// Compose no longer plans one, but a render from before the plan was approved
 /// — or from before a later chapter made this one the last — may have drawn
@@ -359,8 +362,8 @@ fn drop_cta_short(render_dir: &Path, n: u32) -> Result<()> {
     match std::fs::remove_file(&short) {
         Ok(()) => {
             eprintln!(
-                "stream-recorder: removed {} — chapter {n:02} is the plan's call to action, \
-                 which is not a short",
+                "stream-recorder: removed {} — chapter {n:02} is the plan's call to action \
+                 or outline, which is not a short",
                 short.display()
             );
             Ok(())

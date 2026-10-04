@@ -425,6 +425,7 @@ fn layout_options() -> Vec<LayoutOption> {
 fn chapter_view(n: usize, chapter: &crate::plan::schema::PlanChapter) -> ChapterView {
     let (kind, kind_label) = match chapter.kind {
         ChapterKind::Hook => ("hook", "Hook"),
+        ChapterKind::Outline => ("outline", "Outline"),
         ChapterKind::Body => ("body", "Body"),
         ChapterKind::Cta => ("cta", "Call to action"),
     };
