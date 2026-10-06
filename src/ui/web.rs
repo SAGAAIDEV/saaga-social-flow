@@ -67,6 +67,8 @@ pub enum WebEvent {
     GenerateThumbnails,
     /// Draw the procedural card.
     DrawCard,
+    /// Approve the drawn artwork set for publishing.
+    ApproveThumbnail,
     /// The edited brief, field by field.
     SaveBrief {
         fields: std::collections::BTreeMap<String, String>,
@@ -281,6 +283,7 @@ impl WebEvent {
                 UiEvent::Action(crate::hotkeys::Action::GenerateThumbnails)
             }
             WebEvent::DrawCard => UiEvent::Action(crate::hotkeys::Action::DrawCard),
+            WebEvent::ApproveThumbnail => UiEvent::Action(crate::hotkeys::Action::ApproveThumbnail),
             WebEvent::SaveBrief { fields } => UiEvent::SaveBrief(fields),
             WebEvent::SaveCard { fields } => UiEvent::SaveCard(fields),
             WebEvent::GenerateArtwork { fields } => UiEvent::GenerateArtwork(fields),

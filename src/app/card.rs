@@ -34,6 +34,9 @@ impl App {
             Ok(job) => {
                 self.card_pending = Some(job);
                 self.draw_next_asset();
+                // Approve goes off for the length of the draw: the set it
+                // would approve is about to be replaced.
+                self.update_thumbnail_view();
                 self.card_pending.is_some()
             }
             Err(err) => {
@@ -105,7 +108,10 @@ impl App {
                         Ok(()) => {
                             committed = true;
                             self.set_thumbnail_progress(Some(1.0));
-                            self.set_thumbnail_status("Artwork ready: horizontal, vertical and OG. YouTube, blog and social exports use this set.");
+                            self.set_thumbnail_status(
+                                "Artwork drawn: horizontal, vertical and OG. Review it and press \
+                                 Approve — nothing is published until you do.",
+                            );
                         }
                         Err(err) => {
                             failed = true;
@@ -128,7 +134,9 @@ impl App {
         self.update_blog_view();
         self.sync_controls();
         if committed {
-            self.finish_pipeline_with_upload();
+            // A fresh set is never approved — its id is new — so the chain
+            // stops here for someone to look at it.
+            self.stop_pipeline_for_review();
         } else if failed {
             self.pipeline = false;
         }

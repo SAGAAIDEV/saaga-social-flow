@@ -114,6 +114,9 @@ pub enum Action {
     /// Draw the procedural thumbnail — see [`crate::card`]. No hotkey: it is
     /// pressed after typing in the two boxes right above the button.
     DrawCard,
+    /// The Thumbnail tab's Approve: the drafted set may be published, and the
+    /// uploads the render press stopped short of start.
+    ApproveThumbnail,
     CollectAllAnalytics,
     NewProject,
     NewVersion,

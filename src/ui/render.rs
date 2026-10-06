@@ -36,6 +36,10 @@ fn environment() -> Environment<'static> {
         .expect("components template");
     env.add_template("reflect.html", REFLECT)
         .expect("reflect template");
+    env.add_template("studio.html", include_str!("templates/studio.html"))
+        .expect("studio styles");
+    env.add_template("thumbnail.html", include_str!("templates/thumbnail.html"))
+        .expect("thumbnail template");
     env.add_template("video.html", VIDEO)
         .expect("video template");
     env.add_template("edit.html", EDIT).expect("edit template");
@@ -130,9 +134,7 @@ mod tests {
         }
     }
 
-    /// The artwork half of the video pane, for tests whose subject is something
-    /// else on the same page. Every one of them still has to supply it: the
-    /// sections share a template, and a pane that cannot render shows nothing.
+    /// The Thumbnail tab's artwork with nothing drawn and no photo yet.
     fn empty_art() -> minijinja::Value {
         context! {
             artwork => Vec::<()>::new(), artwork_notice => None::<String>,
@@ -150,6 +152,11 @@ mod tests {
                 focus => "0.50", can_draw => false, hint => "Capture your photo first.",
             },
         }
+    }
+
+    /// Where the thumbnail stands, as the recording page's strip reads it.
+    fn no_thumbnail() -> minijinja::Value {
+        context! { review => "none", has_photo => false }
     }
 
     fn no_clips() -> minijinja::Value {
@@ -208,7 +215,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief { notes: "</textarea><script>bad()</script>".into(), title: "A title".into(), description: "A description".into() },
                 root => "/tmp/project", busy => true, model => "chosen-model",
-                art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
             },
         );
         assert!(!html.contains("template error"), "{html}");
@@ -226,8 +233,54 @@ mod tests {
         );
     }
 
-    /// Before any render there is no copy, no artwork and nothing to watch, and
-    /// each section says what will fill it rather than drawing an empty box.
+    /// A drawn set with its photo, the design and the AI experiments, as the
+    /// Thumbnail tab is handed it.
+    fn drawn_art() -> minijinja::Value {
+        context! {
+            artwork => vec![
+                context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
+                context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
+                context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
+            ],
+            artwork_notice => None::<String>,
+            still => context! { url => "file:///tmp/still.jpg" },
+            screen => context! { url => "file:///tmp/screen.jpg" },
+            brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
+            candidates => vec![
+                context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
+            ],
+            models => vec![
+                context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
+            ],
+            references => vec![
+                context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
+            ],
+            active_id => "thumb-a", can_generate => true, blocked => None::<String>,
+            card => context! {
+                format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
+                kicker => "SAAGA",
+                themes => vec![
+                    context! { id => "dark", label => "dark", selected => true },
+                    context! { id => "light", label => "light", selected => false },
+                ],
+                focus => "0.34", can_draw => true, hint => "Redraws all three.",
+            },
+        }
+    }
+
+    fn thumbnail_page(art: minijinja::Value, review: &str) -> String {
+        page(
+            "thumbnail.html",
+            context! {
+                art => art, review => review, can_approve => review == "drafted",
+                drawing => false, approved_at => None::<String>, title => "Ship it anyway",
+                live => false, photo_countdown => 3,
+            },
+        )
+    }
+
+    /// Before any render there is no copy and nothing to watch, and each
+    /// section says what will fill it rather than drawing an empty box.
     #[test]
     fn an_empty_video_pane_says_what_the_render_will_produce() {
         let html = page(
@@ -235,64 +288,41 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief::default(),
                 root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
             },
         );
         assert!(!html.contains("template error"), "{html}");
         assert!(!html.contains("id=\"copy\""));
         assert!(html.contains("Nothing written yet"));
-        assert!(html.contains("No artwork yet"));
-        assert!(html.contains("No photo yet"));
-        // Both retakes are offered whatever the state: the photo, and the screen
-        // on its own so a good photo survives a slide change.
-        assert!(html.contains("captureFrame") && html.contains("captureScreen"));
         assert!(html.contains("Nothing rendered yet"));
         assert!(html.contains("name=\"notes\""));
         assert!(!html.contains("<fieldset disabled>"));
-        // Nothing to redraw from, so the button is not offered.
-        let redraw = html.find("generateArtwork").expect("the redraw button");
-        assert!(html[..redraw].rfind("disabled").is_some());
+        // The artwork is the Thumbnail tab's: none of its controls are here.
+        for gone in [
+            "generateArtwork",
+            "captureFrame",
+            "approveThumbnail",
+            "data-form=\"card\"",
+        ] {
+            assert!(!html.contains(gone), "{gone} is on the recording page");
+        }
+        assert!(
+            html.contains("Thumbnail</b> tab"),
+            "the page says where the thumbnail went"
+        );
     }
 
-    /// After a render the page is the whole result: the copy, the three pictures
-    /// the set is made of, the photo they were drawn from, and the clips.
+    /// After a render the recording page is the copy, the figures and the
+    /// clips, in the order they are produced, and its strip says where the
+    /// thumbnail stands without showing it.
     #[test]
-    fn a_rendered_video_pane_shows_copy_artwork_and_clips_in_that_order() {
+    fn a_rendered_video_pane_shows_copy_figures_and_clips_in_that_order() {
         let html = page(
             "video.html",
             context! {
                 brief => crate::video_brief::Brief { notes: "".into(), title: "Ship it anyway".into(), description: "Why the queue fell over.".into() },
                 root => "/tmp/project", busy => false, model => "m",
-                art => context! {
-                    artwork => vec![
-                        context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
-                        context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
-                        context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
-                    ],
-                    artwork_notice => None::<String>,
-                    still => context! { url => "file:///tmp/still.jpg" },
-                    screen => context! { url => "file:///tmp/screen.jpg" },
-                    brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
-                    candidates => vec![
-                        context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
-                    ],
-                    models => vec![
-                        context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
-                    ],
-                    references => vec![
-                        context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
-                    ],
-                    active_id => "thumb-a", can_generate => true, blocked => None::<String>,
-                    card => context! {
-                        format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
-                        kicker => "SAAGA",
-                        themes => vec![
-                            context! { id => "dark", label => "dark", selected => true },
-                            context! { id => "light", label => "light", selected => false },
-                        ],
-                        focus => "0.34", can_draw => true, hint => "Redraws all three.",
-                    },
-                },
+                thumbnail => context! { review => "drafted", has_photo => true },
                 review => context! {
                     blocked => None::<String>,
                     clips => vec![
@@ -325,7 +355,6 @@ mod tests {
             },
         );
         assert!(!html.contains("template error"), "{html}");
-        // The figures, each with what was said over it — or why nothing was yet.
         assert!(
             html.contains("every line a 429"),
             "the spoken explanation is on the page"
@@ -334,59 +363,136 @@ mod tests {
             html.contains("Transcribing what you said…"),
             "a figure still transcribing says so"
         );
-        assert!(
-            html.contains("The retry storm that took the queue down."),
-            "the blurb is shown under it"
-        );
-        assert!(html.contains("figure-02.webp") && html.contains("figure-01.webp"));
+        assert!(html.contains("The retry storm that took the queue down."));
         assert!(html.contains("captureFigure") && html.contains("writeBlurbs"));
-        let figs = html.find("figure-02.webp").unwrap();
-        assert!(
-            html.find("horizontal.jpg").unwrap() < figs
-                && figs < html.find("longform.mp4").unwrap(),
-            "figures sit between the artwork and the clips"
-        );
         // Order of production is the order on the page.
         let copy = html.find("id=\"copy\"").expect("the copy box");
-        let art = html.find("horizontal.jpg").expect("the artwork set");
+        let figs = html.find("figure-02.webp").expect("the figures");
         let clips = html.find("longform.mp4").expect("the clips");
-        assert!(copy < art && art < clips, "copy, then artwork, then review");
-        // All three pictures, the photo they were drawn from, and the screen.
-        assert!(html.contains("vertical.jpg") && html.contains("og.jpg"));
-        assert!(html.contains("still.jpg") && html.contains("screen.jpg"));
-        // The two clips, shaped like their video.
+        assert!(
+            copy < figs && figs < clips,
+            "copy, then figures, then review"
+        );
         assert!(html.contains("clip landscape") && html.contains("clip portrait"));
         assert!(html.contains("12.5 MB"));
-        // The corrections are on the page: retake the photo, redraw, tweak the design.
-        assert!(html.contains("captureFrame"));
-        assert!(html.contains("generateArtwork"));
-        assert!(html.contains("saveCard"));
-        assert!(html.contains(r#"data-form="card""#));
-        assert!(html.contains(r#"data-field="kicker""#));
+        assert!(
+            !html.contains("horizontal.jpg"),
+            "the artwork is on the Thumbnail tab"
+        );
+        // The strip: photo, render and copy done; the thumbnail waits on review.
+        let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
+        assert_eq!(steps.matches("\"done\"").count(), 3, "{steps}");
+        assert!(
+            steps.contains(r#"class="review""#) && steps.contains("Thumbnail · review"),
+            "{steps}"
+        );
+        assert!(steps.contains("YouTube"));
+    }
+
+    /// The strip's thumbnail dot follows the review: approved is done, a stale
+    /// set is flagged, and nothing drawn is neither.
+    #[test]
+    fn the_video_strip_reads_the_thumbnail_review() {
+        let strip = |state: &str| {
+            let html = page(
+                "video.html",
+                context! {
+                    brief => crate::video_brief::Brief::default(), root => "/tmp/p", busy => false, model => "m",
+                    thumbnail => context! { review => state, has_photo => false },
+                    review => no_clips(), youtube => None::<String>, figures => no_figures(),
+                },
+            );
+            assert!(!html.contains("template error"), "{html}");
+            let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
+            let item = &steps[..steps.find("Thumbnail").unwrap()];
+            item[item.rfind("<li").unwrap()..].to_string()
+        };
+        assert!(strip("approved").contains(r#"class="done""#));
+        assert!(strip("stale").contains(r#"class="stale""#));
+        assert!(strip("none").contains(r#"class="""#));
+    }
+
+    /// The Thumbnail tab is the whole artwork step: the three pictures, the
+    /// photo they were drawn from, every correction, and Approve.
+    #[test]
+    fn the_thumbnail_pane_shows_the_set_its_photo_and_approve() {
+        let html = thumbnail_page(drawn_art(), "drafted");
+        assert!(!html.contains("template error"), "{html}");
+        assert!(
+            html.contains("horizontal.jpg")
+                && html.contains("vertical.jpg")
+                && html.contains("og.jpg")
+        );
+        assert!(html.contains("still.jpg") && html.contains("screen.jpg"));
+        assert!(
+            html.contains("Ship it anyway"),
+            "the title it was drawn for"
+        );
+        assert!(html.contains(r#"class="badge">Needs review"#));
+        // Approve is the primary action and is live for a drafted set.
+        let approve = html
+            .find(r#"{"type":"approveThumbnail"}"#)
+            .expect("Approve");
+        let button = &html[html[..approve].rfind("<button").unwrap()..approve];
+        assert!(
+            button.contains("primary") && !button.contains("disabled"),
+            "{button}"
+        );
+        assert!(html.contains("uploads the video to YouTube"));
+        // Every correction moved here with it.
+        for control in [
+            "captureFrame",
+            "captureScreen",
+            "generateArtwork",
+            "saveCard",
+            "portrait-file",
+            "retake-photo",
+            "selectThumbnail",
+            "toggleReference",
+            "Drop images here",
+            "thumbnailModel",
+            "saveBrief",
+        ] {
+            assert!(html.contains(control), "missing {control}");
+        }
+        assert!(html.contains(r#"data-form="card""#) && html.contains(r#"data-field="kicker""#));
         assert!(
             html.contains(r#"value="0.34""#),
             "the focus is where it was left"
         );
-        // The design controls and the AI experiments still have a home, folded away.
         assert_eq!(html.matches("<details class=\"acc\">").count(), 2);
-        // The pipeline strip reads the whole run off the page's own data.
-        let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
-        assert_eq!(
-            steps.matches("done").count(),
-            4,
-            "photo, render, copy and artwork are done: {steps}"
+        // The countdown overlay and its script came along.
+        assert!(html.contains("id=\"countdown\"") && html.contains("FileReader"));
+    }
+
+    /// Approve is only ever offered for a current, drafted set.
+    #[test]
+    fn approve_is_off_unless_a_drafted_set_is_waiting() {
+        let approve_disabled = |html: &str| {
+            let at = html
+                .find(r#"{"type":"approveThumbnail"}"#)
+                .expect("Approve");
+            html[html[..at].rfind("<button").unwrap()..at].contains("disabled")
+        };
+        let empty = thumbnail_page(empty_art(), "none");
+        assert!(!empty.contains("template error"), "{empty}");
+        assert!(approve_disabled(&empty));
+        assert!(empty.contains("No artwork yet") && empty.contains("No photo yet"));
+        let redraw = empty.find("generateArtwork").expect("the redraw button");
+        assert!(
+            empty[..redraw].rfind("disabled").is_some(),
+            "nothing to redraw from"
         );
-        assert!(steps.contains("YouTube"));
-        assert!(html.contains("saveBrief") && html.contains(r#"data-form="brief""#));
-        assert!(html.contains("selectThumbnail") && html.contains("· live"));
-        assert!(html.contains("toggleReference") && html.contains("Drop images here"));
-        assert!(html.contains("thumbnailModel") && html.contains("seedream-5-0-pro"));
-        // Nothing sends the reader to a tab that no longer exists.
-        assert!(!html.contains("Thumbnails tab"));
+
+        let approved = thumbnail_page(drawn_art(), "approved");
+        assert!(approve_disabled(&approved));
+        assert!(
+            approved.contains(">Approved</button>") && approved.contains("needs approving again")
+        );
     }
 
     /// A stale set is shown with the reason it is stale, above the pictures it
-    /// is about — the message that used to sit on a tab nobody was looking at.
+    /// is about, and cannot be approved until it is redrawn.
     #[test]
     fn a_stale_artwork_set_says_why_above_the_pictures() {
         let mut art = serde_json::to_value(empty_art()).unwrap();
@@ -395,14 +501,7 @@ mod tests {
         art["artwork"] = serde_json::json!([
             { "id": "horizontal", "url": "file:///tmp/sets/a/horizontal.jpg", "label": "horizontal · 1280×720", "selected": true }
         ]);
-        let html = page(
-            "video.html",
-            context! {
-                brief => crate::video_brief::Brief::default(),
-                root => "/tmp/project", busy => false, model => "m",
-                art => art, review => no_clips(), youtube => None::<String>, figures => no_figures(),
-            },
-        );
+        let html = thumbnail_page(minijinja::Value::from_serialize(&art), "stale");
         assert!(!html.contains("template error"), "{html}");
         let notice = html.find("Design changed").expect("the notice");
         let picture = html.find("horizontal.jpg").expect("the picture");
@@ -411,8 +510,7 @@ mod tests {
             html.contains(r#"class="badge warn">Stale"#),
             "the card is badged stale"
         );
-        let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
-        assert!(steps.contains(r#"class="stale""#), "{steps}");
+        assert!(html.contains("Redraw it before it can be approved"));
     }
 
     /// Once the upload has happened the strip says so — the last stage of the
@@ -424,7 +522,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief::default(),
                 root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), figures => no_figures(),
                 youtube => "https://www.youtube.com/watch?v=abc",
             },
         );
@@ -444,7 +542,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief::default(),
                 root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), figures => no_figures(),
                 youtube => "https://www.youtube.com/watch?v=abc",
                 short => "https://www.youtube.com/shorts/def",
             },
@@ -467,7 +565,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief::default(),
                 root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), figures => no_figures(),
                 youtube => None::<String>, short => None::<String>,
             },
         );
@@ -484,7 +582,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief::default(),
                 root => "/tmp/project", busy => false, model => "m",
-                art => empty_art(), review => no_clips(), figures => no_figures(),
+                thumbnail => no_thumbnail(), review => no_clips(), figures => no_figures(),
                 youtube => None::<String>, short => None::<String>,
                 hosted => context! { count => 9, path => "/tmp/project/distribute/v1/links.json" },
             },
@@ -1489,7 +1587,7 @@ mod tests {
                 context! {
                     brief => crate::video_brief::Brief::default(),
                     root => "/tmp/p", busy => false, model => "m",
-                    art => empty_art(), review => no_clips(), youtube => None::<String>,
+                    thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>,
                     figures => no_figures(), summary => summary,
                 },
             )
@@ -1568,7 +1666,7 @@ mod tests {
                 context! {
                     brief => crate::video_brief::Brief::default(),
                     root => "/tmp/p", busy => false, model => "m",
-                    art => empty_art(), review => no_clips(), youtube => None::<String>,
+                    thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>,
                     figures => no_figures(), critique => critique,
                 },
             )

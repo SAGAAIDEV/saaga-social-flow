@@ -3,20 +3,22 @@ use objc2::{AnyThread, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSTabView, NSTabViewItem, NSTabViewType};
 use objc2_foundation::{NSRect, NSString};
 
-/// Six steps. Project and Plan come before recording: the project is picked
+/// Seven steps. Project and Plan come before recording: the project is picked
 /// and named first, and a video is planned — hook, chapters, call to action —
 /// before a camera turns on. Both used to live on the recording tab, which
 /// held the project picker and built its speaking notes backwards from a
 /// rehearsal. See `docs/plan-tab-plan.md`.
 ///
-/// Thumbnails used to be a step of its own; the render button now draws the
-/// artwork set, and the recording page shows it beside the title, the
-/// description and the rendered clips — so there is nothing left for a
-/// separate tab to hold.
-pub const STEPS: [(&str, &str, &[&str]); 6] = [
+/// Thumbnail sits between recording and YouTube. The render drafts the
+/// artwork set, and nothing is uploaded until it has been looked at and
+/// approved here — it was folded into the recording page once, and then
+/// nothing stood between the draw and the upload. See
+/// `docs/thumbnail-tab-plan.md`.
+pub const STEPS: [(&str, &str, &[&str]); 7] = [
     ("project", "Project", &["project"]),
     ("plan", "Plan", &["plan"]),
     ("video", "Video recording", &["draft"]),
+    ("thumbnail", "Thumbnail", &["thumbnail"]),
     ("youtube", "YouTube", &["youtube"]),
     ("blog", "Blog (Strapi)", &["blog"]),
     (
@@ -77,20 +79,30 @@ pub fn attach(
 mod tests {
     use super::*;
     #[test]
-    fn the_workflow_has_six_ordered_steps_and_each_pane_once() {
+    fn the_workflow_has_seven_ordered_steps_and_each_pane_once() {
         assert_eq!(
             STEPS.map(|(id, _, _)| id),
-            ["project", "plan", "video", "youtube", "blog", "socials"]
+            [
+                "project",
+                "plan",
+                "video",
+                "thumbnail",
+                "youtube",
+                "blog",
+                "socials"
+            ]
         );
         let children: Vec<_> = STEPS
             .iter()
             .flat_map(|(_, _, children)| children.iter().copied())
             .collect();
-        assert_eq!(children.len(), 9);
+        assert_eq!(children.len(), 10);
         // Planned before it is recorded: the plan is per project and outlives
         // versions, and versioning stays with recording.
         let at = |pane: &str| children.iter().position(|c| *c == pane).unwrap();
         assert!(at("project") < at("plan") && at("plan") < at("draft"));
+        // Reviewed after it is recorded and before anything goes public.
+        assert!(at("draft") < at("thumbnail") && at("thumbnail") < at("youtube"));
         // The launch tab must be a step of its own, or it has no identifier
         // on the root tab view and the window opens on Project instead.
         assert!(STEPS.iter().any(|(_, _, children)| *children == [OPENS_ON]));
@@ -101,8 +113,7 @@ mod tests {
         assert_eq!(unique.len(), children.len());
         assert!(!children.contains(&"edit"));
         assert!(!children.contains(&"substack"));
-        // Folded into the recording page rather than tabs of their own.
-        assert!(!children.contains(&"thumbnails"));
+        // Folded into the recording page rather than a tab of its own.
         assert!(!children.contains(&"review"));
     }
 }
