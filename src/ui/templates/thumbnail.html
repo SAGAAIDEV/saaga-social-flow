@@ -16,9 +16,7 @@
 {% block content %}
 {% include "studio.html" %}
 <style>
-  .approve { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-             padding-top: 14px; border-top: 1px solid var(--border); }
-  .approve .help { margin: 0; flex: 1; min-width: 200px; }
+  .toolbar { padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 </style>
 
 <div class="page">
@@ -41,6 +39,26 @@
     {% else %}<span class="badge outline">Not yet</span>{% endif %}
   </div>
   <div class="card-bd">
+    <div class="toolbar">
+      <div class="actions">
+        {{ ui.action("Approve thumbnail" if review != "approved" else "Approved", {"type": "approveThumbnail"}, primary=true, disabled=not can_approve) }}
+        {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, disabled=not art.card.can_draw) }}
+        <button type="button" id="retake-photo" data-countdown="{{ photo_countdown }}"
+          title="The camera keeps running on every tab — look at it when the countdown ends">Retake photo</button>
+        {{ ui.action("Retake screen", {"type": "captureScreen"}) }}
+        <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
+      </div>
+      <p class="help">
+        {% if review == "approved" %}Approved{% if approved_at %} {{ approved_at }}{% endif %}. A redraw, a new photo or a design change needs approving again.
+        {% elif drawing %}Drawing — Approve opens when the set is done.
+        {% elif review == "drafted" and live %}Approving puts nothing on YouTube by itself — the video is already up, so press Replace thumbnail on the YouTube tab after.
+        {% elif review == "drafted" %}Approving uploads the video to YouTube and the renders to S3 for Buffer.
+        {% elif review == "stale" %}Redraw it before it can be approved.
+        {% else %}Nothing to approve yet.{% endif %}
+        {{ art.card.hint }}
+      </p>
+    </div>
+
     {% if art.artwork_notice %}
     <div class="alert warn">
       <p class="alert-title">Needs a redraw</p>
@@ -65,18 +83,6 @@
     <div class="empty">No artwork yet. Render video and thumbnails on the Video recording tab draws the landscape, portrait and link-preview images from your photo and the title.</div>
     {% endif %}
 
-    <div class="approve">
-      {{ ui.action("Approve thumbnail" if review != "approved" else "Approved", {"type": "approveThumbnail"}, primary=true, disabled=not can_approve) }}
-      <p class="help">
-        {% if review == "approved" %}Approved{% if approved_at %} {{ approved_at }}{% endif %}. A redraw, a new photo or a design change needs approving again.
-        {% elif drawing %}Drawing — Approve opens when the set is done.
-        {% elif review == "drafted" and live %}Approving puts nothing on YouTube by itself — the video is already up, so press Replace thumbnail on the YouTube tab after.
-        {% elif review == "drafted" %}Approving uploads the video to YouTube and the renders to S3 for Buffer.
-        {% elif review == "stale" %}Redraw it before it can be approved.
-        {% else %}Nothing to approve yet.{% endif %}
-      </p>
-    </div>
-
     <div>
       <p class="section-title">Photo</p>
       <div class="photos">
@@ -93,16 +99,6 @@
       </div>
     </div>
 
-    <div>
-      <div class="actions">
-        {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
-        <button type="button" id="retake-photo" data-countdown="{{ photo_countdown }}"
-          title="The camera keeps running on every tab — look at it when the countdown ends">Retake photo</button>
-        {{ ui.action("Retake screen", {"type": "captureScreen"}) }}
-        <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
-      </div>
-      <p class="help">{{ art.card.hint }}</p>
-    </div>
 
     <details class="acc">
       <summary><span class="acc-t"><span>Design</span><span class="sub">Kicker, theme, focus, and the words on the picture</span></span></summary>
