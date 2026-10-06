@@ -22,9 +22,6 @@ pub(super) struct CopyJob {
     pub(super) session: crate::session::Session,
     brief: Brief,
     rx: Receiver<Result<Metadata, String>>,
-    /// Started by a render finishing rather than by hand, so the render's own
-    /// status line is told how it went.
-    from_render: bool,
 }
 impl App {
     /// The notes typed on the pane, if the event is for the project on screen.
@@ -72,36 +69,10 @@ impl App {
         if self.notes_from_fields(fields).is_none() {
             return;
         }
-        self.start_video_copy(false);
-    }
-    /// A render just finished, so every chapter has transcribed: write the
-    /// title and description now, unless someone already wrote their own.
-    ///
-    /// The copy the last generation produced is what `video-brief.json` holds,
-    /// and what YouTube will use is `youtube-metadata.json`. The YouTube tab
-    /// saves edits to the latter alone, so the two disagreeing means a person
-    /// chose different words — and a re-render, which happens after every small
-    /// cut, must not undo that.
-    ///
-    /// Every way out of here hands on to the render chain: a kept edit goes
-    /// straight to the artwork, a fresh generation goes there when it lands,
-    /// and a copy step that cannot start ends the chain with its reason.
-    pub(super) fn write_copy_after_render(&mut self) {
-        let brief = video_brief::load(&self.session);
-        let published = crate::publish::metadata::load(&self.session);
-        if !brief.title.trim().is_empty() && published != brief.metadata() {
-            self.update_video_brief(
-                "Kept the title and description edited on the YouTube tab; the render did not rewrite them.",
-            );
-            self.continue_pipeline_after_copy();
-            return;
-        }
-        if !self.start_video_copy(true) {
-            self.pipeline = false;
-        }
+        self.start_video_copy();
     }
     /// Whether a generation is now running.
-    fn start_video_copy(&mut self, from_render: bool) -> bool {
+    fn start_video_copy(&mut self) -> bool {
         if self.video_copy_job.is_some() {
             self.update_video_brief("Copy generation is already running. Wait for it to finish.");
             return false;
@@ -135,15 +106,8 @@ impl App {
                     session: self.session.clone(),
                     brief,
                     rx,
-                    from_render,
                 });
                 self.update_video_brief(&status);
-                if from_render {
-                    self.set_render_status("Render ready — writing the title and description…");
-                    // A model call has no measurable middle, so the bar runs
-                    // rather than sitting at zero looking stuck.
-                    self.set_thumbnail_progress(None);
-                }
                 true
             }
             Err(err) => {
@@ -164,9 +128,6 @@ impl App {
             }
         };
         let job = self.video_copy_job.take().expect("active job");
-        // Whether the copy reached the card and YouTube — which is what the
-        // artwork is drawn from, so it is what the chain waits on.
-        let mut written = false;
         let status = match result {
             Ok(metadata) => {
                 // Over the artwork limits is a note, not a failure — the copy is
@@ -180,7 +141,6 @@ impl App {
                 };
                 match video_brief::sync(&job.session, &brief) {
                     Ok(true) => {
-                        written = true;
                         note.unwrap_or_else(|| "Title and description written, and shared with the artwork and YouTube.".into())
                     }
                     Ok(false) => "Copy saved, but needs a valid title before it can update the artwork and YouTube.".into(),
@@ -194,23 +154,9 @@ impl App {
         // A result always belongs to the project it started in.
         if job.session.root == self.session.root {
             self.update_video_brief(&status);
-            if job.from_render {
-                self.set_render_status(&format!("Render ready — {status}"));
-                // The copy step is over either way; the artwork, if it follows,
-                // takes the bar from here.
-                self.set_thumbnail_progress(Some(0.0));
-            }
             self.update_publish_summary();
             self.update_blog_view();
             self.sync_controls();
-            if job.from_render && written {
-                self.continue_pipeline_after_copy();
-            } else if job.from_render {
-                // No copy to draw, so nothing further runs; the status says why.
-                self.pipeline = false;
-            }
-        } else {
-            self.pipeline = false;
         }
     }
 }

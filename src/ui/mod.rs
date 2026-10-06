@@ -490,7 +490,7 @@ pub struct ControlTargetIvars {
     /// both, so whichever tab is open says what the draw is doing.
     thumbnail_tab_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
-    /// The two bars under Render video and thumbnails — see `layout_left`.
+    /// The bar under Render video — see `layout_left`.
     render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
     thumbnail_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
 
@@ -2555,7 +2555,7 @@ pub fn attach_controls(
     // which would throw away the notes someone is typing and their scroll.
     let host_bounds = brief_host.bounds();
     let thumbnail_status = NSTextField::labelWithString(
-        &NSString::from_str("Record a video, then press Render video and thumbnails."),
+        &NSString::from_str("Take a photo and press Draw artwork to make the thumbnail."),
         mtm,
     );
     thumbnail_status.setFrame(NSRect::new(
@@ -2866,18 +2866,18 @@ pub fn attach_controls(
     // the same selectors. Copy Transcript and Suggest Shorts stay, because
     // they act on a finished take.
     let buttons: [(&str, Sel); 12] = [
-        ("", sel!(onNewChapter:)),                           // 0 ┐
-        ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
-        ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
-        ("Stop", sel!(onStop:)),                             // 3 │
-        ("Render video and thumbnails", sel!(onRunRender:)), // 4 │
-        ("Re-render missing", sel!(onRerenderMissing:)),     // 5 ┘
-        ("", sel!(onStartShort:)),                           // 6   Record, title set by set_shorts
-        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 ┐ Notes (right pane)
-        ("Suggest Shorts", sel!(onSuggestShorts:)),          // 8 ┘
-        ("New Version", sel!(onNewVersion:)),                // 9 ┐ Session
-        ("", sel!(onToggleRegions:)),                        // 10 │ title set by set_regions
-        ("Open Rendered Video", sel!(onOpenVideo:)),         // 11 ┘
+        ("", sel!(onNewChapter:)),                       // 0 ┐
+        ("Retake  ⌃⌥T", sel!(onRetake:)),                // 1 │ Record
+        ("Pause  ⌃⌥P", sel!(onTogglePause:)),            // 2 │ title set by set_recording
+        ("Stop", sel!(onStop:)),                         // 3 │
+        ("Render video", sel!(onRunRender:)),            // 4 │
+        ("Re-render missing", sel!(onRerenderMissing:)), // 5 ┘
+        ("", sel!(onStartShort:)),                       // 6   Record, title set by set_shorts
+        ("Copy Transcript", sel!(onCopyTranscript:)),    // 7 ┐ Notes (right pane)
+        ("Suggest Shorts", sel!(onSuggestShorts:)),      // 8 ┘
+        ("New Version", sel!(onNewVersion:)),            // 9 ┐ Session
+        ("", sel!(onToggleRegions:)),                    // 10 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),     // 11 ┘
     ];
     const RECORD: Range<usize> = 0..6;
     const START_SHORT: usize = 6;
@@ -2961,31 +2961,29 @@ pub fn attach_controls(
     // chain of hops on the main thread, which the status line alone never made
     // legible as one wait. Always shown, empty until a run starts: a bar that
     // appeared only mid-run would shift the preview under the pointer.
-    let progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)> = [
-        ("Video", &target.ivars().render_bar),
-        ("Thumbnails", &target.ivars().thumbnail_bar),
-    ]
-    .into_iter()
-    .map(|(caption, slot)| {
-        let label = NSTextField::labelWithString(&NSString::from_str(caption), mtm);
-        label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
-        label.setTextColor(Some(&NSColor::secondaryLabelColor()));
-        left.addSubview(&label);
-        let bar = NSProgressIndicator::initWithFrame(
-            NSProgressIndicator::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
-        );
-        bar.setStyle(NSProgressIndicatorStyle::Bar);
-        bar.setControlSize(NSControlSize::Small);
-        bar.setIndeterminate(false);
-        bar.setMinValue(0.0);
-        bar.setMaxValue(100.0);
-        bar.setDoubleValue(0.0);
-        left.addSubview(&bar);
-        *slot.borrow_mut() = Some(bar.clone());
-        (label, bar)
-    })
-    .collect();
+    let progress_rows: Vec<(Retained<NSTextField>, Retained<NSProgressIndicator>)> =
+        [("Video", &target.ivars().render_bar)]
+            .into_iter()
+            .map(|(caption, slot)| {
+                let label = NSTextField::labelWithString(&NSString::from_str(caption), mtm);
+                label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+                label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+                left.addSubview(&label);
+                let bar = NSProgressIndicator::initWithFrame(
+                    NSProgressIndicator::alloc(mtm),
+                    NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+                );
+                bar.setStyle(NSProgressIndicatorStyle::Bar);
+                bar.setControlSize(NSControlSize::Small);
+                bar.setIndeterminate(false);
+                bar.setMinValue(0.0);
+                bar.setMaxValue(100.0);
+                bar.setDoubleValue(0.0);
+                left.addSubview(&bar);
+                *slot.borrow_mut() = Some(bar.clone());
+                (label, bar)
+            })
+            .collect();
 
     // The Record group, with the Render boxes as one row directly above the
     // Render button, and Re-render missing under it — the last two in its run.
@@ -3055,7 +3053,7 @@ pub fn attach_controls(
     let thumbnail_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
     fill_parent(&thumbnail_view);
     let thumbnail_tab_status = NSTextField::labelWithString(
-        &NSString::from_str("Record a video, then press Render video and thumbnails."),
+        &NSString::from_str("Take a photo and press Draw artwork to make the thumbnail."),
         mtm,
     );
     thumbnail_tab_status.setFrame(NSRect::new(

@@ -21,9 +21,9 @@
 <div class="page">
 <header class="hd">
   <h1>Video</h1>
-  <p>One press of <b>Render video and thumbnails</b> takes your photo, cuts the take, writes the
-    title and description, and drafts the thumbnail. Review and approve it on the
-    <b>Thumbnail</b> tab — that is what uploads to YouTube.</p>
+  <p><b>Render video</b> cuts and renders the take, and that is all. Then write the title and
+    description here, make and approve the thumbnail on the <b>Thumbnail</b> tab, and upload on
+    the <b>YouTube</b> tab — each its own step.</p>
 </header>
 
 {% set artwork_state = {"approved": "done", "drafted": "review", "stale": "stale"}[thumbnail.review] | default("") %}
@@ -40,7 +40,7 @@
   <div class="card-hd">
     <div>
       <h2 class="card-title">Title &amp; description</h2>
-      <p class="card-desc">Written from the transcript by each render.</p>
+      <p class="card-desc">Written from the transcript when you press Write.</p>
     </div>
     {% if brief.title %}<span class="badge secondary">Written</span>
     {% else %}<span class="badge outline">Not yet</span>{% endif %}
@@ -50,7 +50,7 @@
     <div class="copy" id="copy"><div class="t">{{ brief.title }}</div>{% if brief.description %}<div class="d">{{ brief.description }}</div>{% endif %}</div>
     <p class="help">To change it, edit it on the YouTube tab — a render keeps an edit made there.</p>
     {% else %}
-    <div class="empty">Nothing written yet — the render writes both once every chapter has transcribed.</div>
+    <div class="empty">Nothing written yet — press Write once every chapter has transcribed.</div>
     {% endif %}
     <form id="brief">
       <input type="hidden" name="root" value="{{ root }}">
@@ -60,6 +60,9 @@
           placeholder="Key idea, audience, or takeaway to emphasize.">{{ brief.notes }}</textarea>
         <p class="help">Steers the emphasis, never replaces the transcript. Remembered for this project.
           Uses {{ model }} — change it under Speaking notes.</p>
+        <div class="actions">
+          <button type="button" class="primary" id="write-copy">{% if brief.title %}Rewrite title &amp; description{% else %}Write title &amp; description{% endif %}</button>
+        </div>
       </fieldset>
     </form>
   </div>
@@ -114,7 +117,7 @@
   <div class="card-hd">
     <div>
       <h2 class="card-title">Rendered clips</h2>
-      <p class="card-desc">What goes to YouTube and S3 once the thumbnail is approved. Scrub before it does.</p>
+      <p class="card-desc">What goes to YouTube and S3 when you upload them. Scrub before you do.</p>
     </div>
     {% if review.clips %}<span class="badge secondary">{{ review.clips | length }}</span>
     {% else %}<span class="badge outline">Not yet</span>{% endif %}
@@ -282,6 +285,8 @@
   form.addEventListener('input', () => send({type: 'saveVideoBrief',
     fields: {root: form.elements.root.value, notes: form.elements.notes.value}, apply: false}));
   form.addEventListener('submit', event => event.preventDefault());
+  document.getElementById('write-copy').addEventListener('click', () => send({type: 'generateVideoCopy',
+    fields: {root: form.elements.root.value, notes: form.elements.notes.value}}));
 
   // Duration comes from the file itself once the browser has read its header —
   // cheaper and more honest than shelling out to ffprobe on every repaint.

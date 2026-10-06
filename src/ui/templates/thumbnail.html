@@ -22,9 +22,9 @@
 <div class="page">
 <header class="hd">
   <h1>Thumbnail</h1>
-  <p>The render drafts the artwork from your photo and the video's title. Look it over, redraw it
-    if it needs it, and press <b>Approve thumbnail</b> — nothing goes to YouTube, the blog or S3
-    until you do.</p>
+  <p>Take a photo, draw the artwork from it and the video's title, look it over, and press
+    <b>Approve thumbnail</b>. Uploading is the YouTube tab's job — it only takes an approved
+    thumbnail, and so do the blog and S3.</p>
 </header>
 
 <section class="card">
@@ -42,17 +42,17 @@
     <div class="toolbar">
       <div class="actions">
         {{ ui.action("Approve thumbnail" if review != "approved" else "Approved", {"type": "approveThumbnail"}, primary=true, disabled=not can_approve) }}
-        {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, disabled=not art.card.can_draw) }}
+        {{ ui.action("Draw artwork" if not art.artwork else "Redraw artwork", {"type": "generateArtwork"}, primary=not art.artwork or review == "stale", disabled=not art.card.can_draw) }}
         <button type="button" id="retake-photo" data-countdown="{{ photo_countdown }}"
-          title="The camera keeps running on every tab — look at it when the countdown ends">Retake photo</button>
+          title="The camera keeps running on every tab — look at it when the countdown ends">{% if art.still %}Retake photo{% else %}Take photo{% endif %}</button>
         {{ ui.action("Retake screen", {"type": "captureScreen"}) }}
         <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
       </div>
       <p class="help">
         {% if review == "approved" %}Approved{% if approved_at %} {{ approved_at }}{% endif %}. A redraw, a new photo or a design change needs approving again.
         {% elif drawing %}Drawing — Approve opens when the set is done.
-        {% elif review == "drafted" and live %}Approving puts nothing on YouTube by itself — the video is already up, so press Replace thumbnail on the YouTube tab after.
-        {% elif review == "drafted" %}Approving uploads the video to YouTube and the renders to S3 for Buffer.
+        {% elif review == "drafted" and live %}The video is already up — after approving, press Replace thumbnail on the YouTube tab.
+        {% elif review == "drafted" %}Approving uploads nothing — upload on the YouTube tab after.
         {% elif review == "stale" %}Redraw it before it can be approved.
         {% else %}Nothing to approve yet.{% endif %}
         {{ art.card.hint }}
@@ -80,7 +80,7 @@
     {% endfor %}
     </div>
     {% else %}
-    <div class="empty">No artwork yet. Render video and thumbnails on the Video recording tab draws the landscape, portrait and link-preview images from your photo and the title.</div>
+    <div class="empty">No artwork yet. Take a photo, then Draw artwork makes the landscape, portrait and link-preview images from it and the video's title.</div>
     {% endif %}
 
     <div>
@@ -88,9 +88,9 @@
       <div class="photos">
         {% if art.still %}
         <figure><div class="frame"><img src="{{ art.still.url }}" alt="your photo"></div>
-          <figcaption>Your photo, taken when Render was pressed</figcaption></figure>
+          <figcaption>Your photo</figcaption></figure>
         {% else %}
-        <div class="empty" style="flex:1">No photo yet — the render takes one from the camera, or Retake photo takes one now.</div>
+        <div class="empty" style="flex:1">No photo yet — Take photo grabs one from the camera, or Choose photo… uses a file.</div>
         {% endif %}
         {% if art.screen %}
         <figure><div class="frame"><img src="{{ art.screen.url }}" alt="screen grab"></div>

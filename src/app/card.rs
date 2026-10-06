@@ -90,8 +90,6 @@ impl App {
         }
         // A set is three pictures, so most events here are one picture landing
         // and the next starting. Only the commit — or a failure — is an outcome.
-        let mut committed = false;
-        let mut failed = false;
         for event in events {
             self.card_raster = None;
             let Some(mut job) = self.card_pending.take() else {
@@ -102,11 +100,9 @@ impl App {
                     Ok(false) => {
                         self.card_pending = Some(job);
                         self.draw_next_asset();
-                        failed = self.card_pending.is_none();
                     }
                     Ok(true) => match job.commit() {
                         Ok(()) => {
-                            committed = true;
                             self.set_thumbnail_progress(Some(1.0));
                             self.set_thumbnail_status(
                                 "Artwork drawn: horizontal, vertical and OG. Review it and press \
@@ -114,17 +110,14 @@ impl App {
                             );
                         }
                         Err(err) => {
-                            failed = true;
                             self.set_thumbnail_status(&format!("Could not save artwork: {err:#}"));
                         }
                     },
                     Err(err) => {
-                        failed = true;
                         self.set_thumbnail_status(&format!("Could not save artwork: {err:#}"));
                     }
                 },
                 RasterEvent::Failed(message) => {
-                    failed = true;
                     self.set_thumbnail_status(&format!("Artwork failed: {message}"));
                 }
             }
@@ -133,13 +126,6 @@ impl App {
         self.update_publish_summary();
         self.update_blog_view();
         self.sync_controls();
-        if committed {
-            // A fresh set is never approved — its id is new — so the chain
-            // stops here for someone to look at it.
-            self.stop_pipeline_for_review();
-        } else if failed {
-            self.pipeline = false;
-        }
     }
 
     /// Saves the edited card and redraws nothing.

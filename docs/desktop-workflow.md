@@ -3,11 +3,10 @@
 The recorder's workflow steps are declared in `src/ui/workflow.rs`. From
 recording on:
 
-1. **Video recording** — record the session, then press **Render video and
-   thumbnails**. That one press does the whole run, in this order:
-   1. Takes your photo from the camera (and the screen, when the layout has one).
-      A render requires a still: it refuses to start only when no frame can be
-      taken and there is none from before to fall back on.
+1. **Video recording** — record the session, then press **Render video**. It
+   cuts and renders, and nothing else: the title and description, the
+   thumbnail and the uploads are each their own step after it.
+   1. (The photo is no longer taken here — see **Thumbnail**.)
    2. Cuts and renders the longform and the vertical chapters, with progress
       beneath the recording controls. The longform opens on the video's own
       title, and every chapter after the first gets a card carrying the
@@ -32,36 +31,16 @@ recording on:
       part way. A render refuses to start, saying what to close, when even one
       would not fit; `SCREENCAST_RENDER_WORKERS=N` pins the count for an
       operator who knows better.
-   3. Writes the title and description from the completed transcript, using the
-      model selected under Speaking notes: a title of up to 60 characters and a
-      one-sentence description of up to 140. An edit made on the YouTube tab is
-      kept rather than rewritten.
-   4. Drafts the artwork set — horizontal, portrait and OG — from the photo and
-      that copy, and **stops**. Nothing below happens until the set is approved
-      on the **Thumbnail** tab, the next step; Approve there runs 5 and 6. When
-      the set on disk is current and already approved — **Re-render missing**
-      keeps the photo, so its approval holds — it is not redrawn and the press
-      carries straight on.
-   5. Uploads the longform to YouTube with the horizontal artwork, at the
-      visibility chosen on the YouTube tab — but only for a project that has
-      never been uploaded. A re-render of a video already on YouTube stops here
-      and says so; publishing it again as a new video is the YouTube tab's
-      button, so tightening a cut never mints a duplicate on the channel. When
-      the project has a vertical cut it follows as a Short, and the status line
-      and the Video pane's **Published** card list both links — the longform's
-      and the Short's — rather than the last one to land. The YouTube tab lists the pair with a copy button on each and one for both.
-   6. Uploads the renders — longform, chapter shorts, their transcripts and the
-      artwork — to the team's public S3 bucket at the same time, which is what
-      the Buffer plan posts from. Every render, not only the first: the keys
-      carry a content hash, so a re-render lands at fresh URLs and an unchanged
-      file is found already there and not sent again. It narrates on the
-      Socials tab beside the plan, and the **Published** card counts the files.
-      It needs `S3_BUCKET` and a live `aws sso login`; when either is missing
-      the status line says so and the rest of the chain is unaffected.
-      **Re-render missing** runs both uploads again by hand.
+   3. **Write title & description** on the Video details pane writes them from
+      the completed transcript, using the model selected under Speaking notes:
+      a title of up to 60 characters and a one-sentence description of up to
+      140. It is a button, not part of the render.
+   4. The thumbnail is made on the **Thumbnail** tab, and the YouTube upload
+      is the YouTube tab's **Upload** — neither runs off the render.
+   5. The S3 upload for Buffer is the Socials tab's button, beside the plan.
+      It needs `S3_BUCKET` and a live `aws sso login`.
 
-   The chain stops at the first failure and the status line under the button
-   says which step. A render that loses some of its clips — "5 of 21 render(s)
+   The status line under the button says how the render went. A render that loses some of its clips — "5 of 21 render(s)
    failed" — names each one and the reason HyperFrames gave, and leaves that
    reason in a `.log` beside where the clip would have landed under `render/`.
    **Re-render missing**, directly under the Render button, is the way back:
@@ -118,18 +97,16 @@ recording on:
    **New Chapter** out of a retake opens the first unrecorded number rather
    than the chapter after it, so it never lands on one already recorded. The
    **Retake ⌃⌥T** button is unchanged: it redoes the chapter that is rolling.
-2. **Thumbnail** — review the artwork the render drafted, and approve it. The
+2. **Thumbnail** — take the photo, draw the artwork, review it, and approve it. The
    three pictures at a size that shows them, the photo and screen grab they
    were drawn from, and the corrections: **Retake photo** (the camera keeps
    running on every tab, so the countdown works from here — the new still
    appears when it ends), **Retake screen**, **Choose photo…** and **Redraw
    artwork**, with the design controls (kicker, theme, focus) and the optional
-   AI image experiments folded away beneath them. **Approve thumbnail** is the
-   one thing that lets the set out: the YouTube upload and Replace thumbnail,
-   the blog and the S3 copy for Buffer all read only an approved set, and
-   pressing it starts the uploads the render press held back — or, for a video
-   already on YouTube, points at **Replace thumbnail** instead of uploading it
-   twice. The approval is recorded in `thumbnails/approval.json` against the
+   AI image experiments folded away beneath them. **Approve thumbnail** only
+   records the approval; it uploads nothing. The YouTube upload and Replace
+   thumbnail, the blog and the S3 copy for Buffer all read only an approved
+   set. The approval is recorded in `thumbnails/approval.json` against the
    set's id, so a redraw, a new photo or a design edit needs approving again;
    nothing has to clear it. A project that was already on YouTube before this
    step existed counts as approved until it is approved once.

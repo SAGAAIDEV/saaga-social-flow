@@ -138,7 +138,7 @@ impl Stages {
             .map(|_| ())
             .map_err(|err| match crate::card::assets::review(&session.root) {
                 crate::card::assets::Review::None => {
-                    format!("Artwork is not ready: {err:#} — press Render video and thumbnails")
+                    format!("Artwork is not ready: {err:#} — take a photo and press Draw artwork on the Thumbnail tab")
                 }
                 crate::card::assets::Review::Stale => {
                     format!("Artwork is not ready: {err:#} — redraw it on the Thumbnail tab")
@@ -379,7 +379,7 @@ mod tests {
             .publish
             .missing()
             .unwrap()
-            .contains("Render video and thumbnails"));
+            .contains("Draw artwork on the Thumbnail tab"));
         crate::card::assets::fixture(&root);
         // Drawn is not enough: it waits on the Thumbnail tab's Approve.
         let reason = Stages::read(&session(&root), Busy::default())

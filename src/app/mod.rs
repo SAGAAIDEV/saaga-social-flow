@@ -118,15 +118,6 @@ pub struct App {
     /// `render/vN` in place, so a second press would have two threads composing
     /// into the same folders.
     render_busy: bool,
-    /// True from the render button being pressed until everything that press
-    /// is on the hook for has run or failed: the render, the title and
-    /// description, the artwork set, and the YouTube upload.
-    ///
-    /// Each of those is its own worker with its own terminal event, so the
-    /// chain is a flag read where each one lands rather than a call stack. It
-    /// is cleared the moment anything fails, so a hand-pressed retry of one
-    /// stage starts that stage alone and drags nothing after it.
-    pipeline: bool,
     posts_tx: mpsc::Sender<crate::posts::PostsEvent>,
     posts_rx: Receiver<crate::posts::PostsEvent>,
     substack_tx: mpsc::Sender<crate::substack::SubstackEvent>,
@@ -1455,37 +1446,14 @@ impl App {
         );
     }
 
-    /// The one press. Photo, cut, title and description, artwork, YouTube.
-    ///
-    /// The photograph is taken first, while whoever pressed the button is
-    /// still in front of the camera: the artwork set is drawn over it once the
-    /// copy is written, and a render with nothing to draw over would finish
-    /// with the YouTube and blog gates shut over a missing picture. So a
-    /// render *requires* a still — it takes one, and refuses to start only
-    /// when it cannot and there is none from before to fall back on.
+    /// Render video: the cut and the render, and nothing after them. The
+    /// photo, the title and description, the thumbnail and the uploads are
+    /// each their own step, pressed on their own tab.
     fn run_render(&mut self) {
         if !self.render_can_start() {
             return;
         }
-        let photo = match self.take_still() {
-            Ok(message) => message,
-            Err(err) if crate::card::photo(&self.session.root).is_some() => {
-                format!("{err} — drawing over the photo from before")
-            }
-            Err(err) => {
-                let reason = format!(
-                    "Not rendering: {err}. The artwork needs your photo — is the camera running?"
-                );
-                self.set_render_status(&reason);
-                self.set_thumbnail_status(&reason);
-                return;
-            }
-        };
-        self.update_video_view();
-        self.launch_render(
-            &format!("{photo}. Cutting disfluencies…"),
-            &format!("{photo}. Rendering — the title, artwork and upload follow."),
-        );
+        self.launch_render("Cutting disfluencies…");
     }
 
     /// Re-render missing: the Render press without the photo.
@@ -1503,7 +1471,6 @@ impl App {
         }
         self.launch_render(
             "Re-rendering what the last render left missing — current clips are skipped…",
-            "Re-rendering — the title, artwork and upload follow.",
         );
     }
 
@@ -1526,183 +1493,37 @@ impl App {
             let reason = "Every render output is switched off — tick the horizontal longform, \
                           the vertical longform or the chapter clips above the Render button";
             self.set_render_status(reason);
-            self.set_thumbnail_status(reason);
             return false;
         }
         true
     }
 
-    /// Start the cut-and-render thread and arm the chain that follows it. The
-    /// two status lines are the press's own words about what it is doing.
-    fn launch_render(&mut self, render_status: &str, thumbnail_status: &str) {
+    /// Start the cut-and-render thread.
+    fn launch_render(&mut self, render_status: &str) {
         self.finish_open_chapter();
         println!("stream-recorder: cutting disfluencies and rendering…");
         self.render_busy = true;
-        self.pipeline = true;
-        // Both bars back to the start: the second is what this press owes next.
         self.set_render_progress(0.0);
-        self.set_thumbnail_progress(Some(0.0));
         self.set_render_status(render_status);
-        self.set_thumbnail_status(thumbnail_status);
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
         self.sync_controls();
     }
 
-    /// The render is done and the copy is settled: draft the artwork, stop
-    /// for review when a drafted set is waiting, or skip straight to the
-    /// uploads when the set on disk is current and already approved — a
-    /// Re-render missing, which keeps the photo, lands there.
+    /// The Thumbnail tab's Approve: record that this set may be published.
     ///
-    /// Called from wherever the copy step ends — a fresh generation landing,
-    /// a hand edit being kept, or nothing to write — so every exit from that
-    /// step takes the same next one.
-    pub(super) fn continue_pipeline_after_copy(&mut self) {
-        if !self.pipeline {
-            return;
-        }
-        match crate::card::assets::review(&self.session.root) {
-            crate::card::assets::Review::Approved => {
-                self.set_thumbnail_progress(Some(1.0));
-                self.pipeline_status("The approved thumbnail still matches this photo and copy.");
-                self.finish_pipeline_with_upload();
-                return;
-            }
-            crate::card::assets::Review::Drafted => {
-                self.set_thumbnail_progress(Some(1.0));
-                self.stop_pipeline_for_review();
-                return;
-            }
-            crate::card::assets::Review::None | crate::card::assets::Review::Stale => {}
-        }
-        self.set_thumbnail_progress(Some(0.0));
-        self.pipeline_status("Copy written — drawing the artwork set…");
-        // `draw_card` reports its own refusal — no title, no photo — into the
-        // status line; the chain simply does not go on from there.
-        if !self.draw_card() {
-            self.pipeline = false;
-        }
-    }
-
-    /// The approved set still matches what the press produced: the last
-    /// things it owes are the uploads — the longform to YouTube, and every
-    /// render to S3 for Buffer — each only when it is safe to make unasked.
-    ///
-    /// Both start here and run side by side; each streams from disk in small
-    /// parts, so neither costs the memory a render does. A refusal on either
-    /// side ends that half of the chain with the reason rather than a failure:
-    /// the render and the artwork are done and good, and the status line says
-    /// what each upload is doing or why it is not.
-    pub(super) fn finish_pipeline_with_upload(&mut self) {
-        if !self.pipeline {
-            return;
-        }
-        self.pipeline = false;
-        let uploads = self.start_uploads();
-        self.pipeline_status(&format!("Thumbnail approved. {uploads}"));
-    }
-
-    /// The artwork set is drafted: the press ends here, and the uploads wait
-    /// for someone to look at it. Approve on the Thumbnail tab carries on.
-    pub(super) fn stop_pipeline_for_review(&mut self) {
-        if !self.pipeline {
-            return;
-        }
-        self.pipeline = false;
-        self.pipeline_status(
-            "Thumbnail drafted — review it and press Approve on the Thumbnail tab to upload.",
-        );
-    }
-
-    /// The uploads a render press is on the hook for, each only when it is safe
-    /// to make unasked. The end of the chain, and what Approve runs.
-    fn start_uploads(&mut self) -> String {
-        let youtube = self.youtube_after_render();
-        let hosting = self.host_after_render();
-        format!("{youtube} {hosting}")
-    }
-
-    /// The Thumbnail tab's Approve: record that this set may be published,
-    /// then start what the render press stopped short of.
-    ///
-    /// A video already on YouTube is not uploaded again — `youtube_after_render`
-    /// refuses that — so a redrawn thumbnail for a live video is pointed at
-    /// Replace thumbnail instead.
+    /// Only that. Uploading is the YouTube tab's job and S3 the Socials tab's,
+    /// each pressed on its own — the render, the thumbnail and the uploads are
+    /// separate steps.
     fn approve_thumbnail(&mut self) {
-        if let Err(err) = crate::card::assets::approve(&self.session.root) {
-            self.set_thumbnail_status(&format!("Not approved: {err:#}"));
-            self.update_video_view();
-            return;
-        }
-        let live = crate::publish::longform(&self.session)
-            .or_else(|| crate::publish::short(&self.session));
-        let uploads = match live {
-            Some(_) => {
-                let hosting = self.host_after_render();
-                format!(
-                    "It is already on YouTube — press Replace thumbnail on the YouTube tab to \
-                     put this one on it. {hosting}"
-                )
-            }
-            None => self.start_uploads(),
+        let status = match crate::card::assets::approve(&self.session.root) {
+            Ok(_) => "Thumbnail approved — upload it on the YouTube tab.".to_string(),
+            Err(err) => format!("Not approved: {err:#}"),
         };
-        self.pipeline_status(&format!("Thumbnail approved. {uploads}"));
+        self.set_thumbnail_status(&status);
         self.update_video_view();
         self.update_publish_summary();
         self.update_blog_view();
         self.sync_controls();
-    }
-
-    /// The YouTube half. Only a project that has never been uploaded goes up
-    /// on its own. A re-render of a video that is already on YouTube would
-    /// otherwise mint a second copy on the channel every time a cut was
-    /// tightened, and that is a decision for the YouTube tab's button, not
-    /// the render's. Likewise a shut gate or an unconnected account is a
-    /// sentence here, not an error.
-    fn youtube_after_render(&mut self) -> String {
-        if let Some(prior) = crate::publish::longform(&self.session) {
-            return format!(
-                "Already on YouTube at {} — to publish this render as a new video, press Upload on the YouTube tab.",
-                prior.url
-            );
-        }
-        if crate::publish::connected_channel().is_none() {
-            return "YouTube is not connected — press Connect… in Settings → YouTube, then Upload."
-                .to_string();
-        }
-        match self.stages().publish {
-            crate::stage::Gate::Ready => {
-                self.run_youtube_upload();
-                format!("Uploading to YouTube as {}…", self.youtube_privacy.label())
-            }
-            crate::stage::Gate::Busy => "A YouTube upload is already running.".to_string(),
-            crate::stage::Gate::Missing(reason) => format!("YouTube upload skipped: {reason}"),
-        }
-    }
-
-    /// The S3 half: the renders Buffer will post, uploaded on every render.
-    ///
-    /// Every render rather than only the first, unlike YouTube, because the
-    /// keys carry a content hash — see [`crate::distribute`] — so a re-render
-    /// lands at fresh URLs and an unchanged file is found already there and
-    /// not sent again. This used to be a button on a tab of its own, pressed
-    /// between the render and Build Plan and forgotten as often as not; the
-    /// tab is gone, and the plan's gate names this step when the URLs are
-    /// missing. Re-render missing is how to run it again by hand — after an
-    /// `aws sso login`, say.
-    ///
-    /// Narrates on the Socials tab beside the Buffer plan, which is where the
-    /// URLs are consumed — and so the YouTube upload running alongside keeps
-    /// the render's own line for its link.
-    fn host_after_render(&mut self) -> String {
-        match self.stages().distribute {
-            crate::stage::Gate::Ready => {
-                self.start_hosting();
-                "The renders are going to S3 for Buffer — progress on the Socials tab, above the plan."
-                    .to_string()
-            }
-            crate::stage::Gate::Busy => "An S3 upload is already running.".to_string(),
-            crate::stage::Gate::Missing(reason) => format!("S3 upload skipped: {reason}"),
-        }
     }
 
     /// The Buffer tab's button, for when the check above the plan says a video
@@ -1752,14 +1573,6 @@ impl App {
             _ => check.summary(),
         };
         self.set_distribute_status(&line);
-    }
-
-    /// The chain narrates in both places it is watched: under the render
-    /// button on the left, and above the pane on the right that fills in as
-    /// it goes.
-    fn pipeline_status(&self, msg: &str) {
-        self.show_render_progress(msg);
-        self.set_thumbnail_status(msg);
     }
 
     fn set_render_status(&self, text: &str) {
@@ -3551,14 +3364,8 @@ impl App {
                     match upload.orientation {
                         crate::publish::Orientation::Horizontal => {
                             self.set_publish_status(&format!("Live at {}{thumb}", upload.url));
-                            // The upload is what the blog gate waits for, and
-                            // the render chain is what usually started it: both
-                            // places should read as finished without a tab switch.
+                            // The upload is what the blog gate waits for.
                             self.update_blog_view();
-                            self.pipeline_status(&format!(
-                                "On YouTube at {}{thumb}. The blog is ready when you are.",
-                                upload.url
-                            ));
                         }
                         crate::publish::Orientation::Vertical => {
                             // The Short lands second, and a line naming only it
@@ -3576,14 +3383,6 @@ impl App {
                             // The blog's mobile player embeds it, so the pane
                             // that shows the body is out of date until it re-reads.
                             self.update_blog_view();
-                            let pipeline = match &longform {
-                                Some(long) => format!(
-                                    "On YouTube at {} and the Short at {}. The blog is ready when you are.",
-                                    long.url, upload.url
-                                ),
-                                None => format!("Short on YouTube at {}.", upload.url),
-                            };
-                            self.pipeline_status(&pipeline);
                         }
                     }
                     // The Video pane lists both links under the clips, so it has
@@ -3813,9 +3612,7 @@ impl App {
             .map(|name| render_dir.join(name))
             .find(|path| path.is_file())
         else {
-            self.set_render_status(
-                "Nothing rendered yet — press Render video and thumbnails first.",
-            );
+            self.set_render_status("Nothing rendered yet — press Render video first.");
             return;
         };
         match std::process::Command::new("open").arg(&path).status() {
@@ -4257,14 +4054,11 @@ impl App {
                     self.render_busy = false;
                     self.set_render_progress(1.0);
                     self.show_render_progress(&format!(
-                        "Render ready — clips are under Video details. Files: {}",
+                        "Render ready — clips are under Video details. Next: write the title \
+                         and description there, then the Thumbnail tab. Files: {}",
                         dir.display()
                     ));
-                    // Every chapter has transcribed by now, which is what the
-                    // title and description are written from. The artwork and
-                    // the upload follow from wherever that step ends.
-                    self.write_copy_after_render();
-                    // Beside the chain, not in it: nothing waits on the summary.
+                    // Nothing waits on the summary.
                     self.summarize_after_render();
                     self.update_render_summary();
                     // The cut moved, so the Edit tab's per-chapter figures did too.
@@ -4279,10 +4073,7 @@ impl App {
                 }
                 crate::edit::RenderEvent::Failed(msg) => {
                     self.render_busy = false;
-                    // Nothing downstream runs over a failed render.
-                    self.pipeline = false;
                     self.show_render_progress(&msg);
-                    self.set_thumbnail_status(&msg);
                     self.sync_controls();
                 }
             }
@@ -4361,12 +4152,6 @@ impl App {
                 crate::distribute::DistributeEvent::Failed(msg) => {
                     self.distribute_busy = false;
                     self.set_distribute_status(&msg);
-                    // An upload the render started fails where the render is
-                    // watched — unless the YouTube upload started beside it is
-                    // still narrating there, in which case its link wins.
-                    if !self.publish_busy {
-                        self.pipeline_status(&msg);
-                    }
                     self.sync_controls();
                 }
             }

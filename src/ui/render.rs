@@ -228,8 +228,8 @@ mod tests {
         assert!(!html.contains("Generate title"));
         assert!(html.contains("A title") && html.contains("A description"));
         assert!(
-            html.contains("Render video and thumbnails"),
-            "the pane names the button that fills it"
+            html.contains("<b>Render video</b>") && html.contains("generateVideoCopy"),
+            "the pane names the render button and has its own Write button"
         );
     }
 
@@ -438,7 +438,8 @@ mod tests {
             button.contains("primary") && !button.contains("disabled"),
             "{button}"
         );
-        assert!(html.contains("uploads the video to YouTube"));
+        // Approve uploads nothing: that is the YouTube tab's step.
+        assert!(html.contains("Approving uploads nothing"));
         // Every correction moved here with it.
         for control in [
             "captureFrame",
