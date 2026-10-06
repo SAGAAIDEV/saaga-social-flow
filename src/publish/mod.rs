@@ -660,11 +660,23 @@ fn upload_one(
     };
     append(session, &upload)?;
 
-    if let Some(jpeg) = poster {
-        status("Setting the thumbnail…".into());
-        if set_poster(orientation, &video_id, &url, jpeg)? {
-            upload = record_poster(session, upload)?;
+    let poster = poster
+        .map(|jpeg| {
+            status("Setting the thumbnail…".into());
+            set_poster(orientation, &video_id, &url, jpeg)
+        })
+        .transpose();
+    // Before the poster's result is acted on: a thumbnail that failed leaves
+    // the video live, and the retry press finds this row and never comes back
+    // through here — so this is the one chance to tell the team. A video's
+    // Short is not announced on its own; a short project's is the video.
+    if orientation == Orientation::Horizontal || session.is_short() {
+        if let Some(line) = crate::slack::announce(&upload) {
+            status(line);
         }
+    }
+    if poster?.unwrap_or(false) {
+        upload = record_poster(session, upload)?;
     }
     Ok(upload)
 }

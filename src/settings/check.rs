@@ -175,10 +175,21 @@ fn youtube() -> Result<String> {
     {
         crate::publish::youtube::access_token()?;
     }
-    match crate::publish::connected_channel() {
-        Some(channel) => Ok(format!("signed in as {channel}")),
-        None => Ok("client looks right — press Connect… under YouTube account to sign in".into()),
+    let youtube = match crate::publish::connected_channel() {
+        Some(channel) => format!("signed in as {channel}"),
+        None => "client looks right — press Connect… under YouTube account to sign in".into(),
+    };
+    // Slack rides on this section because it is told about uploads. Optional,
+    // so an unset webhook says nothing; a set one has to look right.
+    if std::env::var(crate::slack::WEBHOOK)
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return Ok(youtube);
     }
+    let slack = crate::slack::check().context("checking the Slack webhook")?;
+    Ok(format!("{youtube}; Slack: {slack}"))
 }
 
 fn assemblyai() -> Result<String> {
