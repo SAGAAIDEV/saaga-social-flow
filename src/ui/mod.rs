@@ -486,6 +486,9 @@ pub struct ControlTargetIvars {
     // Render tab
     render_status: RefCell<Option<Retained<NSTextField>>>,
     thumbnail_status: RefCell<Option<Retained<NSTextField>>>,
+    /// The same line again, on the Thumbnail tab: the artwork jobs narrate to
+    /// both, so whichever tab is open says what the draw is doing.
+    thumbnail_tab_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
     /// The two bars under Render video and thumbnails — see `layout_left`.
     render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
@@ -995,6 +998,7 @@ impl ControlTarget {
             queue_button: RefCell::new(None),
             render_status: RefCell::new(None),
             thumbnail_status: RefCell::new(None),
+            thumbnail_tab_status: RefCell::new(None),
             render_summary: RefCell::new(None),
             render_bar: RefCell::new(None),
             thumbnail_bar: RefCell::new(None),
@@ -1670,8 +1674,11 @@ impl ControlTarget {
     }
 
     pub fn set_thumbnail_status(&self, text: &str) {
-        if let Some(field) = self.ivars().thumbnail_status.borrow().clone() {
-            field.setStringValue(&NSString::from_str(text));
+        let ivars = self.ivars();
+        for field in [&ivars.thumbnail_status, &ivars.thumbnail_tab_status] {
+            if let Some(field) = field.borrow().clone() {
+                field.setStringValue(&NSString::from_str(text));
+            }
         }
     }
 
@@ -2380,6 +2387,8 @@ pub struct Attached {
     /// The recording page's right-hand pane: details, artwork and review.
     pub video_brief_pane: WebPane,
     pub settings_pane: WebPane,
+    /// The Thumbnail tab's pane: the artwork set, its photo, and Approve.
+    pub thumbnail_pane: WebPane,
     /// The Project tab's summary: plan status, versions, what is live.
     pub project_pane: WebPane,
     /// The Plan tab's pane: the idea, the instructions, the plan.
@@ -3035,6 +3044,41 @@ pub fn attach_controls(
     };
     draft_item.setLabel(&NSString::from_str("Record"));
     draft_item.setView(Some(&split));
+
+    // ==========================================
+    // TAB: THUMBNAIL
+    // ==========================================
+    // Its own step between recording and YouTube: the render drafts the
+    // artwork set, and this is where it is looked at, redrawn and approved
+    // before anything is uploaded. One native line for the draw's progress,
+    // then the pane — the same shape as Reflect.
+    let thumbnail_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&thumbnail_view);
+    let thumbnail_tab_status = NSTextField::labelWithString(
+        &NSString::from_str("Record a video, then press Render video and thumbnails."),
+        mtm,
+    );
+    thumbnail_tab_status.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 34.0),
+        NSSize::new((bounds.size.width - PAD * 4.0).max(80.0), 20.0),
+    ));
+    pin_top(&thumbnail_tab_status);
+    thumbnail_view.addSubview(&thumbnail_tab_status);
+    *target.ivars().thumbnail_tab_status.borrow_mut() = Some(thumbnail_tab_status);
+    let thumbnail_pane = WebPane::attach(&thumbnail_view, mtm, tx.clone());
+    thumbnail_pane.set_frame(NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(bounds.size.width, (bounds.size.height - 40.0).max(60.0)),
+    ));
+    thumbnail_pane.fill_below();
+    let thumbnail_item = unsafe {
+        NSTabViewItem::initWithIdentifier(
+            NSTabViewItem::alloc(),
+            Some(&NSString::from_str("thumbnail")),
+        )
+    };
+    thumbnail_item.setLabel(&NSString::from_str("Thumbnail"));
+    thumbnail_item.setView(Some(&thumbnail_view));
 
     // ==========================================
     // TAB: PROJECT
@@ -3990,6 +4034,7 @@ pub fn attach_controls(
             ("project", &project_item),
             ("plan", &plan_item),
             ("draft", &draft_item),
+            ("thumbnail", &thumbnail_item),
             ("youtube", &publish_item),
             ("blog", &blog_item),
             ("post", &post_item),
@@ -4046,6 +4091,7 @@ pub fn attach_controls(
         blog_pane,
         publish_pane,
         video_brief_pane,
+        thumbnail_pane,
         settings_pane,
         project_pane,
         plan_pane,

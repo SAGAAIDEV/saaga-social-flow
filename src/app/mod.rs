@@ -93,6 +93,8 @@ struct Live {
     /// The recording page's right-hand pane: notes and copy, the artwork set,
     /// and the rendered clips — see `update_video_view`.
     video_brief_pane: ui::WebPane,
+    /// The Thumbnail tab's pane — see `update_thumbnail_view`.
+    thumbnail_pane: ui::WebPane,
     settings_pane: ui::WebPane,
     /// The Project tab's summary — see `update_project_view`.
     project_pane: ui::WebPane,
@@ -398,6 +400,7 @@ impl App {
             blog_pane: attached.blog_pane,
             publish_pane: attached.publish_pane,
             video_brief_pane: attached.video_brief_pane,
+            thumbnail_pane: attached.thumbnail_pane,
             settings_pane: attached.settings_pane,
             project_pane: attached.project_pane,
             plan_pane: attached.plan_pane,
@@ -609,6 +612,7 @@ impl App {
             Action::DrawCard => {
                 self.draw_card();
             }
+            Action::ApproveThumbnail => self.approve_thumbnail(),
             Action::ApplyRewrites => self.run_apply_rewrites(),
             Action::CollectAllAnalytics => self.run_analytics_collect_all(),
             Action::NewVersion => self.new_version(),
@@ -1544,8 +1548,10 @@ impl App {
         self.sync_controls();
     }
 
-    /// The render is done and the copy is settled: draw the artwork, or skip
-    /// straight to the upload when the set on disk is already right.
+    /// The render is done and the copy is settled: draft the artwork, stop
+    /// for review when a drafted set is waiting, or skip straight to the
+    /// uploads when the set on disk is current and already approved — a
+    /// Re-render missing, which keeps the photo, lands there.
     ///
     /// Called from wherever the copy step ends — a fresh generation landing,
     /// a hand edit being kept, or nothing to write — so every exit from that
@@ -1554,11 +1560,19 @@ impl App {
         if !self.pipeline {
             return;
         }
-        if crate::card::assets::ready(&self.session.root).is_ok() {
-            self.set_thumbnail_progress(Some(1.0));
-            self.pipeline_status("Artwork already matches this photo and copy.");
-            self.finish_pipeline_with_upload();
-            return;
+        match crate::card::assets::review(&self.session.root) {
+            crate::card::assets::Review::Approved => {
+                self.set_thumbnail_progress(Some(1.0));
+                self.pipeline_status("The approved thumbnail still matches this photo and copy.");
+                self.finish_pipeline_with_upload();
+                return;
+            }
+            crate::card::assets::Review::Drafted => {
+                self.set_thumbnail_progress(Some(1.0));
+                self.stop_pipeline_for_review();
+                return;
+            }
+            crate::card::assets::Review::None | crate::card::assets::Review::Stale => {}
         }
         self.set_thumbnail_progress(Some(0.0));
         self.pipeline_status("Copy written — drawing the artwork set…");
@@ -1569,9 +1583,9 @@ impl App {
         }
     }
 
-    /// The artwork set is committed: the last things the press owes are the
-    /// uploads — the longform to YouTube, and every render to S3 for Buffer —
-    /// each only when it is safe to make unasked.
+    /// The approved set still matches what the press produced: the last
+    /// things it owes are the uploads — the longform to YouTube, and every
+    /// render to S3 for Buffer — each only when it is safe to make unasked.
     ///
     /// Both start here and run side by side; each streams from disk in small
     /// parts, so neither costs the memory a render does. A refusal on either
@@ -1583,9 +1597,59 @@ impl App {
             return;
         }
         self.pipeline = false;
+        let uploads = self.start_uploads();
+        self.pipeline_status(&format!("Thumbnail approved. {uploads}"));
+    }
+
+    /// The artwork set is drafted: the press ends here, and the uploads wait
+    /// for someone to look at it. Approve on the Thumbnail tab carries on.
+    pub(super) fn stop_pipeline_for_review(&mut self) {
+        if !self.pipeline {
+            return;
+        }
+        self.pipeline = false;
+        self.pipeline_status(
+            "Thumbnail drafted — review it and press Approve on the Thumbnail tab to upload.",
+        );
+    }
+
+    /// The uploads a render press is on the hook for, each only when it is safe
+    /// to make unasked. The end of the chain, and what Approve runs.
+    fn start_uploads(&mut self) -> String {
         let youtube = self.youtube_after_render();
         let hosting = self.host_after_render();
-        self.pipeline_status(&format!("Artwork ready. {youtube} {hosting}"));
+        format!("{youtube} {hosting}")
+    }
+
+    /// The Thumbnail tab's Approve: record that this set may be published,
+    /// then start what the render press stopped short of.
+    ///
+    /// A video already on YouTube is not uploaded again — `youtube_after_render`
+    /// refuses that — so a redrawn thumbnail for a live video is pointed at
+    /// Replace thumbnail instead.
+    fn approve_thumbnail(&mut self) {
+        if let Err(err) = crate::card::assets::approve(&self.session.root) {
+            self.set_thumbnail_status(&format!("Not approved: {err:#}"));
+            self.update_video_view();
+            return;
+        }
+        let live = crate::publish::longform(&self.session)
+            .or_else(|| crate::publish::short(&self.session));
+        let uploads = match live {
+            Some(_) => {
+                let hosting = self.host_after_render();
+                format!(
+                    "It is already on YouTube — press Replace thumbnail on the YouTube tab to \
+                     put this one on it. {hosting}"
+                )
+            }
+            None => self.start_uploads(),
+        };
+        self.pipeline_status(&format!("Thumbnail approved. {uploads}"));
+        self.update_video_view();
+        self.update_publish_summary();
+        self.update_blog_view();
+        self.sync_controls();
     }
 
     /// The YouTube half. Only a project that has never been uploaded goes up
@@ -2781,29 +2845,22 @@ impl App {
     /// it describes. Cheap: a few `stat` calls, three hashes and a template, so
     /// it runs wherever any of its parts change. It reloads the page, though,
     /// so nothing calls it per keystroke or per progress line.
+    /// Repaints the recording page — and the Thumbnail tab with it.
+    ///
+    /// One call for both because every event that changes one changes the
+    /// other: a photo, a render, new copy, a drawn set. The recording page's
+    /// pipeline strip reads where the thumbnail stands, and the Thumbnail tab
+    /// reads the title the render wrote.
     fn update_video_view(&self) {
+        self.update_thumbnail_view();
         let Some(live) = self.live.as_ref() else {
             return;
         };
-        // The style library is the one thing on the page outside the project.
-        // With no home to find it under, the project stands in and the
-        // references simply read as empty — the rest of the pane still draws.
-        let library = crate::thumbnail::references::library_root()
-            .unwrap_or_else(|_| self.session.root.clone());
-        let art = crate::thumbnail::pane::build(
-            &self.session.root,
-            &library,
-            crate::config::load().thumbnail.brief,
-        );
         let review = crate::review::build(&self.session.render_dir());
         let busy = self
             .video_copy_job
             .as_ref()
             .is_some_and(|job| job.session.root == self.session.root);
-        // Both trees have to be readable, and the API takes one directory — so
-        // scope it to the shallowest folder holding both, which for the default
-        // library is `~/.stream-recorder` and never the whole disk.
-        let access = crate::ui::common_ancestor(&self.session.root, &library);
         live.video_brief_pane.show_local(
             &ui::render::page(
                 "video.html",
@@ -2812,8 +2869,12 @@ impl App {
                     root => self.session.root.to_string_lossy(),
                     busy => busy,
                     model => self.notes_pick.model(),
-                    photo_countdown => crate::config::load().photo_countdown_secs(),
-                    art => art,
+                    // Where the thumbnail stands, for the pipeline strip. The
+                    // set itself is on the Thumbnail tab.
+                    thumbnail => minijinja::context! {
+                        review => crate::card::assets::review(&self.session.root),
+                        has_photo => crate::card::photo(&self.session.root).is_some(),
+                    },
                     review => review,
                     // The last stage of the render chain, so the pane's pipeline
                     // strip can show the whole run without a trip to the YouTube tab.
@@ -2847,8 +2908,53 @@ impl App {
                 },
             ),
             &self.session.root,
-            &access,
+            &self.session.root,
             ".video.html",
+        );
+    }
+
+    /// Repaints the Thumbnail tab: the artwork set, the photo it was drawn
+    /// from, the design and AI controls, and Approve.
+    fn update_thumbnail_view(&self) {
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        // The style library is the one thing on the page outside the project.
+        // With no home to find it under, the project stands in and the
+        // references simply read as empty — the rest of the pane still draws.
+        let library = crate::thumbnail::references::library_root()
+            .unwrap_or_else(|_| self.session.root.clone());
+        let art = crate::thumbnail::pane::build(
+            &self.session.root,
+            &library,
+            crate::config::load().thumbnail.brief,
+        );
+        let review = crate::card::assets::review(&self.session.root);
+        let drawing = self.card_pending.is_some() || self.card_raster.is_some();
+        // Both trees have to be readable, and the API takes one directory — so
+        // scope it to the shallowest folder holding both, which for the default
+        // library is `~/.stream-recorder` and never the whole disk.
+        let access = crate::ui::common_ancestor(&self.session.root, &library);
+        live.thumbnail_pane.show_local(
+            &ui::render::page(
+                "thumbnail.html",
+                minijinja::context! {
+                    art => art,
+                    review => review,
+                    can_approve => review == crate::card::assets::Review::Drafted && !drawing,
+                    drawing => drawing,
+                    approved_at => crate::card::assets::approval(&self.session.root)
+                        .map(|approval| approval.approved_at),
+                    title => crate::video_brief::load(&self.session).title,
+                    live => crate::publish::longform(&self.session)
+                        .or_else(|| crate::publish::short(&self.session))
+                        .is_some(),
+                    photo_countdown => crate::config::load().photo_countdown_secs(),
+                },
+            ),
+            &self.session.root,
+            &access,
+            ".thumbnail.html",
         );
     }
 

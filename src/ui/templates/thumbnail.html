@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+{#
+  The Thumbnail tab: the step between recording and YouTube.
+
+  The render drafts the artwork set from the photo it takes and the title it
+  writes, then stops. This page is where the set is looked at — at a size that
+  shows it — redrawn if it needs it, and approved. Approve is the one thing that
+  lets it out: the YouTube upload, the blog and the S3 copy for Buffer all read
+  only an approved set (`card::assets::approved`), and pressing it starts the
+  uploads the render press held back.
+
+  Moved here from the recording page, where the same controls sat under the
+  copy and the set went straight to YouTube without anyone looking at it.
+#}
+{% block content %}
+{% include "studio.html" %}
+<style>
+  .approve { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+             padding-top: 14px; border-top: 1px solid var(--border); }
+  .approve .help { margin: 0; flex: 1; min-width: 200px; }
+</style>
+
+<div class="page">
+<header class="hd">
+  <h1>Thumbnail</h1>
+  <p>The render drafts the artwork from your photo and the video's title. Look it over, redraw it
+    if it needs it, and press <b>Approve thumbnail</b> — nothing goes to YouTube, the blog or S3
+    until you do.</p>
+</header>
+
+<section class="card">
+  <div class="card-hd">
+    <div>
+      <h2 class="card-title">Artwork</h2>
+      <p class="card-desc">YouTube, the blog and the social image posts all use this set{% if title %}, drawn for <b>{{ title }}</b>{% endif %}.</p>
+    </div>
+    {% if review == "approved" %}<span class="badge secondary">Approved</span>
+    {% elif review == "drafted" %}<span class="badge">Needs review</span>
+    {% elif review == "stale" %}<span class="badge warn">Stale</span>
+    {% else %}<span class="badge outline">Not yet</span>{% endif %}
+  </div>
+  <div class="card-bd">
+    {% if art.artwork_notice %}
+    <div class="alert warn">
+      <p class="alert-title">Needs a redraw</p>
+      <p>{{ art.artwork_notice }}</p>
+    </div>
+    {% endif %}
+
+    {% if art.artwork %}
+    <div class="set">
+    {% for asset in art.artwork %}
+      <figure class="{{ asset.id }}">
+        <div class="frame {{ asset.id }}"><img src="{{ asset.url }}" alt="{{ asset.label }}"></div>
+        <figcaption>
+          {% if asset.id == "horizontal" %}<div class="n">Landscape</div><div class="m">1280 × 720 · YouTube, blog thumbnail</div>
+          {% elif asset.id == "vertical" %}<div class="n">Portrait</div><div class="m">720 × 1280 · blog poster</div>
+          {% else %}<div class="n">Link preview</div><div class="m">1200 × 630 · OG image, social posts</div>{% endif %}
+        </figcaption>
+      </figure>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">No artwork yet. Render video and thumbnails on the Video recording tab draws the landscape, portrait and link-preview images from your photo and the title.</div>
+    {% endif %}
+
+    <div class="approve">
+      {{ ui.action("Approve thumbnail" if review != "approved" else "Approved", {"type": "approveThumbnail"}, primary=true, disabled=not can_approve) }}
+      <p class="help">
+        {% if review == "approved" %}Approved{% if approved_at %} {{ approved_at }}{% endif %}. A redraw, a new photo or a design change needs approving again.
+        {% elif drawing %}Drawing — Approve opens when the set is done.
+        {% elif review == "drafted" and live %}Approving puts nothing on YouTube by itself — the video is already up, so press Replace thumbnail on the YouTube tab after.
+        {% elif review == "drafted" %}Approving uploads the video to YouTube and the renders to S3 for Buffer.
+        {% elif review == "stale" %}Redraw it before it can be approved.
+        {% else %}Nothing to approve yet.{% endif %}
+      </p>
+    </div>
+
+    <div>
+      <p class="section-title">Photo</p>
+      <div class="photos">
+        {% if art.still %}
+        <figure><div class="frame"><img src="{{ art.still.url }}" alt="your photo"></div>
+          <figcaption>Your photo, taken when Render was pressed</figcaption></figure>
+        {% else %}
+        <div class="empty" style="flex:1">No photo yet — the render takes one from the camera, or Retake photo takes one now.</div>
+        {% endif %}
+        {% if art.screen %}
+        <figure><div class="frame"><img src="{{ art.screen.url }}" alt="screen grab"></div>
+          <figcaption>The screen, as last grabbed — Retake screen catches a different slide</figcaption></figure>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="actions">
+        {{ ui.action("Redraw artwork", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
+        <button type="button" id="retake-photo" data-countdown="{{ photo_countdown }}"
+          title="The camera keeps running on every tab — look at it when the countdown ends">Retake photo</button>
+        {{ ui.action("Retake screen", {"type": "captureScreen"}) }}
+        <label class="btn">Choose photo…<input id="portrait-file" type="file" accept="image/*"></label>
+      </div>
+      <p class="help">{{ art.card.hint }}</p>
+    </div>
+
+    <details class="acc">
+      <summary><span class="acc-t"><span>Design</span><span class="sub">Kicker, theme, focus, and the words on the picture</span></span></summary>
+      <div class="acc-bd" data-form="card">
+        <div class="field">
+          <label class="label">Kicker</label>
+          <textarea data-field="kicker" rows="1"
+            placeholder="A small orange word above the title. Empty draws nothing.">{{ art.card.kicker }}</textarea>
+        </div>
+        <div class="field">
+          <label class="label">Artwork title</label>
+          <textarea data-field="title" rows="2"
+            placeholder="Filled from the video title by each render.">{{ art.card.title }}</textarea>
+          <p class="help">A line break here is a deliberate line break on the card.</p>
+        </div>
+        <div class="grid-3">
+          <div class="field">
+            <label class="label">Theme</label>
+            <select data-field="theme">
+              {% for choice in art.card.themes %}
+              <option value="{{ choice.id }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <!-- The one control that cannot be judged from the boxes: the still is a
+                 wide frame and the photo column is nearly portrait, so most of the
+                 width is cropped and this picks which part survives — the point the
+                 box is centred on. Set from your face when the photo is taken; nudge
+                 it here. The second box is the same point's other half, and only
+                 moves anything when the still is taller than its box. -->
+            <label class="label" title="Where your face is across the still, 0–1. Set when the photo is taken; nudge to adjust.">Focus ↔</label>
+            <input data-field="focus" type="number" min="0" max="1" step="0.02" value="{{ art.card.focus }}">
+          </div>
+          <div class="field">
+            <label class="label" title="Where your face is down the still, 0–1. Only matters when the still is taller than its box.">Focus ↕</label>
+            <input data-field="focus_y" type="number" min="0" max="1" step="0.02" value="{{ art.card.focus_y }}">
+          </div>
+          <div class="field">
+            <label class="label">AI format</label>
+            <select data-field="format" aria-label="Thumbnail format">
+              <option value="horizontal" {% if art.card.format == "horizontal" %}selected{% endif %}>Horizontal · 16:9</option>
+              <option value="vertical" {% if art.card.format == "vertical" %}selected{% endif %}>Vertical · 9:16</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          {{ ui.action("Save and redraw", {"type": "generateArtwork"}, primary=true, disabled=not art.card.can_draw) }}
+          {{ ui.action("Save design", {"type": "saveCard"}) }}
+        </div>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="acc-t"><span>AI image experiments</span><span class="sub">Nano Banana and other image models. Optional.</span></span></summary>
+      <div class="acc-bd">
+        {% if art.blocked %}<div class="empty">{{ art.blocked }}</div>{% endif %}
+        <p class="help" style="margin:0">These candidates do not replace the drawn artwork set used for publishing.</p>
+        <div class="actions">
+          {{ ui.action("Generate images", {"type": "generateThumbnails"}, disabled=not art.can_generate) }}
+          <select style="width:auto;min-width:160px" data-send-change='{{ {"type": "thumbnailModel"} | tojson }}'>
+            {% for model in art.models %}
+            <option value="{{ model.id }}" {% if model.selected %}selected{% endif %}>{{ model.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div data-form="brief">
+          <p class="section-title">Brief</p>
+          <div class="field">
+            <label class="label">Title</label>
+            <textarea data-field="title" rows="2"
+              placeholder="The words to put on the image, exactly as written.">{{ art.brief.title }}</textarea>
+          </div>
+          <div class="field">
+            <label class="label">Description</label>
+            <textarea data-field="description" rows="5"
+              placeholder="How to edit the picture. The camera still, the screen grab and your style references all go up with this.">{{ art.brief.description }}</textarea>
+            <p class="help">What the image model is told. Not drawn — described.</p>
+          </div>
+          <div class="actions">{{ ui.action("Save brief", {"type": "saveBrief"}) }}</div>
+        </div>
+
+        <div>
+          <p class="section-title">Candidates</p>
+          {% if not art.candidates %}
+            <div class="empty">None yet. Generate to draw some.</div>
+          {% else %}
+          <div class="shots">
+            {% for shot in art.candidates %}
+            <button type="button" aria-pressed="{{ 'true' if shot.selected else 'false' }}" class="shot {% if shot.selected %}on{% endif %}"
+                 data-send='{{ {"type": "selectThumbnail", "id": shot.id} | tojson }}'>
+              <img src="{{ shot.url }}" alt="{{ shot.label }}">
+              <div class="who">{{ shot.label }}{% if shot.selected %} · live{% endif %}</div>
+            </button>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div>
+          <p class="section-title">Style references</p>
+          <div class="drop" id="drop">Drop images here to add them to the style library</div>
+          {% if art.references %}
+          <div class="refs" style="margin-top:8px">
+            {% for ref in art.references %}
+            <div class="ref {% if ref.active %}on{% endif %}"
+                 data-send='{{ {"type": "toggleReference", "name": ref.name, "value": not ref.active} | tojson }}'>
+              <img src="{{ ref.url }}" alt="{{ ref.name }}">
+              <div class="x" title="remove"
+                   data-send='{{ {"type": "removeReference", "name": ref.name} | tojson }}'>×</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </details>
+  </div>
+</section>
+
+</div>
+
+<div id="countdown" class="countdown" hidden role="dialog" aria-live="assertive" aria-label="Photo countdown">
+  <div class="countdown-box">
+    <div id="countdown-n" class="countdown-n"></div>
+    <p>Look at the camera</p>
+    <p class="countdown-hint">Esc or click to cancel</p>
+  </div>
+</div>
+<style>
+  .countdown {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .72); cursor: pointer;
+  }
+  .countdown[hidden] { display: none; }
+  .countdown-box { text-align: center; color: var(--text); }
+  .countdown-n {
+    font-size: 120px; line-height: 1; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: #fff;
+  }
+  .countdown-box p { margin: 10px 0 0; font-size: 16px; }
+  .countdown-hint { color: var(--dim); font-size: 12px !important; }
+</style>
+
+
+<script>
+  document.getElementById('portrait-file').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() { send({type: 'importPortrait', data: String(reader.result)}); };
+    reader.readAsDataURL(file);
+  });
+
+  // The countdown runs here so the still is taken the moment it reaches zero,
+  // not whenever a round trip through Rust happens to land. Esc or a click on
+  // the overlay calls it off.
+  (function () {
+    const button = document.getElementById('retake-photo');
+    const overlay = document.getElementById('countdown');
+    const number = document.getElementById('countdown-n');
+    let timer = null;
+    function stop() {
+      clearInterval(timer);
+      timer = null;
+      overlay.hidden = true;
+      button.disabled = false;
+    }
+    button.addEventListener('click', function () {
+      let left = parseInt(button.dataset.countdown, 10) || 0;
+      if (left <= 0) { send({type: 'captureFrame'}); return; }
+      button.disabled = true;
+      number.textContent = left;
+      overlay.hidden = false;
+      timer = setInterval(function () {
+        left -= 1;
+        if (left > 0) { number.textContent = left; return; }
+        stop();
+        send({type: 'captureFrame'});
+      }, 1000);
+    });
+    overlay.addEventListener('click', stop);
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && timer) stop();
+    });
+  })();
+
+  // Selection and toggles update the DOM here and Rust does not repaint, because
+  // a full re-render reloads the document and throws away the scroll position.
+  // The pane still holds no state: it optimistically reflects an action it just
+  // sent, and any real repaint overwrites it from disk.
+  document.addEventListener('click', function (event) {
+    const shot = event.target.closest('.shot[data-send]');
+    if (shot) {
+      document.querySelectorAll('.shot[data-send]').forEach(function (el) {
+        el.classList.remove('on');
+        el.setAttribute('aria-pressed', 'false');
+        const who = el.querySelector('.who');
+        if (who) who.textContent = who.textContent.replace(' · live', '');
+      });
+      shot.classList.add('on');
+      shot.setAttribute('aria-pressed', 'true');
+      const who = shot.querySelector('.who');
+      if (who && !who.textContent.includes('· live')) who.textContent += ' · live';
+      return;
+    }
+
+    // The × sits inside the tile, so check it before the toggle below.
+    const cross = event.target.closest('.x');
+    if (cross) {
+      const tile = cross.closest('.ref');
+      if (tile) tile.remove();
+      return;
+    }
+
+    const ref = event.target.closest('.ref');
+    if (ref) {
+      const now = !ref.classList.contains('on');
+      ref.classList.toggle('on', now);
+      // Flip the payload too, or the next click repeats this one.
+      const payload = JSON.parse(ref.dataset.send);
+      payload.value = !now;
+      ref.dataset.send = JSON.stringify(payload);
+    }
+  });
+
+  // Edits are gathered on save rather than posted per keystroke — one message,
+  // and the boxes keep focus while you type.
+  //
+  // Scoped to the enclosing [data-form]. Two forms on this page have fields
+  // called `title` and `description`, and a page-wide sweep would post the
+  // card's headline as the image model's brief. The Redraw button outside the
+  // design form posts the design form's fields too, so a redraw always carries
+  // whatever is in those boxes.
+  const FORMS = { saveBrief: 'brief', saveCard: 'card', generateArtwork: 'card' };
+  document.addEventListener('click', function (event) {
+    const el = event.target.closest('[data-send]');
+    if (!el) return;
+    const payload = JSON.parse(el.dataset.send);
+    const form = FORMS[payload.type];
+    if (!form) return;
+    const scope = document.querySelector('[data-form="' + form + '"]');
+    if (!scope) return;
+    const fields = {};
+    scope.querySelectorAll('[data-field]').forEach(function (box) {
+      fields[box.dataset.field] = box.value;
+    });
+    send({ type: payload.type, fields: fields });
+    event.stopImmediatePropagation();
+  }, true);
+
+  const drop = document.getElementById('drop');
+  if (drop) {
+    ['dragenter', 'dragover'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        // Without this the webview navigates to the dropped file.
+        e.preventDefault();
+        drop.classList.add('over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (name) {
+      drop.addEventListener(name, function () { drop.classList.remove('over'); });
+    });
+    drop.addEventListener('drop', function (e) {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files || []);
+      files.forEach(function (file) {
+        const reader = new FileReader();
+        reader.onload = function () {
+          // Strip the data: prefix — Rust wants the payload only.
+          const data = String(reader.result).split(',')[1] || '';
+          send({ type: 'addReference', name: file.name, data: data });
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+  }
+
+</script>
+{% endblock %}

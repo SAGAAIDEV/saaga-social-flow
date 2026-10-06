@@ -264,6 +264,17 @@ pub const FIELDS: &[Field] = &[
         url: None,
     },
     Field {
+        key: "SLACK_WEBHOOK_URL",
+        label: "Slack webhook",
+        group: Group::Video,
+        need: Need::Optional,
+        secret: true,
+        help: "Set it and every new YouTube upload posts its link to Slack. An incoming \
+               webhook, like the landing site's signup alerts; the channel is the one \
+               picked when the webhook was made. Private videos are not posted.",
+        url: Some("https://api.slack.com/messaging/webhooks"),
+    },
+    Field {
         key: "ASSEMBLYAI_API_KEY",
         label: "AssemblyAI API key",
         group: Group::Transcript,

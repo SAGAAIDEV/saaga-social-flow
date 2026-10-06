@@ -1,0 +1,225 @@
+{#
+  The shared look of the Video recording and Thumbnail panes: shadcn/ui's dark
+  zinc theme, bordered cards on the page ground, one accent for the primary
+  action. Included by both, so the two steps read as one product.
+#}
+<style>
+  :root {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #0c0c0f;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --input: #27272a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --accent: #1f1f23;
+    --ring: #d4d4d8;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --destructive: #ef4444;
+    --radius: 8px;
+  }
+  body { background: var(--background); color: var(--foreground); padding: 16px 16px 28px;
+         font-size: 13px; line-height: 1.5; }
+
+  /* ---- page header + pipeline strip ---------------------------------------- */
+  .page > * + * { margin-top: 16px; }
+  .hd h1 { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+  .hd p { margin: 0; color: var(--muted-foreground); }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .steps li {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px;
+    border: 1px solid var(--border); border-radius: 999px; font-size: 11.5px; font-weight: 500;
+    color: var(--muted-foreground); background: var(--card);
+  }
+  .steps li.done { color: var(--foreground); }
+  .steps .dot { width: 7px; height: 7px; border-radius: 999px; background: #3f3f46; flex: none; }
+  .steps li.done .dot { background: var(--success); }
+  .steps li.stale .dot { background: var(--warning); }
+  .steps li.stale { color: var(--foreground); }
+  .steps li.review .dot { background: var(--primary); }
+  .steps li.review { color: var(--foreground); border-color: var(--ring); }
+
+  /* ---- the upload links ------------------------------------------------------ */
+  .uploads { list-style: none; margin: 0; padding: 0; }
+  .uploads li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0;
+                border-top: 1px solid var(--border); }
+  .uploads li:first-child { border-top: 0; padding-top: 0; }
+  .uploads .name { flex: none; width: 64px; color: var(--muted-foreground); font-size: 12px; }
+  .uploads a { color: var(--foreground); word-break: break-all; }
+  .uploads .none { color: var(--muted-foreground); }
+  .uploads .copy {
+    flex: none; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; color: var(--muted-foreground); font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .uploads .copy:hover { color: var(--foreground); border-color: var(--ring); }
+
+  /* ---- card ---------------------------------------------------------------- */
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+  .card-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+             padding: 16px 16px 0; }
+  .card-title { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -.01em;
+                text-transform: none; color: var(--foreground); }
+  .card-desc { margin: 2px 0 0; color: var(--muted-foreground); font-size: 12.5px; }
+  .card-bd { padding: 14px 16px 16px; }
+  .card-bd > * + * { margin-top: 14px; }
+  .card-ft { padding: 0 16px 16px; }
+
+  /* ---- badge / alert / empty ------------------------------------------------ */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; flex: none;
+    border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
+    border: 1px solid transparent; background: var(--primary); color: var(--primary-foreground);
+  }
+  .badge.secondary { background: var(--muted); color: var(--foreground); }
+  .badge.outline { background: transparent; border-color: var(--border); color: var(--muted-foreground); }
+  .badge.warn { background: transparent; border-color: rgba(245,158,11,.5); color: var(--warning); }
+  .alert { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .alert.warn { border-color: rgba(245,158,11,.5); }
+  .alert .alert-title { font-weight: 600; font-size: 12.5px; margin: 0 0 2px; color: var(--warning); }
+  .alert p { margin: 0; color: var(--muted-foreground); font-size: 12.5px; }
+  .empty {
+    border: 1px dashed var(--border); border-radius: var(--radius); padding: 18px 14px;
+    text-align: center; color: var(--muted-foreground); font-size: 12.5px;
+  }
+  .help { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12px; }
+  .label { display: block; font-size: 12.5px; font-weight: 500; margin: 0 0 6px; }
+  .section-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+                   color: var(--muted-foreground); margin: 0 0 8px; }
+
+  /* ---- controls ------------------------------------------------------------ */
+  button, .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 32px; padding: 0 12px; border-radius: 6px; font: 500 13px/1 inherit;
+    font-family: inherit; color: var(--foreground); background: transparent;
+    border: 1px solid var(--input); cursor: pointer; white-space: nowrap;
+    transition: background-color .12s, border-color .12s;
+  }
+  button:hover:not(:disabled), .btn:hover { background: var(--accent); border-color: var(--input); color: var(--foreground); }
+  button.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+  button.primary:hover:not(:disabled) { background: #e4e4e7; border-color: #e4e4e7; color: var(--primary-foreground); }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn input[type=file] { display: none; }
+  textarea, select, input[type=number] {
+    width: 100%; background: transparent; color: var(--foreground);
+    border: 1px solid var(--input); border-radius: 6px; padding: 7px 10px;
+    font: inherit; font-size: 13px; line-height: 1.45;
+  }
+  textarea { resize: vertical; min-height: 36px; }
+  select, input[type=number] { height: 32px; padding: 0 10px; }
+  select { appearance: none; -webkit-appearance: none;
+           background-image: linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+                             linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+           background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px;
+           background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+  textarea::placeholder { color: #71717a; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset:disabled { opacity: .6; }
+  .field + .field { margin-top: 12px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+  .grid-3 > .field { min-width: 0; margin: 0; }
+
+  /* ---- copy ---------------------------------------------------------------- */
+  .copy { border-left: 3px solid var(--primary); padding: 2px 0 2px 12px; }
+  .copy .t { font-size: 15px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
+  .copy .d { margin-top: 4px; color: var(--muted-foreground); }
+
+  /* ---- artwork ------------------------------------------------------------- */
+  /* Two columns: the landscape card and the link preview stack on the left, the
+     portrait poster takes both rows on the right. Every frame is the shape of
+     its destination, so a picture fills it edge to edge instead of floating in
+     a letterbox — and `minmax(0, …)` plus `min-width: 0` keep an image's
+     intrinsic width from pushing the whole pane wider than the window. */
+  .set { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .set figure { margin: 0; min-width: 0; }
+  .set figure.vertical { grid-row: span 2; }
+  .frame { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #000; }
+  .frame.horizontal { aspect-ratio: 16 / 9; }
+  .frame.vertical { aspect-ratio: 9 / 16; }
+  .frame.og { aspect-ratio: 1200 / 630; }
+  .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .set figcaption { padding: 6px 2px 0; font-size: 12px; }
+  .set figcaption .n { font-weight: 500; }
+  .set figcaption .m { color: var(--muted-foreground); font-size: 11.5px; }
+  .photos { display: flex; gap: 10px; align-items: flex-start; }
+  .photos figure { margin: 0; flex: 0 1 200px; min-width: 0; }
+  .photos .frame { aspect-ratio: 16 / 9; }
+  .photos figcaption { padding-top: 4px; font-size: 11.5px; color: var(--muted-foreground); }
+
+  /* ---- accordion (details) ------------------------------------------------- */
+  details.acc { border: 1px solid var(--border); border-radius: var(--radius); }
+  details.acc + details.acc { margin-top: 8px; }
+  details.acc summary {
+    list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; cursor: pointer; font-weight: 500; font-size: 13px; color: var(--foreground);
+    text-transform: none; letter-spacing: 0;
+  }
+  details.acc summary::-webkit-details-marker { display: none; }
+  details.acc summary .acc-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  details.acc summary .sub { color: var(--muted-foreground); font-weight: 400; font-size: 12px; }
+  details.acc summary::after { content: ""; width: 7px; height: 7px; flex: none; margin-left: auto;
+    border-right: 1.5px solid var(--muted-foreground); border-bottom: 1.5px solid var(--muted-foreground);
+    transform: rotate(45deg); transition: transform .15s; margin-top: -3px; }
+  details.acc[open] summary::after { transform: rotate(-135deg); margin-top: 3px; }
+  details.acc[open] summary { border-bottom: 1px solid var(--border); }
+  .acc-bd { padding: 14px; }
+  .acc-bd > * + * { margin-top: 14px; }
+
+  /* ---- AI experiments ------------------------------------------------------ */
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; align-items: start; }
+  .shot { position: relative; border: 2px solid var(--border); border-radius: 6px; height: auto; padding: 0;
+          overflow: hidden; cursor: pointer; background: #000; display: block; }
+  .shot:hover:not(:disabled) { background: #000; border-color: var(--muted-foreground); }
+  .shot img { display: block; width: 100%; height: auto; max-height: 300px; object-fit: contain; }
+  .shot.on { border-color: var(--success); }
+  .shot .who { position: absolute; left: 0; bottom: 0; right: 0; padding: 3px 6px;
+               background: rgba(0,0,0,.66); font-size: 11px; color: var(--foreground); text-align: left; }
+  .refs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .ref { position: relative; border: 2px solid var(--border); border-radius: 6px;
+         overflow: hidden; cursor: pointer; opacity: .5; }
+  .ref.on { border-color: var(--primary); opacity: 1; }
+  .ref img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .ref .x { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
+            line-height: 15px; text-align: center; border-radius: 4px;
+            background: rgba(0,0,0,.7); color: var(--muted-foreground); font-size: 12px; }
+  .ref .x:hover { color: var(--destructive); }
+  .drop { border: 1px dashed var(--border); border-radius: var(--radius); padding: 14px;
+          text-align: center; color: var(--muted-foreground); font-size: 12.5px; }
+  .drop.over { border-color: var(--ring); color: var(--foreground); }
+
+  /* ---- figures ------------------------------------------------------------- */
+  /* Rows, not a grid: the words are what is being read, and a grid sizes itself
+     for the pictures and leaves no room for them. */
+  .figs { display: flex; flex-direction: column; gap: 10px; }
+  .fig { display: flex; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius);
+         padding: 10px; background: var(--background); }
+  .fig .frame { flex: 0 0 112px; align-self: flex-start; }
+  .fig .frame img { width: 100%; height: auto; display: block; }
+  .fig .body { flex: 1; min-width: 0; }
+  .fig .fig-hd { display: flex; flex-direction: column; gap: 1px; }
+  .fig .fig-n { font-weight: 600; font-size: 12.5px; }
+  .fig .fig-m { color: var(--muted-foreground); font-size: 11.5px; }
+  .fig .said { margin: 6px 0 0; font-size: 13px; line-height: 1.5; word-break: break-word; }
+  .fig .said::before { content: "“"; color: var(--muted-foreground); }
+  .fig .said::after { content: "”"; color: var(--muted-foreground); }
+  .fig .note { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12px; font-style: italic; }
+  .fig .cap { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border);
+              font-size: 12px; color: var(--muted-foreground); }
+  .fig .cap b { color: var(--foreground); font-weight: 500; }
+
+  /* ---- review -------------------------------------------------------------- */
+  .clips { display: flex; flex-direction: column; gap: 12px; }
+  .clip { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; background: var(--background); }
+  .clip.portrait { max-width: 280px; }
+  .clip video { width: 100%; border-radius: 4px; background: #000; display: block; }
+  .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px;
+          color: var(--muted-foreground); }
+  .meta .name { color: var(--foreground); font-weight: 500; }
+</style>

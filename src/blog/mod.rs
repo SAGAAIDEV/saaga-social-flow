@@ -606,7 +606,7 @@ fn run(
     let duration = crate::edit::cut::probe_duration_seconds(&video)
         .with_context(|| format!("probing the length of {}", video.display()))?;
 
-    let artwork = crate::card::assets::ready(&session.root)?;
+    let artwork = crate::card::assets::approved(&session.root)?;
     let images = artwork.snapshot(&session.root, &session.blog_dir().join("artwork"))?;
     let thumbnail = images.join("horizontal.jpg");
     let portrait = images.join("vertical.jpg");

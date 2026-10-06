@@ -1,6 +1,7 @@
 # Desktop content workflow
 
-The recorder has four primary steps, declared in `src/ui/workflow.rs`:
+The recorder's workflow steps are declared in `src/ui/workflow.rs`. From
+recording on:
 
 1. **Video recording** — record the session, then press **Render video and
    thumbnails**. That one press does the whole run, in this order:
@@ -35,8 +36,12 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
       model selected under Speaking notes: a title of up to 60 characters and a
       one-sentence description of up to 140. An edit made on the YouTube tab is
       kept rather than rewritten.
-   4. Draws the artwork set — horizontal, portrait and OG — from the photo and
-      that copy. Skipped when the set on disk already matches both.
+   4. Drafts the artwork set — horizontal, portrait and OG — from the photo and
+      that copy, and **stops**. Nothing below happens until the set is approved
+      on the **Thumbnail** tab, the next step; Approve there runs 5 and 6. When
+      the set on disk is current and already approved — **Re-render missing**
+      keeps the photo, so its approval holds — it is not redrawn and the press
+      carries straight on.
    5. Uploads the longform to YouTube with the horizontal artwork, at the
       visibility chosen on the YouTube tab — but only for a project that has
       never been uploaded. A re-render of a video already on YouTube stops here
@@ -62,21 +67,17 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    **Re-render missing**, directly under the Render button, is the way back:
    the same cut and render without retaking the photo. Every stage is
    incremental, so it draws only the clips that are missing or stale, joins the
-   longforms, and then carries on with the title, artwork and upload. Pressing
-   Render again would do the same but retake the photo first. Everything the press produces lands in the **Video details**
-   pane on the right, top to bottom in the order it is produced: the notes that
-   steer the copy and the copy itself, the artwork set with the photo it was
-   drawn from, and the rendered clips to scrub before anything else goes out.
-   **Retake photo**, **Retake screen** and **Redraw artwork** are the
-   corrections — the screen on its own, so a good photo survives a slide
-   change; the design
-   controls (kicker, theme, focus) and the optional AI image experiments are
-   folded away beneath them. Between the artwork and the clips, a **Figures**
-   card lists every figure snipped during the take with what was said over it,
-   transcribed, and the blurb written from that — the same figures the Blog tab
-   places into the article. A pipeline strip at the top of the pane shows which
-   of the five stages are done. Speaking notes keep their own panel beside it.
-   There is no Thumbnails tab and no Review sub-tab any more.
+   longforms, and then carries on with the title and the artwork. Pressing
+   Render again would do the same but retake the photo first, which always
+   asks for a fresh review. Everything else the press produces lands in the
+   **Video details** pane on the right, top to bottom in the order it is
+   produced: the notes that steer the copy and the copy itself, a **Figures**
+   card listing every figure snipped during the take with what was said over
+   it, transcribed, and the blurb written from that — the same figures the Blog
+   tab places into the article — and the rendered clips to scrub before
+   anything goes out. A pipeline strip at the top of the pane shows which
+   stages are done, the thumbnail's review included. Speaking notes keep their
+   own panel beside it. There is no Review sub-tab any more.
    The input meter sits directly under the Microphone selector, the full width
    of the column, so that sound is going into the take is visible at a glance —
    a mic that has picked nothing up is a bar that has not moved, right where
@@ -117,7 +118,22 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    **New Chapter** out of a retake opens the first unrecorded number rather
    than the chapter after it, so it never lands on one already recorded. The
    **Retake ⌃⌥T** button is unchanged: it redoes the chapter that is rolling.
-2. **YouTube** — edit and save the title and description, choose visibility,
+2. **Thumbnail** — review the artwork the render drafted, and approve it. The
+   three pictures at a size that shows them, the photo and screen grab they
+   were drawn from, and the corrections: **Retake photo** (the camera keeps
+   running on every tab, so the countdown works from here — the new still
+   appears when it ends), **Retake screen**, **Choose photo…** and **Redraw
+   artwork**, with the design controls (kicker, theme, focus) and the optional
+   AI image experiments folded away beneath them. **Approve thumbnail** is the
+   one thing that lets the set out: the YouTube upload and Replace thumbnail,
+   the blog and the S3 copy for Buffer all read only an approved set, and
+   pressing it starts the uploads the render press held back — or, for a video
+   already on YouTube, points at **Replace thumbnail** instead of uploading it
+   twice. The approval is recorded in `thumbnails/approval.json` against the
+   set's id, so a redraw, a new photo or a design edit needs approving again;
+   nothing has to clear it. A project that was already on YouTube before this
+   step existed counts as approved until it is approved once.
+3. **YouTube** — edit and save the title and description, choose visibility,
    connect the channel, and upload (or re-upload) the longform by hand. The
    **Visibility** picker is both the setting the next upload goes up with and
    a control on the video already up: moving it makes the longform, and then
@@ -127,12 +143,13 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    this asked for do not carry — the first change says so and asks for one
    more press of **Connect…**. While an upload is running the change is held
    and applied by the next Upload press.
-3. **Blog (Strapi)** — write and review the companion article, then publish it live at
+4. **Blog (Strapi)** — write and review the companion article, then publish it live at
    `/blog/{slug}`; the ledger row records whether Strapi actually published it.
    Deliberately not part of the render's chain: the blog carries the portrait
    poster and the OG image, and this is where they get checked first. When the
-   blog is blocked on artwork the reason is the specific one — a photo or design
-   changed since the set was drawn — rather than a generic "generate artwork".
+   blog is blocked on artwork the reason is the specific one — not drawn, a
+   photo or design changed since the set was drawn, or not approved yet —
+   rather than a generic "generate artwork".
    Before anything is uploaded, the post is measured against the CMS's field
    limits — a Strapi `string` is a 255-character column in Postgres whether the
    schema says so or not, and a pull quote past it used to come back as a bare
@@ -148,7 +165,7 @@ The recorder has four primary steps, declared in `src/ui/workflow.rs`:
    off until the card is empty. The long description is held to one sentence of
    200 characters the same way: not a CMS limit, but it prints under the heading.
    The existing CMS preview and publishing controls remain here.
-4. **Socials** — generate and edit platform copy; build the Buffer plan from the
+5. **Socials** — generate and edit platform copy; build the Buffer plan from the
    public URLs the render's S3 upload left behind, review/approve it, and queue it.
    The Buffer pane's S3 line checks every rendered video against that record —
    on S3 as it is now, rendered again since the upload, or never uploaded — and
@@ -219,18 +236,18 @@ those experiments do not replace the artwork used for publishing.
 
 When the photo is taken, the card's focus point is set from the face tracker's
 anchor, so the photo box is cropped around the face rather than the frame's centre.
-The two Focus boxes on the Video details pane nudge it; the vertical one only moves
+The two Focus boxes on the Thumbnail tab nudge it; the vertical one only moves
 anything when the still is taller than its box.
 
 The current set is recorded in `thumbnails/artwork.json`, with file hashes and measured
 JPEG dimensions. A failed generation leaves the previous complete set active. Editing
 the saved design or changing the photo makes the set stale; the next render redraws it,
-and **Redraw artwork** on Video details does so by hand. The blog and YouTube workflows
-require a current set and name the reason when it is not; image upload failures are
-surfaced.
+and **Redraw artwork** on the Thumbnail tab does so by hand. The blog, YouTube and S3
+workflows require a current, approved set and name the reason when it is not; image
+upload failures are surfaced.
 YouTube can retry/update the thumbnail on an existing upload without duplicating the video:
 **Upload to YouTube** re-sets it while the render is byte-identical to what went up, and
-**Replace thumbnail** beside it pushes whatever artwork is selected on the Thumbnails tab onto
+**Replace thumbnail** beside it pushes the approved artwork from the Thumbnail tab onto
 the newest longform already on YouTube whatever the render is now, then the selected vertical
 artwork onto the Short if there is one. Each replacement is a new row in `youtube.jsonl` with
 `thumbnail_at`, so the tab can say when the poster last changed.

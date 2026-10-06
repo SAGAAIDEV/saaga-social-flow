@@ -501,8 +501,9 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
         bail!("no longform rendered yet — run Render first");
     }
     // Validate all critical artwork before publishing any video.
-    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal)
-        .context("the artwork set is missing or stale — press Render video and thumbnails first")?;
+    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal).context(
+        "the thumbnail is missing, stale or not approved — approve it on the Thumbnail tab first",
+    )?;
     let longform = upload_one(
         session,
         &video,
@@ -662,11 +663,23 @@ fn upload_one(
     };
     append(session, &upload)?;
 
-    if let Some(jpeg) = poster {
-        status("Setting the thumbnail…".into());
-        if set_poster(orientation, &video_id, &url, jpeg)? {
-            upload = record_poster(session, upload)?;
+    let poster = poster
+        .map(|jpeg| {
+            status("Setting the thumbnail…".into());
+            set_poster(orientation, &video_id, &url, jpeg)
+        })
+        .transpose();
+    // Before the poster's result is acted on: a thumbnail that failed leaves
+    // the video live, and the retry press finds this row and never comes back
+    // through here — so this is the one chance to tell the team. A video's
+    // Short is not announced on its own; a short project's is the video.
+    if orientation == Orientation::Horizontal || session.is_short() {
+        if let Some(line) = crate::slack::announce(&upload) {
+            status(line);
         }
+    }
+    if poster?.unwrap_or(false) {
+        upload = record_poster(session, upload)?;
     }
     file_in_playlist(session, &video_id, status);
     Ok(upload)

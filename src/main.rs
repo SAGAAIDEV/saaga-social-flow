@@ -68,6 +68,7 @@ mod session;
 mod sessions;
 mod settings;
 mod shorts;
+mod slack;
 mod stage;
 mod substack;
 mod summary;
