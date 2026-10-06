@@ -126,8 +126,96 @@ pub fn ready(root: &Path) -> Result<Set> {
     current(root, &set)?;
     Ok(set)
 }
+/// A picture that is going to be published, by way of [`approved`].
+///
+/// Every path out of the app — the YouTube upload and Replace thumbnail, the
+/// blog, the S3 copy for Buffer — reads the set through here, so nothing goes
+/// public that has not been looked at on the Thumbnail tab.
 pub fn selected(root: &Path, kind: Kind) -> Result<PathBuf> {
-    ready(root)?.path(root, kind)
+    approved(root)?.path(root, kind)
+}
+
+/// Where the Thumbnail tab's Approve is recorded.
+pub const APPROVAL: &str = "thumbnails/approval.json";
+
+/// Someone looked at one artwork set and said it can be published.
+///
+/// Tied to the set's id rather than kept as a flag on the project, so it lapses
+/// on its own: a redraw mints a new id, and a new photo or a design edit
+/// already fails [`current`]. Nothing has to remember to clear it. Its own file
+/// rather than a field in the manifest so that [`Job::commit`] — which replaces
+/// the manifest wholesale — never has to know about it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Approval {
+    pub set_id: String,
+    pub approved_at: String,
+}
+
+/// Where the set on disk stands, for the Thumbnail tab and the recording
+/// page's pipeline strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Review {
+    /// No set drawn yet.
+    None,
+    /// On disk, but drawn from a photo or a design that has since changed.
+    Stale,
+    /// Current, and waiting to be looked at.
+    Drafted,
+    /// Current and approved: what every upload will use.
+    Approved,
+}
+
+pub fn review(root: &Path) -> Review {
+    let Ok(set) = load(root) else {
+        return Review::None;
+    };
+    if current(root, &set).is_err() {
+        return Review::Stale;
+    }
+    match is_approved(root, &set) {
+        true => Review::Approved,
+        false => Review::Drafted,
+    }
+}
+
+/// The set, when it is current and approved — the only set anything publishes.
+pub fn approved(root: &Path) -> Result<Set> {
+    let set = ready(root)?;
+    if !is_approved(root, &set) {
+        bail!("The thumbnail has not been approved — review it on the Thumbnail tab");
+    }
+    Ok(set)
+}
+
+/// Approves the current set. Refuses a stale or missing one: the button that
+/// calls this is off in those cases, but a queued click can still arrive.
+pub fn approve(root: &Path) -> Result<Approval> {
+    let set = ready(root)?;
+    let approval = Approval {
+        set_id: set.id,
+        approved_at: crate::schedule::ledger::now_rfc3339(),
+    };
+    let path = root.join(APPROVAL);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&approval)?)?;
+    std::fs::rename(&tmp, &path).context("saving the thumbnail approval")?;
+    Ok(approval)
+}
+
+pub fn approval(root: &Path) -> Option<Approval> {
+    serde_json::from_str(&std::fs::read_to_string(root.join(APPROVAL)).ok()?).ok()
+}
+
+fn is_approved(root: &Path, set: &Set) -> bool {
+    match approval(root) {
+        Some(approval) => approval.set_id == set.id,
+        // Projects published before approval existed: their picture has already
+        // gone public, and without this the blog gate of every one of them would
+        // shut on the first launch after the change. The first Approve on such a
+        // project writes the file, and from then on the record is what counts.
+        None => root.join(crate::publish::UPLOADS_JSONL).is_file(),
+    }
 }
 
 pub struct Job {
@@ -298,6 +386,67 @@ pub(crate) fn fixture(root: &Path) -> Set {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("artwork-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
+
+    #[test]
+    fn a_drawn_set_waits_for_approval_and_only_then_is_selected() {
+        let root = scratch("approve");
+        assert_eq!(review(&root), Review::None);
+        fixture(&root);
+        assert_eq!(review(&root), Review::Drafted);
+        assert!(ready(&root).is_ok());
+        let err = selected(&root, Kind::Horizontal).unwrap_err();
+        assert!(err.to_string().contains("Thumbnail tab"), "{err}");
+
+        let approval = approve(&root).unwrap();
+        assert_eq!(approval.set_id, load(&root).unwrap().id);
+        assert_eq!(review(&root), Review::Approved);
+        assert!(selected(&root, Kind::Horizontal).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_approval_lapses_on_a_redraw_a_new_photo_and_a_design_edit() {
+        let root = scratch("lapse");
+        fixture(&root);
+        approve(&root).unwrap();
+        // A redraw: same photo and design, new set id.
+        fixture(&root);
+        assert_eq!(review(&root), Review::Drafted);
+        assert!(approved(&root).is_err());
+
+        approve(&root).unwrap();
+        crate::thumbnail::still::write_bytes(&root, b"another photo").unwrap();
+        assert_eq!(review(&root), Review::Stale);
+        assert!(approved(&root).is_err());
+        assert!(approve(&root).is_err(), "a stale set cannot be approved");
+
+        fixture(&root);
+        approve(&root).unwrap();
+        let mut design = super::super::load(&root);
+        design.title = "Edited".into();
+        super::super::save(&root, &design).unwrap();
+        assert_eq!(review(&root), Review::Stale);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_project_already_on_youtube_counts_as_approved_until_it_is_approved_once() {
+        let root = scratch("backfill");
+        fixture(&root);
+        std::fs::write(root.join(crate::publish::UPLOADS_JSONL), "{}\n").unwrap();
+        assert_eq!(review(&root), Review::Approved);
+        // Once there is a record, the record decides.
+        approve(&root).unwrap();
+        fixture(&root);
+        assert_eq!(review(&root), Review::Drafted);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn incomplete_or_tampered_artwork_cannot_replace_the_previous_set() {
         let root = std::env::temp_dir().join(format!("artwork-atomic-{}", std::process::id()));
@@ -321,6 +470,7 @@ mod tests {
         assert_eq!(load(&root).unwrap().id, job.set.id);
         assert!(ready(&root).is_err(), "new set must match the saved design");
         super::super::save(&root, &job.card).unwrap();
+        approve(&root).unwrap();
         let path = selected(&root, Kind::Og).unwrap();
         std::fs::write(path, b"changed").unwrap();
         assert!(load(&root).is_err());

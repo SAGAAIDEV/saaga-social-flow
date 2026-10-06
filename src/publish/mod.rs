@@ -501,8 +501,9 @@ fn run(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
         bail!("no longform rendered yet — run Render first");
     }
     // Validate all critical artwork before publishing any video.
-    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal)
-        .context("the artwork set is missing or stale — press Render video and thumbnails first")?;
+    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal).context(
+        "the thumbnail is missing, stale or not approved — approve it on the Thumbnail tab first",
+    )?;
     let longform = upload_one(
         session,
         &video,

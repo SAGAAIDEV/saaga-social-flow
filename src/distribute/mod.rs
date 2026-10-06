@@ -397,7 +397,7 @@ fn collect_assets(
     // say "run Render first" instead of uploading a lone picture.
     if !assets.is_empty() {
         if root.join(crate::card::assets::MANIFEST).exists() {
-            let set = crate::card::assets::ready(root)?;
+            let set = crate::card::assets::approved(root)?;
             for (kind, id, orientation) in [
                 (
                     crate::card::assets::Kind::Horizontal,
@@ -693,14 +693,20 @@ mod tests {
         std::fs::create_dir_all(render.join("horizontal")).unwrap();
         std::fs::write(render.join("horizontal/longform.mp4"), b"video").unwrap();
         let set = crate::card::assets::fixture(&root);
-        let assets = collect_assets(
-            &render,
-            &root.join("drafts"),
-            &root,
-            Default::default(),
-            &[],
-        )
-        .unwrap();
+        let collect = || {
+            collect_assets(
+                &render,
+                &root.join("drafts"),
+                &root,
+                Default::default(),
+                &[],
+            )
+        };
+        // A drawn set goes nowhere until the Thumbnail tab approves it.
+        let err = collect().unwrap_err().to_string();
+        assert!(err.contains("Thumbnail tab"), "{err}");
+        crate::card::assets::approve(&root).unwrap();
+        let assets = collect().unwrap();
         for id in ["thumbnail", "thumbnail-vertical", "og-image"] {
             let asset = assets.iter().find(|asset| asset.id == id).unwrap();
             assert_eq!(asset.kind, AssetKind::Image);

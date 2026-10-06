@@ -132,12 +132,19 @@ impl Stages {
         let short_up = crate::publish::short(session).is_some();
         // The reason, not a flag: a set that is on disk but stale reads the
         // same as one that was never drawn if all the gate can say is "no".
-        // The render button draws the set, so that is where a blocked stage
-        // points — there is no separate tab to go and press.
-        let artwork = crate::card::assets::ready(&session.root)
+        // The render button drafts the set and the Thumbnail tab redraws and
+        // approves it, so each state points at the one that moves it on.
+        let artwork = crate::card::assets::approved(&session.root)
             .map(|_| ())
-            .map_err(|err| {
-                format!("Artwork is not ready: {err:#} — press Render video and thumbnails")
+            .map_err(|err| match crate::card::assets::review(&session.root) {
+                crate::card::assets::Review::None => {
+                    format!("Artwork is not ready: {err:#} — press Render video and thumbnails")
+                }
+                crate::card::assets::Review::Stale => {
+                    format!("Artwork is not ready: {err:#} — redraw it on the Thumbnail tab")
+                }
+                _ => "Artwork is not approved — review it and press Approve on the Thumbnail tab"
+                    .to_string(),
             });
         let artwork_reason = artwork.as_ref().err().map(String::as_str).unwrap_or("");
         let has_thumbnail = (artwork.is_ok(), artwork_reason);
@@ -166,6 +173,13 @@ impl Stages {
                 &[
                     (rendered, "Nothing rendered yet — run Render first"),
                     bucket,
+                    // The thumbnails go up beside the videos when there is a set
+                    // at all, and only an approved one — see `distribute::run`.
+                    (
+                        !session.root.join(crate::card::assets::MANIFEST).exists()
+                            || artwork.is_ok(),
+                        artwork_reason,
+                    ),
                 ],
             ),
             plan: gate(
@@ -367,6 +381,14 @@ mod tests {
             .unwrap()
             .contains("Render video and thumbnails"));
         crate::card::assets::fixture(&root);
+        // Drawn is not enough: it waits on the Thumbnail tab's Approve.
+        let reason = Stages::read(&session(&root), Busy::default())
+            .publish
+            .missing()
+            .unwrap()
+            .to_string();
+        assert!(reason.contains("Approve on the Thumbnail tab"), "{reason}");
+        crate::card::assets::approve(&root).unwrap();
         assert!(Stages::read(&session(&root), Busy::default())
             .publish
             .is_ready());
@@ -382,6 +404,7 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(reason.contains("Design changed"), "{reason}");
+        assert!(reason.contains("Thumbnail tab"), "{reason}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
