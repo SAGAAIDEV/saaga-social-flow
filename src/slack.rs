@@ -77,7 +77,13 @@ fn post(url: &str, text: &str) -> Result<()> {
     if !url.starts_with(PREFIX) {
         bail!("{WEBHOOK} should start with {PREFIX}");
     }
-    let response = ureq::post(url)
+    send(url, url, text)
+}
+
+/// `target` is where the request goes; `_webhook` is only there so a test can
+/// point at a dead port while checking the real URL never reaches the error.
+fn send(_webhook: &str, target: &str, text: &str) -> Result<()> {
+    let response = ureq::post(target)
         .timeout(std::time::Duration::from_secs(15))
         .send_json(serde_json::json!({ "text": text, "unfurl_links": true }));
     match response {
@@ -86,7 +92,11 @@ fn post(url: &str, text: &str) -> Result<()> {
             let body = response.into_string().unwrap_or_default();
             bail!("{}", explain(code, body.trim()))
         }
-        Err(err) => Err(err).context("reaching Slack"),
+        // Never the error itself: ureq puts the request URL in a transport
+        // error's message, and the webhook URL is the secret.
+        Err(ureq::Error::Transport(transport)) => {
+            bail!("could not reach Slack ({})", transport.kind())
+        }
     }
 }
 
@@ -139,6 +149,16 @@ mod tests {
         assert!(explain(404, "no_service").contains(WEBHOOK));
         assert!(explain(404, "channel_not_found").contains("make a new one"));
         assert_eq!(explain(500, ""), "Slack http 500");
+    }
+
+    #[test]
+    fn a_transport_failure_never_repeats_the_webhook_url() {
+        // Nothing listens on port 9, so this fails at connect — the same path a
+        // DNS failure or a timeout takes.
+        let secret = "https://hooks.slack.com/services/T000/B000/SECRET";
+        let err =
+            super::send(secret, "http://127.0.0.1:9/services/T000/B000/SECRET", "hi").unwrap_err();
+        assert!(!format!("{err:#}").contains("SECRET"), "{err:#}");
     }
 
     #[test]

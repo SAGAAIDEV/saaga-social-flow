@@ -192,9 +192,13 @@ pub fn approved(root: &Path) -> Result<Set> {
 /// calls this is off in those cases, but a queued click can still arrive.
 pub fn approve(root: &Path) -> Result<Approval> {
     let set = ready(root)?;
+    record(root, &set.id, crate::schedule::ledger::now_rfc3339())
+}
+
+fn record(root: &Path, set_id: &str, approved_at: String) -> Result<Approval> {
     let approval = Approval {
-        set_id: set.id,
-        approved_at: crate::schedule::ledger::now_rfc3339(),
+        set_id: set_id.to_string(),
+        approved_at,
     };
     let path = root.join(APPROVAL);
     let tmp = path.with_extension("json.tmp");
@@ -212,9 +216,14 @@ fn is_approved(root: &Path, set: &Set) -> bool {
         Some(approval) => approval.set_id == set.id,
         // Projects published before approval existed: their picture has already
         // gone public, and without this the blog gate of every one of them would
-        // shut on the first launch after the change. The first Approve on such a
-        // project writes the file, and from then on the record is what counts.
-        None => root.join(crate::publish::UPLOADS_JSONL).is_file(),
+        // shut on the first launch after the change. The set on disk the first
+        // time it is read is the one that went up, so it is recorded as approved
+        // there and then — a migration, once. Tying it to the set id is what
+        // stops every later redraw on such a project counting as approved too.
+        None if root.join(crate::publish::UPLOADS_JSONL).is_file() => {
+            record(root, &set.id, "before approvals existed".into()).is_ok()
+        }
+        None => false,
     }
 }
 
@@ -441,8 +450,8 @@ mod tests {
         fixture(&root);
         std::fs::write(root.join(crate::publish::UPLOADS_JSONL), "{}\n").unwrap();
         assert_eq!(review(&root), Review::Approved);
-        // Once there is a record, the record decides.
-        approve(&root).unwrap();
+        // The set it found is recorded, so a redraw is not approved with it.
+        assert_eq!(approval(&root).unwrap().set_id, load(&root).unwrap().id);
         fixture(&root);
         assert_eq!(review(&root), Review::Drafted);
         std::fs::remove_dir_all(root).unwrap();

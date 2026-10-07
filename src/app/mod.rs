@@ -1515,9 +1515,16 @@ impl App {
     /// each pressed on its own — the render, the thumbnail and the uploads are
     /// separate steps.
     fn approve_thumbnail(&mut self) {
-        let status = match crate::card::assets::approve(&self.session.root) {
-            Ok(_) => "Thumbnail approved — upload it on the YouTube tab.".to_string(),
-            Err(err) => format!("Not approved: {err:#}"),
+        let live = crate::publish::longform(&self.session)
+            .or_else(|| crate::publish::short(&self.session));
+        let status = match (crate::card::assets::approve(&self.session.root), live) {
+            // Upload would put a changed render up as a second video; the
+            // thumbnail of the one already up is Replace thumbnail's job.
+            (Ok(_), Some(_)) => "Thumbnail approved — it is already on YouTube, so press \
+                                 Replace thumbnail on the YouTube tab to put it there."
+                .to_string(),
+            (Ok(_), None) => "Thumbnail approved — upload it on the YouTube tab.".to_string(),
+            (Err(err), _) => format!("Not approved: {err:#}"),
         };
         self.set_thumbnail_status(&status);
         self.update_video_view();
