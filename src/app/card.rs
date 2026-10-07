@@ -26,6 +26,13 @@ impl App {
     /// Returns whether a job started. The render chain reads it: a refusal
     /// here — no title, no photo — is the end of that chain, not a step in it.
     pub(super) fn draw_card(&mut self) -> bool {
+        // A commit prunes the set an upload may be reading from.
+        if self.publish_busy || self.blog_busy || self.distribute_busy {
+            self.set_thumbnail_status(
+                "An upload is reading the current artwork — draw again when it finishes.",
+            );
+            return false;
+        }
         if self.card_pending.is_some() || self.card_raster.is_some() {
             self.set_thumbnail_status("Already generating artwork…");
             return false;
@@ -55,11 +62,12 @@ impl App {
             let mtm = objc2::MainThreadMarker::new()
                 .ok_or_else(|| anyhow::anyhow!("render must run on the main thread"))?;
             let kind = job.kind();
-            // One picture of the set per hop, so the bar moves in thirds.
-            self.set_thumbnail_progress(Some(
-                job.next as f64 / card::assets::Kind::ALL.len() as f64,
+            self.set_thumbnail_status(&format!(
+                "Drawing {} artwork ({} of {})…",
+                kind.name(),
+                job.next + 1,
+                card::assets::Kind::ALL.len()
             ));
-            self.set_thumbnail_status(&format!("Drawing {} artwork…", kind.name()));
             let size = kind.size();
             let html =
                 card::render::html(&job.root, &job.design(), Some(&job.photo), size.0, size.1)?;
@@ -103,7 +111,6 @@ impl App {
                     }
                     Ok(true) => match job.commit() {
                         Ok(()) => {
-                            self.set_thumbnail_progress(Some(1.0));
                             self.set_thumbnail_status(
                                 "Artwork drawn: horizontal, vertical and OG. Review it and press \
                                  Approve — nothing is published until you do.",
@@ -123,8 +130,10 @@ impl App {
             }
         }
         self.update_video_view();
+        self.update_thumbnail_view();
         self.update_publish_summary();
         self.update_blog_view();
+        self.update_distribute_summary();
         self.sync_controls();
     }
 
@@ -183,6 +192,7 @@ impl App {
             }
         };
         self.update_video_view();
+        self.update_thumbnail_view();
         saved
     }
 }

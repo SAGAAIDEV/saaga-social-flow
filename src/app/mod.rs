@@ -1181,6 +1181,7 @@ impl App {
         }
         self.update_render_summary();
         self.update_video_view();
+        self.update_thumbnail_view();
         self.update_substack_view();
         self.update_blog_view();
         self.update_publish_summary();
@@ -1456,15 +1457,9 @@ impl App {
         self.launch_render("Cutting disfluencies…");
     }
 
-    /// Re-render missing: the Render press without the photo.
-    ///
-    /// Everything the render stage does is already incremental — the cut, the
-    /// compositions and the renders each skip what is current on disk — so this
-    /// draws exactly the clips the last press left missing or failed, joins the
-    /// longforms, and carries on down the same chain: copy, artwork, upload.
-    /// The photo is the one step of a Render press that is *not* idempotent —
-    /// it replaces the still the artwork is drawn from — which is why finishing
-    /// five failed renders out of twenty-one must not go through it.
+    /// Re-render missing. The same as Render video now: the render is
+    /// incremental, so either draws only the clips that are missing or stale.
+    /// It used to differ by not retaking the photo, and Render no longer takes one.
     fn run_rerender(&mut self) {
         if !self.render_can_start() {
             return;
@@ -1528,8 +1523,10 @@ impl App {
         };
         self.set_thumbnail_status(&status);
         self.update_video_view();
+        self.update_thumbnail_view();
         self.update_publish_summary();
         self.update_blog_view();
+        self.update_distribute_summary();
         self.sync_controls();
     }
 
@@ -1592,14 +1589,6 @@ impl App {
     fn set_render_progress(&self, fraction: f64) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_render_progress(fraction);
-        }
-    }
-
-    /// The Thumbnails bar. `None` runs it indeterminate — see
-    /// [`ui::ControlTarget::set_thumbnail_progress`].
-    fn set_thumbnail_progress(&self, fraction: Option<f64>) {
-        if let Some(live) = self.live.as_ref() {
-            live.control_target.set_thumbnail_progress(fraction);
         }
     }
 
@@ -2187,6 +2176,7 @@ impl App {
             Err(err) => self.set_thumbnail_status(&err),
         }
         self.update_video_view();
+        self.update_thumbnail_view();
     }
 
     /// The Retake screen button: grab the screen alone and keep the photo.
@@ -2210,6 +2200,7 @@ impl App {
         };
         self.set_thumbnail_status(&message);
         self.update_video_view();
+        self.update_thumbnail_view();
     }
 
     /// The screen exactly as the layout sees it — the tap the compositor reads —
@@ -2358,7 +2349,7 @@ impl App {
             }),
             Err(err) => self.set_thumbnail_status(&format!("Could not save the brief: {err:#}")),
         }
-        self.update_video_view();
+        self.update_thumbnail_view();
     }
 
     /// Records the choice without repainting.
@@ -2369,7 +2360,7 @@ impl App {
     fn select_thumbnail(&mut self, id: &str) {
         if let Err(err) = crate::thumbnail::activate(&self.session, id) {
             self.set_thumbnail_status(&format!("Could not select: {err:#}"));
-            self.update_video_view();
+            self.update_thumbnail_view();
             return;
         }
         self.set_thumbnail_status(&format!("{id} is now the thumbnail."));
@@ -2388,7 +2379,7 @@ impl App {
         // the active cap — needs the pane corrected from disk.
         if let Err(err) = crate::thumbnail::references::set_active(&root, name, value) {
             self.set_thumbnail_status(&format!("{err:#}"));
-            self.update_video_view();
+            self.update_thumbnail_view();
         }
     }
 
@@ -2411,7 +2402,7 @@ impl App {
             Ok(()) => self.set_thumbnail_status(&format!("Drawing with {label}.")),
             Err(err) => self.set_thumbnail_status(&format!("Could not save the model: {err:#}")),
         }
-        self.update_video_view();
+        self.update_thumbnail_view();
     }
 
     fn add_reference(&mut self, name: &str, data: &str) {
@@ -2462,7 +2453,7 @@ impl App {
             Err(err) => {
                 self.set_thumbnail_status(&format!("{err:#}"));
                 // The tile is already gone from the pane; put it back.
-                self.update_video_view();
+                self.update_thumbnail_view();
             }
         }
     }
@@ -2566,7 +2557,7 @@ impl App {
                 "document.getElementById('countdown-saved').textContent = {text};"
             ));
         }
-        self.update_video_view();
+        self.update_thumbnail_view();
     }
 
     /// Settings → YouTube: copy the stored refresh token, for `dev.sops.env`.
@@ -2605,9 +2596,17 @@ impl App {
         }
     }
 
+    /// The Thumbnail tab's line: the photo, the artwork and the AI jobs.
     fn set_thumbnail_status(&self, msg: &str) {
         if let Some(live) = self.live.as_ref() {
             live.control_target.set_thumbnail_status(msg);
+        }
+    }
+
+    /// The line above the Video details pane: the copy, summary and critique.
+    pub(super) fn set_video_details_status(&self, msg: &str) {
+        if let Some(live) = self.live.as_ref() {
+            live.control_target.set_video_details_status(msg);
         }
     }
 
@@ -2654,6 +2653,7 @@ impl App {
         }
         if repaint {
             self.update_video_view();
+            self.update_thumbnail_view();
         }
     }
 
@@ -2665,14 +2665,11 @@ impl App {
     /// it describes. Cheap: a few `stat` calls, three hashes and a template, so
     /// it runs wherever any of its parts change. It reloads the page, though,
     /// so nothing calls it per keystroke or per progress line.
-    /// Repaints the recording page — and the Thumbnail tab with it.
-    ///
-    /// One call for both because every event that changes one changes the
-    /// other: a photo, a render, new copy, a drawn set. The recording page's
-    /// pipeline strip reads where the thumbnail stands, and the Thumbnail tab
-    /// reads the title the render wrote.
+    /// Repaints the recording page. The Thumbnail tab is repainted on its own,
+    /// only by what changes it — a reload there cancels a running photo
+    /// countdown and drops half-typed design fields, so notes autosave, copy
+    /// progress and summaries must not reach it.
     fn update_video_view(&self) {
-        self.update_thumbnail_view();
         let Some(live) = self.live.as_ref() else {
             return;
         };
@@ -3370,7 +3367,15 @@ impl App {
                     self.update_publish_summary();
                     match upload.orientation {
                         crate::publish::Orientation::Horizontal => {
-                            self.set_publish_status(&format!("Live at {}{thumb}", upload.url));
+                            let slack = upload
+                                .slack
+                                .as_deref()
+                                .map(|line| format!(" {line}"))
+                                .unwrap_or_default();
+                            self.set_publish_status(&format!(
+                                "Live at {}{thumb}.{slack}",
+                                upload.url
+                            ));
                             // The upload is what the blog gate waits for.
                             self.update_blog_view();
                         }
@@ -3380,11 +3385,19 @@ impl App {
                             // two links on screen. Both, with the longform read
                             // back from the row its own event appended.
                             let longform = crate::publish::longform(&self.session);
+                            let slack = upload
+                                .slack
+                                .as_deref()
+                                .map(|line| format!(" {line}"))
+                                .unwrap_or_default();
                             let status = match &longform {
                                 Some(long) => {
-                                    format!("Live at {}. Short live at {}", long.url, upload.url)
+                                    format!(
+                                        "Live at {}. Short live at {}.{slack}",
+                                        long.url, upload.url
+                                    )
                                 }
-                                None => format!("Short live at {}", upload.url),
+                                None => format!("Short live at {}.{slack}", upload.url),
                             };
                             self.set_publish_status(&status);
                             // The blog's mobile player embeds it, so the pane
@@ -3396,6 +3409,7 @@ impl App {
                     // to re-read the ledger after either row lands; so does the
                     // Project tab's Published card.
                     self.update_video_view();
+                    self.update_thumbnail_view();
                     self.update_project_view();
                 }
                 crate::publish::PublishEvent::ThumbnailSet(upload) => {
@@ -3459,9 +3473,6 @@ impl App {
                 crate::publish::PublishEvent::Failed(msg) => {
                     self.publish_busy = false;
                     self.set_publish_status(&msg);
-                    // An upload the render started fails where the render is watched.
-                    self.set_thumbnail_status(&msg);
-                    self.set_render_status(&msg);
                     self.sync_controls();
                 }
             }
@@ -4302,6 +4313,7 @@ impl ApplicationHandler for App {
                 self.report_clock_drift();
                 self.update_render_summary();
                 self.update_video_view();
+                self.update_thumbnail_view();
                 self.update_substack_view();
                 self.update_blog_view();
                 self.update_publish_summary();

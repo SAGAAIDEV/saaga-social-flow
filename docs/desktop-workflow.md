@@ -12,7 +12,7 @@ recording on:
       title, and every chapter after the first gets a card carrying the
       chapter's own number — the same one the vertical cut, the notes and the
       blog use, so the first card a viewer meets reads "Chapter 02". Three
-      boxes directly above **Render video and thumbnails** — **Horizontal**,
+      boxes directly above **Render video** — **Horizontal**,
       **Vertical**, **Shorts** — decide what is produced; all three are on by
       default and remembered. A render draws only what the ticked outputs still
       lack, so ticking one after a render costs that output alone. The vertical
@@ -43,12 +43,10 @@ recording on:
    The status line under the button says how the render went. A render that loses some of its clips — "5 of 21 render(s)
    failed" — names each one and the reason HyperFrames gave, and leaves that
    reason in a `.log` beside where the clip would have landed under `render/`.
-   **Re-render missing**, directly under the Render button, is the way back:
-   the same cut and render without retaking the photo. Every stage is
-   incremental, so it draws only the clips that are missing or stale, joins the
-   longforms, and then carries on with the title and the artwork. Pressing
-   Render again would do the same but retake the photo first, which always
-   asks for a fresh review. Everything else the press produces lands in the
+   Pressing Render video again is the way back: every stage is incremental, so
+   it draws only the clips that are missing or stale and joins the longforms.
+   **Re-render missing**, directly under it, now does exactly the same.
+   Everything the press produces lands in the
    **Video details** pane on the right, top to bottom in the order it is
    produced: the notes that steer the copy and the copy itself, a **Figures**
    card listing every figure snipped during the take with what was said over
@@ -143,7 +141,7 @@ recording on:
    200 characters the same way: not a CMS limit, but it prints under the heading.
    The existing CMS preview and publishing controls remain here.
 5. **Socials** — generate and edit platform copy; build the Buffer plan from the
-   public URLs the render's S3 upload left behind, review/approve it, and queue it.
+   public URLs the S3 upload left behind, review/approve it, and queue it.
    The Buffer pane's S3 line checks every rendered video against that record —
    on S3 as it is now, rendered again since the upload, or never uploaded — and
    Build Plan is off until all of them are up. **Upload to S3** beside it runs
@@ -229,7 +227,7 @@ the newest longform already on YouTube whatever the render is now, then the sele
 artwork onto the Short if there is one. Each replacement is a new row in `youtube.jsonl` with
 `thumbnail_at`, so the tab can say when the poster last changed.
 
-The render's S3 upload exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
+The S3 upload (Socials tab) exports `thumbnail`, `thumbnail-vertical`, and `og-image` as public assets.
 A Buffer plan uses the OG asset as an image post for the longform's Facebook copy. The
 longform goes to LinkedIn as the video itself, one plan row per connected LinkedIn channel
 (the SAAGA Solve page and the personal profile), each approved, queued and deduped on its

@@ -39,7 +39,7 @@ impl App {
     /// is for the two states the page itself draws differently — the notes
     /// locked while a generation runs, and the new copy when it lands.
     pub(super) fn update_video_brief(&self, status: &str) {
-        self.set_thumbnail_status(status);
+        self.set_video_details_status(status);
         self.update_video_view();
     }
     /// Remember the notes. `_apply` is kept for the event's shape; notes never
@@ -81,6 +81,14 @@ impl App {
         let source = video_brief::Source::for_session(&self.session, &brief.notes);
         if let Err(err) = source.prompt() {
             self.update_video_brief(&format!("{err:#}"));
+            return false;
+        }
+        // The render used to guarantee this; a button does not.
+        if source.completed < source.total {
+            self.update_video_brief(&format!(
+                "Wait for every chapter to transcribe first — {} of {} are done.",
+                source.completed, source.total
+            ));
             return false;
         }
         let status = source.status();
@@ -154,6 +162,8 @@ impl App {
         // A result always belongs to the project it started in.
         if job.session.root == self.session.root {
             self.update_video_brief(&status);
+            // The tab shows the title the artwork is drawn for.
+            self.update_thumbnail_view();
             self.update_publish_summary();
             self.update_blog_view();
             self.sync_controls();

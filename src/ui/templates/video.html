@@ -55,7 +55,7 @@
     <form id="brief">
       <input type="hidden" name="root" value="{{ root }}">
       <fieldset {% if busy %}disabled{% endif %}>
-        <label class="label" for="video-notes">Notes for the next render</label>
+        <label class="label" for="video-notes">Notes for Write</label>
         <textarea id="video-notes" name="notes" rows="2" maxlength="20000"
           placeholder="Key idea, audience, or takeaway to emphasize.">{{ brief.notes }}</textarea>
         <p class="help">Steers the emphasis, never replaces the transcript. Remembered for this project.
@@ -270,7 +270,7 @@
       <li><span class="name">S3</span>
         {% if hosted %}{{ hosted.count }} public file(s) for Buffer
         <button class="copy" data-send='{{ {"type": "copyText", "text": hosted.path} | tojson }}'>copy path</button>
-        {% else %}<span class="none">Not on S3 yet — the renders go up when a render finishes</span>{% endif %}</li>
+        {% else %}<span class="none">Not on S3 yet — press the S3 upload on the Socials tab</span>{% endif %}</li>
     </ul>
   </div>
 </section>

@@ -486,13 +486,11 @@ pub struct ControlTargetIvars {
     // Render tab
     render_status: RefCell<Option<Retained<NSTextField>>>,
     thumbnail_status: RefCell<Option<Retained<NSTextField>>>,
-    /// The same line again, on the Thumbnail tab: the artwork jobs narrate to
-    /// both, so whichever tab is open says what the draw is doing.
+    /// The Thumbnail tab's own line: the photo, the artwork and the AI jobs.
     thumbnail_tab_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
     /// The bar under Render video — see `layout_left`.
     render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
-    thumbnail_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
 
     // Post tab
     posts_model_popup: RefCell<Option<Retained<NSPopUpButton>>>,
@@ -1001,7 +999,6 @@ impl ControlTarget {
             thumbnail_tab_status: RefCell::new(None),
             render_summary: RefCell::new(None),
             render_bar: RefCell::new(None),
-            thumbnail_bar: RefCell::new(None),
             posts_model_popup: RefCell::new(None),
             posts_provider_popup: RefCell::new(None),
             posts_prompt_view: RefCell::new(None),
@@ -1673,12 +1670,17 @@ impl ControlTarget {
         }
     }
 
+    /// The Thumbnail tab's line.
     pub fn set_thumbnail_status(&self, text: &str) {
-        let ivars = self.ivars();
-        for field in [&ivars.thumbnail_status, &ivars.thumbnail_tab_status] {
-            if let Some(field) = field.borrow().clone() {
-                field.setStringValue(&NSString::from_str(text));
-            }
+        if let Some(field) = self.ivars().thumbnail_tab_status.borrow().clone() {
+            field.setStringValue(&NSString::from_str(text));
+        }
+    }
+
+    /// The line above the Video details pane.
+    pub fn set_video_details_status(&self, text: &str) {
+        if let Some(field) = self.ivars().thumbnail_status.borrow().clone() {
+            field.setStringValue(&NSString::from_str(text));
         }
     }
 
@@ -1692,22 +1694,6 @@ impl ControlTarget {
     pub fn set_render_progress(&self, fraction: f64) {
         if let Some(bar) = self.ivars().render_bar.borrow().clone() {
             Self::show_fraction(&bar, fraction);
-        }
-    }
-
-    /// The thumbnails bar. `None` while the copy is being written — a model
-    /// call with no measurable middle, so the bar runs indeterminate rather than
-    /// sitting at zero looking stuck — and a fraction once the artwork is being
-    /// drawn, one picture of the set at a time.
-    pub fn set_thumbnail_progress(&self, fraction: Option<f64>) {
-        if let Some(bar) = self.ivars().thumbnail_bar.borrow().clone() {
-            match fraction {
-                Some(fraction) => Self::show_fraction(&bar, fraction),
-                None => {
-                    bar.setIndeterminate(true);
-                    unsafe { bar.startAnimation(None) };
-                }
-            }
         }
     }
 
@@ -2555,7 +2541,7 @@ pub fn attach_controls(
     // which would throw away the notes someone is typing and their scroll.
     let host_bounds = brief_host.bounds();
     let thumbnail_status = NSTextField::labelWithString(
-        &NSString::from_str("Take a photo and press Draw artwork to make the thumbnail."),
+        &NSString::from_str("Render video, then write the title and description below."),
         mtm,
     );
     thumbnail_status.setFrame(NSRect::new(
@@ -2943,13 +2929,13 @@ pub fn attach_controls(
 
     *target.ivars().render_button.borrow_mut() = Some(built[4].clone());
     built[5].setToolTip(Some(&NSString::from_str(
-        "Render only the clips the last render left missing or failed, without retaking \
-         the photo. Clips already current are skipped; the title, artwork and upload follow.",
+        "Render only the clips the last render left missing or failed. Clips already \
+         current are skipped. Render video does the same — both are incremental.",
     )));
     *target.ivars().rerender_button.borrow_mut() = Some(built[5].clone());
     let render_status = NSTextField::labelWithString(
         &NSString::from_str(
-            "Record a video, then render it. One press: photo, cut, title, artwork, YouTube.",
+            "Record a video, then press Render video. Title, thumbnail and uploads are their own steps.",
         ),
         mtm,
     );

@@ -226,16 +226,17 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
 fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
     match (card.is_empty(), has_still) {
         (true, _) => {
-            "No title yet — the render writes one, or type one under Artwork design.".to_string()
+            "No title yet — press Write title & description on Video details, or type one \
+             under Design."
+                .to_string()
         }
         // A set is a photograph with words beside it, so there is nothing to
         // draw without one. The button is disabled to match, rather than taking
         // the press and failing on it.
-        (false, false) => "No photo yet — Retake photo, or choose one.".to_string(),
-        (false, true) => "The render draws these. Redraw only after retaking the photo or \
-             changing the design: the YouTube thumbnail, the portrait poster, and the \
-             link preview — which is the thumbnail at 1200×630. The AI format picker \
-             steers only the image models."
+        (false, false) => "No photo yet — Take photo, or choose one.".to_string(),
+        (false, true) => "Draw artwork makes the YouTube thumbnail, the portrait poster, and \
+             the link preview — which is the thumbnail at 1200×630. Draw again after a new \
+             photo or a design change. The AI format picker steers only the image models."
             .to_string(),
     }
 }

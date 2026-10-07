@@ -165,6 +165,11 @@ pub struct Upload {
     /// written before the Short existed was.
     #[serde(default)]
     pub orientation: Orientation,
+    /// How the Slack post went, for the press's last status line — a Status
+    /// event of its own is overwritten by the next step before anyone reads it.
+    /// Never written to the ledger.
+    #[serde(skip)]
+    pub slack: Option<String>,
 }
 
 /// Which cut a ledger row is: the landscape longform, or the vertical edit of
@@ -329,7 +334,11 @@ fn run_visibility(
                 longform.privacy.label()
             )
         })?;
+        let before = longform.privacy;
         let row = record_privacy(session, longform, privacy)?;
+        if let Some(line) = announce_now_visible(session, before, &row) {
+            status(line);
+        }
         eprintln!(
             "stream-recorder: youtube visibility → {} on {}",
             privacy.as_str(),
@@ -349,7 +358,11 @@ fn run_visibility(
         .and_then(|token| youtube::update_privacy(&token, &short.video_id, privacy))
     {
         Ok(()) => {
+            let before = short.privacy;
             let row = record_privacy(session, short, privacy)?;
+            if let Some(line) = announce_now_visible(session, before, &row) {
+                status(line);
+            }
             let _ = tx.send(PublishEvent::VisibilitySet(row));
         }
         Err(err) => {
@@ -361,6 +374,21 @@ fn run_visibility(
         }
     }
     Ok(())
+}
+
+/// Tells Slack about a video that was private and no longer is: it was skipped
+/// when it went up, and nothing else would ever announce it. Same rule as a
+/// fresh upload — a video's Short is not announced on its own.
+fn announce_now_visible(
+    session: &Session,
+    before: youtube::Privacy,
+    row: &Upload,
+) -> Option<String> {
+    let opened = before == youtube::Privacy::Private && row.privacy != youtube::Privacy::Private;
+    let announced = row.orientation == Orientation::Horizontal || session.is_short();
+    (opened && announced)
+        .then(|| crate::slack::announce(row))
+        .flatten()
 }
 
 /// The row that says who can see the video now, and since when.
@@ -386,10 +414,30 @@ fn run_thumbnail(session: &Session, tx: &Sender<PublishEvent>) -> Result<()> {
     let status = |msg: String| {
         let _ = tx.send(PublishEvent::Status(msg));
     };
+    // A short project has no longform: its Short is the video, so its poster
+    // is the whole press and a failure fails it.
+    if session.is_short() {
+        let short = short(session)
+            .context("nothing on YouTube yet from this project — press Upload to YouTube first")?;
+        let poster = chosen_thumbnail(session, crate::card::assets::Kind::Vertical).context(
+            "the thumbnail is missing, stale or not approved — approve it on the Thumbnail tab first",
+        )?;
+        status(format!(
+            "Replacing the poster on the Short at {}…",
+            short.url
+        ));
+        let token = youtube::access_token()?;
+        youtube::set_thumbnail(&token, &short.video_id, &poster)
+            .with_context(|| format!("the poster on {} was not replaced", short.url))?;
+        let row = record_poster(session, short)?;
+        let _ = tx.send(PublishEvent::ThumbnailSet(row));
+        return Ok(());
+    }
     let longform = longform(session)
         .context("nothing on YouTube yet from this project — press Upload to YouTube first")?;
-    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal)
-        .context("no horizontal artwork selected — pick a thumbnail on the Thumbnails tab first")?;
+    let jpeg = chosen_thumbnail(session, crate::card::assets::Kind::Horizontal).context(
+        "the thumbnail is missing, stale or not approved — approve it on the Thumbnail tab first",
+    )?;
     status(format!("Replacing the thumbnail on {}…", longform.url));
     let token = youtube::access_token()?;
     youtube::set_thumbnail(&token, &longform.video_id, &jpeg).with_context(|| {
@@ -589,7 +637,13 @@ fn upload_one(
             match youtube::access_token()
                 .and_then(|token| youtube::update_privacy(&token, &prior.video_id, meta.privacy))
             {
-                Ok(()) => prior = record_privacy(session, prior, meta.privacy)?,
+                Ok(()) => {
+                    let before = prior.privacy;
+                    prior = record_privacy(session, prior, meta.privacy)?;
+                    if let Some(line) = announce_now_visible(session, before, &prior) {
+                        status(line);
+                    }
+                }
                 Err(err) => match orientation {
                     Orientation::Horizontal => {
                         return Err(err).with_context(|| {
@@ -660,6 +714,7 @@ fn upload_one(
         privacy: meta.privacy,
         privacy_at: None,
         orientation,
+        slack: None,
     };
     append(session, &upload)?;
 
@@ -674,9 +729,7 @@ fn upload_one(
     // through here — so this is the one chance to tell the team. A video's
     // Short is not announced on its own; a short project's is the video.
     if orientation == Orientation::Horizontal || session.is_short() {
-        if let Some(line) = crate::slack::announce(&upload) {
-            status(line);
-        }
+        upload.slack = crate::slack::announce(&upload);
     }
     if poster?.unwrap_or(false) {
         upload = record_poster(session, upload)?;
@@ -924,6 +977,7 @@ mod tests {
             privacy: youtube::Privacy::Public,
             privacy_at: None,
             orientation: Orientation::Horizontal,
+            slack: None,
         }
     }
 

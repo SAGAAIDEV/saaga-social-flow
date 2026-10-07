@@ -426,39 +426,11 @@ fn collect_assets(
                     chapter: None,
                 });
             }
-        } else if let Some(thumbnail) = chosen_thumbnail(root) {
-            assets.push(thumbnail);
         }
+        // No drawn set, no thumbnail. The AI experiments' active candidate used
+        // to ship here, but it never passes through Approve.
     }
     Ok(assets)
-}
-
-/// The candidate the AI experiments last activated, if it is still on disk.
-///
-/// It keeps its content-addressed filename, so activating a different candidate
-/// publishes a different URL rather than overwriting the old one — a post that
-/// already went out must not have its cover changed underneath it. The stable
-/// handle is the `thumbnail` id in `links.json`, which is what the planner reads.
-fn chosen_thumbnail(root: &Path) -> Option<Asset> {
-    let rows = crate::thumbnail::schema::load(root);
-    let candidate = crate::thumbnail::schema::active(&rows)?;
-    let path = candidate.path(root);
-    if !path.is_file() {
-        eprintln!(
-            "stream-recorder: chosen thumbnail {} is missing from {}",
-            candidate.id,
-            path.display()
-        );
-        return None;
-    }
-    Some(Asset {
-        id: "thumbnail".into(),
-        kind: AssetKind::Image,
-        path,
-        content_type: "image/jpeg",
-        orientation: Some("landscape".into()),
-        chapter: None,
-    })
 }
 
 fn chapter_transcript(drafts: &Path, n: u32) -> Option<String> {
@@ -619,7 +591,7 @@ mod tests {
     /// The gap this closes: the thumbnail was chosen, saved, and then never
     /// left the machine, so nothing downstream could put a cover on the video.
     #[test]
-    fn the_chosen_thumbnail_ships_with_the_videos() {
+    fn an_ai_candidate_never_ships_without_an_approved_set() {
         let root = temp("thumbnail");
         let render = root.join("render");
         std::fs::create_dir_all(render.join("horizontal")).unwrap();
@@ -634,15 +606,7 @@ mod tests {
             &[],
         )
         .unwrap();
-        let thumb = assets
-            .iter()
-            .find(|a| a.id == "thumbnail")
-            .expect("the activated thumbnail");
-        assert_eq!(thumb.kind, AssetKind::Image);
-        assert_eq!(thumb.content_type, "image/jpeg");
-        assert!(thumb
-            .path
-            .ends_with("thumbnails/candidates/thumb-abc123.jpg"));
+        assert!(!assets.iter().any(|a| a.id == "thumbnail"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

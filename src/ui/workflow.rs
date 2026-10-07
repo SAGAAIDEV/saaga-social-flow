@@ -107,7 +107,7 @@ mod tests {
         // on the root tab view and the window opens on Project instead.
         assert!(STEPS.iter().any(|(_, _, children)| *children == [OPENS_ON]));
         assert!(!children.contains(&"render"));
-        // The S3 upload runs off the render now — see `App::host_after_render`.
+        // The S3 upload is a button on Socials, not a tab of its own.
         assert!(!children.contains(&"distribute"));
         let unique: std::collections::HashSet<_> = children.iter().collect();
         assert_eq!(unique.len(), children.len());

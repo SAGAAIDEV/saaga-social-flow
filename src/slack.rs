@@ -8,7 +8,7 @@
 //! kind the landing site's signup notifications use, and the channel is the one
 //! picked when the webhook was made — there is no channel to set here.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 
 use crate::publish::Upload;
 
@@ -131,6 +131,7 @@ mod tests {
             privacy: Privacy::Public,
             privacy_at: None,
             orientation,
+            slack: None,
         }
     }
 
