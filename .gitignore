@@ -48,3 +48,6 @@ tfplan
 
 # Python bytecode from checking infra/gpu-render/worker locally.
 __pycache__/
+
+# Worktrees, one per branch: see CLAUDE.md.
+.claude/worktrees/
