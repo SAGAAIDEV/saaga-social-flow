@@ -52,6 +52,49 @@ pub fn sync(session: &Session, brief: &Brief) -> Result<bool> {
     apply(session, brief)?;
     Ok(true)
 }
+/// Whether this video has a title someone gave it — by Write, or on the
+/// YouTube tab — rather than the project's name, which [`load`] stands in when
+/// there is neither so YouTube always has something to show.
+///
+/// The Video details badge reads this. It used to read the title alone, so a
+/// project nobody had written for said Written and offered Rewrite, while the
+/// artwork — which only takes a title when one is written — had none.
+pub fn written(session: &Session) -> bool {
+    let title = load(session).title;
+    let title = title.trim();
+    !title.is_empty()
+        && (crate::publish::metadata::saved(session).is_some() || title != session.title())
+}
+
+/// The video's title, for artwork that has no title of its own.
+///
+/// YouTube's, so the picture and the upload say the same thing until someone
+/// types a different headline under Design. `None` when all there is is the
+/// folder's timestamp: [`crate::publish::metadata::load`] falls back to it so
+/// an upload always has a title, and no picture should carry one.
+pub fn artwork_title(session: &Session) -> Option<String> {
+    let title = crate::publish::metadata::load(session).title;
+    let title = title.trim();
+    (!title.is_empty() && title != session.folder()).then(|| title.to_string())
+}
+
+/// The design Draw artwork draws: `card.json`, with the video's title on it
+/// when the card has none.
+///
+/// The card only takes a title from Write ([`apply`]) or from the Design box,
+/// while the rest of the app always has one to show. A project nobody had
+/// pressed Write on named its video on every tab and still refused to draw,
+/// "no title yet", with Approve locked behind it.
+pub fn card(session: &Session) -> crate::card::Card {
+    let mut card = crate::card::load(&session.root);
+    if card.is_empty() {
+        if let Some(title) = artwork_title(session) {
+            card.title = title;
+        }
+    }
+    card
+}
+
 pub fn apply(session: &Session, brief: &Brief) -> Result<()> {
     let metadata = brief.metadata();
     metadata.validate()?;
@@ -486,6 +529,69 @@ mod tests {
             crate::publish::metadata::load(&session).title,
             "Edited title"
         );
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
+    /// The session that exposed this: named "GTM Update 16", Write never
+    /// pressed. Video details said Written and the artwork had no title.
+    #[test]
+    fn a_named_project_nobody_wrote_for_is_not_written_but_its_artwork_has_a_title() {
+        let session = session("named-unwritten");
+        crate::sessions::save_name(&session.root, "GTM Update 16").unwrap();
+        assert_eq!(
+            load(&session).title,
+            "GTM Update 16",
+            "what YouTube would use"
+        );
+        assert!(!written(&session));
+        assert_eq!(artwork_title(&session).as_deref(), Some("GTM Update 16"));
+        assert_eq!(card(&session).title, "GTM Update 16");
+        assert!(
+            !crate::card::path(&session.root).exists(),
+            "reading the design writes nothing — Draw is what saves it"
+        );
+
+        // Typing notes saves the brief with the stand-in title in it; that
+        // still is not a title anyone wrote.
+        let mut brief = load(&session);
+        brief.notes = "A rough idea".into();
+        save(&session.root, &brief).unwrap();
+        assert!(!written(&session));
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
+    /// The folder's timestamp keeps an upload titled, but goes on no picture.
+    #[test]
+    fn an_unnamed_project_lends_its_artwork_no_title() {
+        let session = session("unnamed");
+        std::fs::create_dir_all(&session.root).unwrap();
+        assert_eq!(load(&session).title, session.folder());
+        assert!(!written(&session));
+        assert_eq!(artwork_title(&session), None);
+        assert!(card(&session).is_empty());
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
+    /// A title typed on the YouTube tab is written, and is what an untitled
+    /// card draws; a card with a title of its own keeps it.
+    #[test]
+    fn the_youtube_title_is_written_and_lent_only_to_an_untitled_card() {
+        let session = session("youtube-title");
+        crate::sessions::save_name(&session.root, "GTM Update 16").unwrap();
+        let metadata = Metadata {
+            title: "What shipped in week 16".into(),
+            description: String::new(),
+        };
+        crate::publish::metadata::save(&session, &metadata).unwrap();
+        assert!(written(&session));
+        assert_eq!(card(&session).title, "What shipped in week 16");
+
+        let own = crate::card::Card {
+            title: "Week 16".into(),
+            ..Default::default()
+        };
+        crate::card::save(&session.root, &own).unwrap();
+        assert_eq!(card(&session), own);
         std::fs::remove_dir_all(session.root).unwrap();
     }
 

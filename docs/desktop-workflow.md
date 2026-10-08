@@ -99,9 +99,14 @@ recording on:
    three pictures at a size that shows them, the photo and screen grab they
    were drawn from, and the corrections: **Retake photo** (the camera keeps
    running on every tab, so the countdown works from here — the new still
-   appears when it ends), **Retake screen**, **Choose photo…** and **Redraw
+   appears when it ends), **Retake screen** (the slide as the layout frames
+   it, or — when the layout has no screen, Talking Head say — the whole
+   display with this app's windows left out), **Choose photo…** and **Redraw
    artwork**, with the design controls (kicker, theme, focus) and the optional
-   AI image experiments folded away beneath them. **Approve thumbnail** only
+   AI image experiments folded away beneath them. The artwork's title is the
+   one **Write** puts on it; until then an empty title draws the video's — the
+   YouTube title, else the project's name, never the folder's timestamp — and
+   the first draw saves it to the design. **Approve thumbnail** only
    records the approval; it uploads nothing. The YouTube upload and Replace
    thumbnail, the blog and the S3 copy for Buffer all read only an approved
    set. The approval is recorded in `thumbnails/approval.json` against the
@@ -216,8 +221,8 @@ anything when the still is taller than its box.
 
 The current set is recorded in `thumbnails/artwork.json`, with file hashes and measured
 JPEG dimensions. A failed generation leaves the previous complete set active. Editing
-the saved design or changing the photo makes the set stale; the next render redraws it,
-and **Redraw artwork** on the Thumbnail tab does so by hand. The blog, YouTube and S3
+the saved design or changing the photo makes the set stale, and **Redraw artwork** on the
+Thumbnail tab draws it again — nothing redraws it on its own. The blog, YouTube and S3
 workflows require a current, approved set and name the reason when it is not; image
 upload failures are surfaced.
 YouTube can retry/update the thumbnail on an existing upload without duplicating the video:

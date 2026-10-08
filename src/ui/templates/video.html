@@ -30,7 +30,7 @@
 <ol class="steps" aria-label="What the render has produced">
   <li class="{% if thumbnail.has_photo %}done{% endif %}"><span class="dot"></span>Photo</li>
   <li class="{% if review.clips %}done{% endif %}"><span class="dot"></span>Render</li>
-  <li class="{% if brief.title %}done{% endif %}"><span class="dot"></span>Copy</li>
+  <li class="{% if written %}done{% endif %}"><span class="dot"></span>Copy</li>
   <li class="{{ artwork_state }}"><span class="dot"></span>Thumbnail{% if thumbnail.review == "drafted" %} · review{% endif %}</li>
   <li class="{% if youtube %}done{% endif %}"><span class="dot"></span>YouTube</li>
 </ol>
@@ -42,11 +42,11 @@
       <h2 class="card-title">Title &amp; description</h2>
       <p class="card-desc">Written from the transcript when you press Write.</p>
     </div>
-    {% if brief.title %}<span class="badge secondary">Written</span>
+    {% if written %}<span class="badge secondary">Written</span>
     {% else %}<span class="badge outline">Not yet</span>{% endif %}
   </div>
   <div class="card-bd">
-    {% if brief.title %}
+    {% if written %}
     <div class="copy" id="copy"><div class="t">{{ brief.title }}</div>{% if brief.description %}<div class="d">{{ brief.description }}</div>{% endif %}</div>
     <p class="help">To change it, edit it on the YouTube tab — a render keeps an edit made there.</p>
     {% else %}
@@ -61,7 +61,7 @@
         <p class="help">Steers the emphasis, never replaces the transcript. Remembered for this project.
           Uses {{ model }} — change it under Speaking notes.</p>
         <div class="actions">
-          <button type="button" class="primary" id="write-copy">{% if brief.title %}Rewrite title &amp; description{% else %}Write title &amp; description{% endif %}</button>
+          <button type="button" class="primary" id="write-copy">{% if written %}Rewrite title &amp; description{% else %}Write title &amp; description{% endif %}</button>
         </div>
       </fieldset>
     </form>

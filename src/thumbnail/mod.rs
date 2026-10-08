@@ -81,6 +81,13 @@ pub enum ThumbnailEvent {
     PortraitSaved {
         root: PathBuf,
     },
+    /// A screenshot taken on request, with no stream to read one from — see
+    /// [`spawn_screen`]. Its own event rather than `Failed`, which also ends an
+    /// image-model run that may still be going.
+    ScreenSaved {
+        root: PathBuf,
+        result: std::result::Result<PathBuf, String>,
+    },
     Failed(String),
 }
 
@@ -245,6 +252,44 @@ pub fn spawn_portrait(root: PathBuf, data: String, tx: Sender<ThumbnailEvent>) {
         let _ = unstarted.send(ThumbnailEvent::Failed(format!(
             "Could not start photo import: {err}"
         )));
+    }
+}
+
+/// Grabs the whole of `display` into the project's screen grabs and answers
+/// with [`ThumbnailEvent::ScreenSaved`].
+///
+/// On a thread because resolving the display can take seconds, and the press
+/// came from the main one. `show_self` is the Show App switch — see
+/// [`crate::capture::screenshot`].
+pub fn spawn_screen(root: PathBuf, display: u32, show_self: bool, tx: Sender<ThumbnailEvent>) {
+    let unstarted = (tx.clone(), root.clone());
+    if let Err(err) = thread::Builder::new()
+        .name("screen-grab".into())
+        .spawn(move || {
+            let refused = (tx.clone(), root.clone());
+            let asked = crate::capture::screenshot::display(display, show_self, move |image| {
+                let result = image
+                    .and_then(|image| still::write_screen_image(&root, image))
+                    .map_err(|err| format!("{err:#}"));
+                let _ = tx.send(ThumbnailEvent::ScreenSaved {
+                    root: root.clone(),
+                    result,
+                });
+            });
+            if let Err(err) = asked {
+                let (tx, root) = refused;
+                let _ = tx.send(ThumbnailEvent::ScreenSaved {
+                    root,
+                    result: Err(format!("{err:#}")),
+                });
+            }
+        })
+    {
+        let (tx, root) = unstarted;
+        let _ = tx.send(ThumbnailEvent::ScreenSaved {
+            root,
+            result: Err(format!("could not start the screen grab: {err}")),
+        });
     }
 }
 
