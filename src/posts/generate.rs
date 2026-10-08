@@ -251,8 +251,11 @@ fn longform_context(session_dir: &Path, notes: Option<&NotesData>) -> VideoConte
 }
 
 fn chapter_contexts(session_dir: &Path, notes: Option<&NotesData>) -> Vec<VideoContext> {
-    crate::notes::closed_chapter_numbers(session_dir)
+    // Only the chapters with speech: an empty one has no short — the render
+    // drops it — so a post for it would sell a clip that does not exist.
+    crate::notes::collect_completed(session_dir)
         .into_iter()
+        .map(|(n, _)| n)
         .map(|n| {
             // A chapter the deck has no words for is a gap in it, not a title.
             let ch_notes = notes

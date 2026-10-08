@@ -247,7 +247,14 @@ pub fn prepare_targets(
 
     let mut h_segments: Vec<Segment> = Vec::new();
     let mut v_jobs = Vec::new();
-    for (n, title) in titles {
+    for (index, (n, title)) in titles.iter().enumerate() {
+        // What the numbers viewers see count from: this chapter's place among
+        // the chapters that render, not its number in the drafts. A chapter
+        // with nothing said in it is dropped before the plan is made — see
+        // `super::Dropped` — and a viewer counting cards must not meet a gap
+        // because of it. Paths and ids keep the draft number, which is what
+        // every file is named by.
+        let place = index as u32 + 1;
         let chapter = edit_root.join(format!("chapter-{n:02}"));
         let audio = chapter.join("audio.mp3");
         let h_src = chapter.join(format!("chapter-{n:02}-horizontal.mp4"));
@@ -259,9 +266,9 @@ pub fn prepare_targets(
             // there was taken out — three seconds of plate before a word is
             // said, on every video.
             //
-            // Cards display the source chapter number minus one: chapter one
-            // has no card, so the first inter-chapter card is labeled "01".
-            // Source paths and chapter IDs still use the original number.
+            // Cards display the chapter's place minus one: chapter one has no
+            // card, so the first inter-chapter card is labeled "01". Source
+            // paths and chapter IDs still use the draft number.
             //
             // The CTA chapter has none either, and the numbering is unaffected:
             // it is last, so no card after it has a number to shift.
@@ -269,7 +276,7 @@ pub fn prepare_targets(
             // The outline chapter has none, and the cards after it count from
             // "01" again: it is one fewer chapter before them with a number.
             if !h_segments.is_empty() && cta != Some(*n) && intro != Some(*n) {
-                let shown = n
+                let shown = place
                     .saturating_sub(1)
                     .saturating_sub(u32::from(intro.is_some_and(|i| i < *n)));
                 h_segments.push(Segment::Render(write_card(&horizontal, *n, shown, title)?));
@@ -284,6 +291,7 @@ pub fn prepare_targets(
                     h_segments.push(Segment::Render(write_outline_chapter(
                         &horizontal,
                         *n,
+                        place,
                         title,
                         seconds,
                         outline,
@@ -308,13 +316,14 @@ pub fn prepare_targets(
                 Some(outline) => write_outline_chapter(
                     &vertical,
                     *n,
+                    place,
                     title,
                     seconds,
                     outline,
                     Orientation::Vertical,
                     intro == Some(*n),
                 )?,
-                None => write_v_chapter(&vertical, *n, title, seconds)?,
+                None => write_v_chapter(&vertical, *n, place, title, seconds)?,
             });
         }
     }
@@ -432,10 +441,10 @@ fn copy_if_changed(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The card before source chapter `n`, displaying `n - 1`.
+/// The card before draft chapter `n`, displaying `shown` — its place among
+/// the chapters that render, minus one (see [`prepare_targets`]).
 /// Only the display number is offset; source IDs, titles and media are unchanged.
 /// An empty title leaves the label/number alone, with no invented topic.
-/// The card in front of recording chapter `n`, reading "Chapter `shown`".
 fn write_card(workspace: &Path, n: u32, shown: u32, title: &str) -> Result<Job> {
     title_card(
         workspace,
@@ -485,7 +494,9 @@ fn title_card(workspace: &Path, id: &str, values: serde_json::Value) -> Result<J
     })
 }
 
-fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Result<Job> {
+/// Draft chapter `n` as a vertical, numbered `shown`: its place among the
+/// chapters that render, so a dropped chapter leaves no gap.
+fn write_v_chapter(workspace: &Path, n: u32, shown: u32, title: &str, seconds: f64) -> Result<Job> {
     let camera = format!("assets/videos/chapter-{n:02}/chapter-{n:02}-vertical.mp4");
     write_footage_chapter(
         workspace,
@@ -494,6 +505,7 @@ fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Resul
         Kind::Vertical,
         (1080, 1920),
         n,
+        shown,
         title,
         seconds,
         &camera,
@@ -512,9 +524,11 @@ fn write_v_chapter(workspace: &Path, n: u32, title: &str, seconds: f64) -> Resul
 /// the Buffer plan look for. The points ride in as one JSON string variable:
 /// HyperFrames variables are scalars, and the block parses this one once at
 /// load and builds its list from it.
+#[allow(clippy::too_many_arguments)]
 fn write_outline_chapter(
     workspace: &Path,
     n: u32,
+    shown: u32,
     title: &str,
     seconds: f64,
     outline: &crate::outline::ChapterOutline,
@@ -555,7 +569,7 @@ fn write_outline_chapter(
         }),
     };
     write_footage_chapter(
-        workspace, &id, block, kind, size, n, title, seconds, &camera, extra,
+        workspace, &id, block, kind, size, n, shown, title, seconds, &camera, extra,
     )
 }
 
@@ -571,6 +585,7 @@ fn write_footage_chapter(
     kind: Kind,
     (width, height): (u32, u32),
     n: u32,
+    shown: u32,
     title: &str,
     seconds: f64,
     camera: &str,
@@ -579,7 +594,7 @@ fn write_footage_chapter(
     let audio = format!("assets/videos/chapter-{n:02}/audio.mp3");
     let mut values = serde_json::json!({
         "chapterLabel": "Chapter",
-        "chapterNumber": format!("{n:02}"),
+        "chapterNumber": format!("{shown:02}"),
         "chapterTopic": title,
         "cameraSrc": camera,
         "audioSrc": audio,
@@ -980,6 +995,37 @@ mod tests {
             ],
             "no approved plan: a card in front of every chapter after the first"
         );
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// An accidental empty chapter is dropped before the plan is made, and the
+    /// chapters after it close up: draft chapter three, with two gone, is the
+    /// second chapter, so its card reads "01" like any first card. The files
+    /// keep the draft number.
+    #[test]
+    fn a_dropped_chapter_leaves_no_gap_in_the_numbers_viewers_see() {
+        let (library, edit, compose) = fixture("gap");
+        let third = edit.join("chapter-03");
+        std::fs::create_dir_all(&third).unwrap();
+        std::fs::write(third.join("chapter-03-horizontal.mp4"), b"v").unwrap();
+        let titles = vec![(1u32, "First".to_string()), (3u32, "Third".to_string())];
+        let plan = prepare(&edit, &compose, &library, &titles).unwrap();
+        let ids: Vec<String> = plan
+            .h_segments
+            .iter()
+            .filter_map(Segment::job)
+            .map(|job| job.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            ["seg-03-card"],
+            "the card is named for the draft chapter"
+        );
+        let card =
+            std::fs::read_to_string(compose.join("horizontal/compositions/seg-03-card.html"))
+                .unwrap();
+        assert!(card.contains(r#""chapterNumber":"01""#), "{card}");
+        assert!(card.contains("Third"), "{card}");
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
