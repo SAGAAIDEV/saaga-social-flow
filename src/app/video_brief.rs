@@ -1,11 +1,9 @@
-//! The video's title and description, written by the render.
+//! The video's title and description, written from the transcript.
 //!
 //! The details pane holds one thing the author types — notes to steer the copy,
-//! remembered per project — and shows what the last render wrote. Generation
-//! is not a button: a render has already waited for every chapter's transcript,
-//! so the moment it finishes is the moment the copy can be written, and
-//! [`App::write_copy_after_render`] does exactly that. The one thing it will not
-//! do is overwrite copy edited by hand on the YouTube tab — see that method.
+//! remembered per project — and shows what Write last wrote. Write is a button
+//! on Video details and on the YouTube tab; both start the one job, read the
+//! saved notes, and report on both tabs' status lines.
 
 use super::App;
 use crate::{
@@ -42,6 +40,13 @@ impl App {
         self.set_video_details_status(status);
         self.update_video_view();
     }
+    /// [`Self::update_video_brief`] for Write, which is pressed on the YouTube
+    /// tab too: that tab has its own line, and a press there answered one tab
+    /// over looked like nothing happened.
+    fn report_copy(&self, status: &str) {
+        self.update_video_brief(status);
+        self.set_publish_status(status);
+    }
     /// Remember the notes. `_apply` is kept for the event's shape; notes never
     /// reach thumbnails or YouTube on their own, so there is nothing to apply.
     pub(super) fn save_video_brief(&mut self, fields: &BTreeMap<String, String>, _apply: bool) {
@@ -74,18 +79,18 @@ impl App {
     /// Whether a generation is now running.
     fn start_video_copy(&mut self) -> bool {
         if self.video_copy_job.is_some() {
-            self.update_video_brief("Copy generation is already running. Wait for it to finish.");
+            self.report_copy("Copy generation is already running. Wait for it to finish.");
             return false;
         }
         let brief = video_brief::load(&self.session);
         let source = video_brief::Source::for_session(&self.session, &brief.notes);
         if let Err(err) = source.prompt() {
-            self.update_video_brief(&format!("{err:#}"));
+            self.report_copy(&format!("{err:#}"));
             return false;
         }
         // The render used to guarantee this; a button does not.
         if source.completed < source.total {
-            self.update_video_brief(&format!(
+            self.report_copy(&format!(
                 "Wait for every chapter to transcribe first — {} of {} are done.",
                 source.completed, source.total
             ));
@@ -115,11 +120,13 @@ impl App {
                     brief,
                     rx,
                 });
-                self.update_video_brief(&status);
+                // The YouTube tab's Write button reads "Writing…" while it runs.
+                self.update_publish_summary();
+                self.report_copy(&status);
                 true
             }
             Err(err) => {
-                self.update_video_brief(&format!("Could not start generation: {err}"));
+                self.report_copy(&format!("Could not start generation: {err}"));
                 false
             }
         }
@@ -136,6 +143,7 @@ impl App {
             }
         };
         let job = self.video_copy_job.take().expect("active job");
+        let here = job.session.root == self.session.root;
         let status = match result {
             Ok(metadata) => {
                 // Over the artwork limits is a note, not a failure — the copy is
@@ -149,7 +157,19 @@ impl App {
                 };
                 match video_brief::sync(&job.session, &brief) {
                     Ok(true) => {
-                        note.unwrap_or_else(|| "Title and description written, and shared with the artwork and YouTube.".into())
+                        // Write replaces the copy, so edits not yet saved on
+                        // the YouTube tab go with it — otherwise the tab kept
+                        // showing them over the copy just written.
+                        if here {
+                            self.youtube_draft = None;
+                        }
+                        let written = note.unwrap_or_else(|| "Title and description written, and shared with the artwork and YouTube.".into());
+                        // Saved here, not sent: the video already up keeps its
+                        // copy until Save video details pushes the new one.
+                        match crate::publish::longform(&job.session) {
+                            Some(_) => format!("{written} The video on YouTube still has the old copy — press Save video details to change it there."),
+                            None => written,
+                        }
                     }
                     Ok(false) => "Copy saved, but needs a valid title before it can update the artwork and YouTube.".into(),
                     Err(err) => format!("Could not save generated copy: {err:#}"),
@@ -160,13 +180,14 @@ impl App {
             }
         };
         // A result always belongs to the project it started in.
-        if job.session.root == self.session.root {
-            self.update_video_brief(&status);
+        if here {
             // The tab shows the title the artwork is drawn for.
             self.update_thumbnail_view();
             self.update_publish_summary();
             self.update_blog_view();
             self.sync_controls();
+            // Last: repainting the YouTube tab resets its status line.
+            self.report_copy(&status);
         }
     }
 }

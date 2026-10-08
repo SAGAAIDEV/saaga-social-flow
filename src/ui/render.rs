@@ -1315,6 +1315,43 @@ mod tests {
         assert!(!html.contains("Template error"));
     }
 
+    /// Write is on the tab the copy is edited on, not only on Video details:
+    /// the same event, for this project, locked while a write runs.
+    #[test]
+    fn the_youtube_tab_can_write_the_title_and_description() {
+        let render = |writing: bool, written: bool| {
+            page(
+                "youtube.html",
+                minijinja::context! {
+                    metadata => crate::publish::metadata::Metadata {
+                        title: String::new(), description: String::new(),
+                    },
+                    info => "", root => "/tmp/project", writing => writing, written => written,
+                },
+            )
+        };
+        let html = render(false, false);
+        assert!(!html.contains("Template error"), "{html}");
+        let at = html.find(r#"id="write-copy""#).expect("the Write button");
+        let button = &html[html[..at].rfind("<button").unwrap()..];
+        let button = &button[..button.find("</button>").unwrap()];
+        assert!(
+            button.contains(r#"{"fields":{"root":"/tmp/project"},"type":"generateVideoCopy"}"#),
+            "{button}"
+        );
+        assert!(button.contains("Write title &amp; description"), "{button}");
+        assert!(!button.contains("disabled"), "{button}");
+
+        let html = render(false, true);
+        assert!(html.contains("Rewrite title &amp; description"), "{html}");
+
+        let html = render(true, true);
+        let at = html.find(r#"id="write-copy""#).unwrap();
+        let button = &html[at..at + html[at..].find("</button>").unwrap()];
+        assert!(button.contains("disabled"), "{button}");
+        assert!(button.contains("Writing…"), "{button}");
+    }
+
     fn no_plan_status() -> minijinja::Value {
         context! { state => "none", text => "No plan yet — build one on the Plan tab.",
         working_title => "", chapters => 0 }
