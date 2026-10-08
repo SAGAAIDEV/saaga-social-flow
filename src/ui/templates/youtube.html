@@ -24,7 +24,11 @@
   <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%">
   <p><label for="youtube-description">Description</label></p>
   <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit">{{ metadata.description }}</textarea>
-  <div class="bar"><button type="submit">Save video details</button>{% if unsaved %} <span class="sub">Unsaved edits — Upload shows them and saves them first.</span>{% endif %}</div>
+  <div class="bar"><button type="submit">Save video details</button>
+    <button type="button" id="write-copy"{% if writing %} disabled{% endif %}
+      data-send='{{ {"type": "generateVideoCopy", "fields": {"root": root}} | tojson }}'>{% if writing %}Writing…{% elif written %}Rewrite title &amp; description{% else %}Write title &amp; description{% endif %}</button>
+    {% if unsaved %} <span class="sub">Unsaved edits — Upload shows them and saves them first.</span>{% endif %}</div>
+  <p class="sub">Write drafts both from the transcript, steered by the notes on the Video tab, and replaces what is above{% if unsaved %}, unsaved edits included{% endif %}.</p>
 </form>
 {% if youtube or short %}
 <div class="links">

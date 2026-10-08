@@ -3879,6 +3879,11 @@ impl App {
                         .clone()
                         .unwrap_or_else(|| crate::publish::metadata::load(&self.session)),
                     unsaved => self.youtube_draft.is_some(), info => info,
+                    // Write, from this tab as well as Video details: the same
+                    // job, so one running locks both buttons.
+                    root => self.session.root.to_string_lossy(),
+                    writing => self.video_copy_job.as_ref().is_some_and(|job| job.session.root == self.session.root),
+                    written => crate::video_brief::written(&self.session),
                     youtube => youtube, short => short, both => both,
                     team => self.footer_view(),
                 },
