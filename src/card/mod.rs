@@ -65,6 +65,13 @@ pub struct Card {
     /// control anyone has over where it wraps.
     #[serde(default)]
     pub title: String,
+    /// Whether the headline was typed under Design rather than taken from the
+    /// video's title. Write leaves a title of the card's own alone; typing the
+    /// video's title back, or clearing the box, hands it back to the video —
+    /// see [`crate::video_brief::is_own_title`]. Not in the fingerprint: it
+    /// changes no pixels.
+    #[serde(default)]
+    pub own_title: bool,
     /// The line under it.
     #[serde(default)]
     pub description: String,
@@ -110,6 +117,7 @@ impl Default for Card {
         Card {
             format: Default::default(),
             title: String::new(),
+            own_title: false,
             description: String::new(),
             kicker: String::new(),
             theme: default_theme(),

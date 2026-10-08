@@ -161,6 +161,7 @@ impl App {
         let mut card = card::load(&root);
         if let Some(title) = fields.get("title") {
             card.title = title.clone();
+            card.own_title = crate::video_brief::is_own_title(&self.session, title);
         }
         if let Some(description) = fields.get("description") {
             card.description = description.clone();

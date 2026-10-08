@@ -19,8 +19,33 @@ This is a teleprompter. Tighten the rambling, keep what landed, drop whatever wa
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 struct NotesExtraction {
-    #[serde(alias = "slides")]
+    #[serde(alias = "slides", deserialize_with = "lenient_chapters")]
     chapters: Vec<ExtractedChapter>,
+}
+
+/// Chapters as objects, as the schema asks — or as JSON strings of objects,
+/// which some models return inside the array and which failed the whole deck
+/// over a quoting habit. The schema the model is shown is unchanged.
+fn lenient_chapters<'de, D>(deserializer: D) -> std::result::Result<Vec<ExtractedChapter>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Object(ExtractedChapter),
+        Quoted(String),
+    }
+    Vec::<Either>::deserialize(deserializer)?
+        .into_iter()
+        .map(|item| match item {
+            Either::Object(chapter) => Ok(chapter),
+            Either::Quoted(text) => serde_json::from_str(&text).map_err(|err| {
+                let head: String = text.chars().take(200).collect();
+                serde::de::Error::custom(format!("{err}: a chapter came back as {head:?}"))
+            }),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -159,5 +184,27 @@ mod tests {
         let extracted: NotesExtraction =
             serde_json::from_str(r#"{"slides":[{"title":"Hi","points":["a"]}]}"#).unwrap();
         assert_eq!(extracted.chapters[0].title, "Hi");
+    }
+
+    /// Some models quote each chapter as a JSON string inside the array; the
+    /// deck reads the same either way.
+    #[test]
+    fn quoted_chapters_read_like_objects() {
+        let quoted = r#"{"chapters":["{\"title\":\"Faster renders\",\"points\":[\"Half the time\"]}",{"title":"New layout","points":["Outline cards"]}]}"#;
+        let parsed: NotesExtraction = serde_json::from_str(quoted).unwrap();
+        let notes = parsed.into_notes("t", None);
+        assert_eq!(notes.chapters.len(), 2);
+        assert_eq!(notes.chapters[0].title, "Faster renders");
+        assert_eq!(notes.chapters[1].points, ["Outline cards"]);
+    }
+
+    /// A quoted chapter that is not a chapter fails with what came back, not a
+    /// bare serde message about an untagged enum.
+    #[test]
+    fn a_quoted_chapter_that_does_not_parse_says_what_it_was() {
+        let err = serde_json::from_str::<NotesExtraction>(r#"{"chapters":["not json"]}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not json"), "{err}");
     }
 }

@@ -95,13 +95,26 @@ pub fn card(session: &Session) -> crate::card::Card {
     card
 }
 
+/// Whether `title`, typed into the Design box, is a headline of the card's own
+/// rather than the video's: something, and not what the card would borrow from
+/// the video anyway ([`artwork_title`]).
+///
+/// The card used to take the video's title on every Write and every sync of
+/// the copy, so a headline written for the thumbnail lasted until the next one.
+pub fn is_own_title(session: &Session, title: &str) -> bool {
+    let title = title.trim();
+    !title.is_empty() && artwork_title(session).as_deref() != Some(title)
+}
+
 pub fn apply(session: &Session, brief: &Brief) -> Result<()> {
     let metadata = brief.metadata();
     metadata.validate()?;
-    // The title is the thumbnail's headline; the description is YouTube's
-    // alone — the card does not draw one.
+    // The title is the thumbnail's headline unless one was typed for it under
+    // Design; the description is YouTube's alone — the card does not draw one.
     let mut card = crate::card::load(&session.root);
-    card.title = metadata.title.clone();
+    if !card.own_title {
+        card.title = metadata.title.clone();
+    }
     save(&session.root, brief)?;
     crate::card::save(&session.root, &card)?;
     crate::publish::metadata::save(session, &metadata)?;
@@ -592,6 +605,46 @@ mod tests {
         };
         crate::card::save(&session.root, &own).unwrap();
         assert_eq!(card(&session), own);
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
+    /// A headline typed for the thumbnail outlives Write: the video's copy
+    /// changes, the card's words do not. Before, every Write and every sync of
+    /// the copy put the YouTube title back on the card.
+    #[test]
+    fn a_title_typed_for_the_thumbnail_survives_write() {
+        let session = session("own-title");
+        let card = crate::card::Card {
+            title: "Ship it anyway".into(),
+            own_title: true,
+            ..Default::default()
+        };
+        crate::card::save(&session.root, &card).unwrap();
+        let brief = Brief {
+            notes: String::new(),
+            title: "A different video title".into(),
+            description: "And its description.".into(),
+        };
+        apply(&session, &brief).unwrap();
+        assert_eq!(crate::card::load(&session.root).title, "Ship it anyway");
+        assert_eq!(
+            crate::publish::metadata::load(&session).title,
+            "A different video title"
+        );
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
+    /// What the Design box decides: words of the card's own, or the video's.
+    #[test]
+    fn a_title_is_the_cards_own_only_when_it_is_not_the_videos() {
+        let session = session("is-own-title");
+        crate::sessions::save_name(&session.root, "GTM Update 16").unwrap();
+        assert!(is_own_title(&session, "Week 16"));
+        assert!(
+            !is_own_title(&session, "  GTM Update 16 "),
+            "the video's own title, typed back"
+        );
+        assert!(!is_own_title(&session, "   "), "cleared");
         std::fs::remove_dir_all(session.root).unwrap();
     }
 
