@@ -1002,6 +1002,7 @@ impl App {
             UiEvent::BlogAuthorSelected(id) => self.select_blog_author(&id),
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
             UiEvent::ProjectCategory { root, value } => self.select_project_category(&root, &value),
+            UiEvent::ProjectFormat { root, value } => self.select_project_format(&root, &value),
             UiEvent::SetUpCategory {
                 root,
                 slug,
@@ -1068,6 +1069,26 @@ impl App {
             Ok(next) => self.adopt_session(next),
             Err(err) => eprintln!("stream-recorder: could not start a new project: {err:#}"),
         }
+    }
+
+    /// Long or short, from the Project tab. Render, Upload and the Buffer plan
+    /// all read it through [`crate::session::Session::is_short`], so every view
+    /// that shows what they will do is drawn again.
+    fn select_project_format(&mut self, root: &str, value: &str) {
+        if self.session.root.to_str() != Some(root) {
+            return;
+        }
+        let Some(format) = crate::sessions::Format::parse(value) else {
+            return;
+        };
+        if let Err(err) = self.session.set_format(format) {
+            self.set_project_status(&format!("Could not save the format: {err:#}"));
+        }
+        self.refresh_project_controls();
+        self.update_render_summary();
+        self.update_publish_summary();
+        self.update_schedule_summary();
+        self.sync_controls();
     }
 
     /// Names the open project. The folder keeps its timestamp — only the label moves.
@@ -1433,9 +1454,12 @@ impl App {
     fn suggest_shorts(&mut self) {
         if self.session.is_short() {
             if let Some(live) = self.live.as_ref() {
-                live.notes.show_status(
-                    "Shorts are suggested from the video — press Back to Video first.",
-                );
+                live.notes
+                    .show_status(if self.session.parent_root().is_some() {
+                        "Shorts are suggested from the video — press Back to Video first."
+                    } else {
+                        "This project is a Short — shorts are suggested from a long video."
+                    });
             }
             return;
         }
