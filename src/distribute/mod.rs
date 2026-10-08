@@ -394,41 +394,39 @@ fn collect_assets(
     }
     // Last, and only alongside a video: a thumbnail is a cover for something, so
     // on its own it is not a distribution — and an empty list is what makes `run`
-    // say "run Render first" instead of uploading a lone picture.
-    if !assets.is_empty() {
-        if root.join(crate::card::assets::MANIFEST).exists() {
-            let set = crate::card::assets::approved(root)?;
-            for (kind, id, orientation) in [
-                (
-                    crate::card::assets::Kind::Horizontal,
-                    "thumbnail",
-                    "landscape",
-                ),
-                (
-                    crate::card::assets::Kind::Vertical,
-                    "thumbnail-vertical",
-                    "portrait",
-                ),
-                (crate::card::assets::Kind::Og, "og-image", "landscape"),
-            ] {
-                let source = set.path(root, kind)?;
-                // The upload helper uses the basename as its object key.
-                let export_dir = root.join("thumbnails/exports");
-                std::fs::create_dir_all(&export_dir)?;
-                let path = export_dir.join(format!("{}-{}.jpg", set.id, kind.name()));
-                std::fs::copy(source, &path)?;
-                assets.push(Asset {
-                    id: id.into(),
-                    kind: AssetKind::Image,
-                    path,
-                    content_type: "image/jpeg",
-                    orientation: Some(orientation.into()),
-                    chapter: None,
-                });
-            }
+    // say "run Render first" instead of uploading a lone picture. No drawn set,
+    // no thumbnail: the AI experiments' active candidate used to ship here, but
+    // it never passes through Approve.
+    if !assets.is_empty() && root.join(crate::card::assets::MANIFEST).exists() {
+        let set = crate::card::assets::approved(root)?;
+        for (kind, id, orientation) in [
+            (
+                crate::card::assets::Kind::Horizontal,
+                "thumbnail",
+                "landscape",
+            ),
+            (
+                crate::card::assets::Kind::Vertical,
+                "thumbnail-vertical",
+                "portrait",
+            ),
+            (crate::card::assets::Kind::Og, "og-image", "landscape"),
+        ] {
+            let source = set.path(root, kind)?;
+            // The upload helper uses the basename as its object key.
+            let export_dir = root.join("thumbnails/exports");
+            std::fs::create_dir_all(&export_dir)?;
+            let path = export_dir.join(format!("{}-{}.jpg", set.id, kind.name()));
+            std::fs::copy(source, &path)?;
+            assets.push(Asset {
+                id: id.into(),
+                kind: AssetKind::Image,
+                path,
+                content_type: "image/jpeg",
+                orientation: Some(orientation.into()),
+                chapter: None,
+            });
         }
-        // No drawn set, no thumbnail. The AI experiments' active candidate used
-        // to ship here, but it never passes through Approve.
     }
     Ok(assets)
 }

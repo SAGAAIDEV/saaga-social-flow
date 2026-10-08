@@ -615,7 +615,7 @@ fn parse_vm_stat(text: &str) -> Option<u64> {
 /// one and keeps working.
 fn retire_unless_last(alive: &AtomicUsize) -> bool {
     alive
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
             if n > 1 {
                 Some(n - 1)
             } else {
