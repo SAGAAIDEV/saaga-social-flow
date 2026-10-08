@@ -85,6 +85,7 @@ mod tests {
 
     fn card() -> Card {
         Card {
+            custom_words: false,
             title: "Ship it anyway".into(),
             description: "Why the queue fell over.".into(),
             kicker: "SAAGA".into(),

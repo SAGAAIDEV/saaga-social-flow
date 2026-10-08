@@ -71,6 +71,7 @@ pub fn run(group: Group) -> Outcome {
         Group::Blog => strapi(),
         Group::Video => youtube(),
         Group::Transcript => assemblyai(),
+        Group::GitHub => github(),
     };
     match result {
         Ok(message) => Outcome::ok(group, message),
@@ -170,6 +171,14 @@ fn youtube() -> Result<String> {
         Some(channel) => Ok(format!("signed in as {channel}")),
         None => Ok("client looks right — press Connect on the YouTube tab to sign in".into()),
     }
+}
+
+fn github() -> Result<String> {
+    let Some(token) = crate::github::token() else {
+        bail!("no token here and the gh CLI is not signed in");
+    };
+    let login = crate::github::whoami(&token.value)?;
+    Ok(format!("signed in as {login} (from {})", token.source))
 }
 
 fn assemblyai() -> Result<String> {

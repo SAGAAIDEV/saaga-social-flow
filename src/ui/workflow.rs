@@ -3,12 +3,13 @@ use objc2::{AnyThread, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSTabView, NSTabViewItem, NSTabViewType};
 use objc2_foundation::{NSRect, NSString};
 
-/// Four steps. Thumbnails used to be one of its own; the render button now
-/// draws the artwork set, and the recording page shows it beside the title,
-/// the description and the rendered clips — so there is nothing left for a
-/// separate tab to hold.
-pub const STEPS: [(&str, &str, &[&str]); 4] = [
+/// Five steps. Thumbnails is one again: the render still draws the artwork
+/// set, but the words on it are now written for it rather than copied from the
+/// video, and that form needed a page of its own to be found. It sits before
+/// YouTube because the upload carries the set.
+pub const STEPS: [(&str, &str, &[&str]); 5] = [
     ("video", "Video recording", &["draft"]),
+    ("thumbnails", "Thumbnails", &["thumbnails"]),
     ("youtube", "YouTube", &["youtube"]),
     ("blog", "Blog (Strapi)", &["blog"]),
     (
@@ -60,16 +61,16 @@ pub fn attach(
 mod tests {
     use super::*;
     #[test]
-    fn the_workflow_has_four_ordered_steps_and_each_pane_once() {
+    fn the_workflow_has_five_ordered_steps_and_each_pane_once() {
         assert_eq!(
             STEPS.map(|(id, _, _)| id),
-            ["video", "youtube", "blog", "socials"]
+            ["video", "thumbnails", "youtube", "blog", "socials"]
         );
         let children: Vec<_> = STEPS
             .iter()
             .flat_map(|(_, _, children)| children.iter().copied())
             .collect();
-        assert_eq!(children.len(), 7);
+        assert_eq!(children.len(), 8);
         assert!(!children.contains(&"render"));
         // The S3 upload runs off the render now — see `App::host_after_render`.
         assert!(!children.contains(&"distribute"));
@@ -77,8 +78,7 @@ mod tests {
         assert_eq!(unique.len(), children.len());
         assert!(!children.contains(&"edit"));
         assert!(!children.contains(&"substack"));
-        // Folded into the recording page rather than tabs of their own.
-        assert!(!children.contains(&"thumbnails"));
+        // Folded into the recording page rather than a tab of its own.
         assert!(!children.contains(&"review"));
     }
 }

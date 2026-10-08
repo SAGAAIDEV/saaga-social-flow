@@ -178,9 +178,19 @@ impl App {
         if let Some(value) = nudged("focus_y") {
             card.focus_y = value;
         }
+        // Words that differ from the video's were written for the thumbnail,
+        // so a render stops copying the video's over them. Typing the video's
+        // own words back (or clearing both) hands them back to the video.
+        if fields.contains_key("title") || fields.contains_key("description") {
+            let video = crate::publish::metadata::load(&self.session);
+            let blank = card.title.trim().is_empty() && card.description.trim().is_empty();
+            card.custom_words = !blank
+                && (card.title.trim() != video.title.trim()
+                    || card.description.trim() != video.description.trim());
+        }
         let saved = match card::save(&root, &card) {
             Ok(_) => {
-                self.set_thumbnail_status("Design saved. Redraw artwork to draw it.");
+                self.set_thumbnail_status("Saved. Redraw artwork to draw it.");
                 true
             }
             Err(err) => {

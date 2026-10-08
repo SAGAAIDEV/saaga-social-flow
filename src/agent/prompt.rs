@@ -21,6 +21,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub const NOTES: &str = "notes.slide_deck";
+/// The Speaking notes deck written from GitHub commits rather than a
+/// rehearsal — see [`crate::github`]. Its own id: prep before a take and a
+/// teleprompter from one are tuned apart.
+pub const COMMITS: &str = "notes.commits";
 pub const TITLES: &str = "titles.chapter_cards";
 /// The on-screen outline an outline-layout chapter draws beside the speaker —
 /// see [`crate::outline`]. Its own id, not a section of [`NOTES`]: the notes

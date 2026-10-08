@@ -83,8 +83,8 @@ pub enum Command {
         /// A small orange word above the title.
         #[arg(long, default_value = "")]
         kicker: String,
-        /// `dark` or `light`.
-        #[arg(long, default_value = "dark")]
+        /// `light` (the chapter card's look) or `dark`.
+        #[arg(long, default_value = "light")]
         theme: String,
         /// A camera still to put beside the words — right of them on the landscape
         /// card, below them on the portrait one. Omitted draws a title card.

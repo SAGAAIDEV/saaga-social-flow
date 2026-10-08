@@ -12,12 +12,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
+mod commits;
 mod deck;
 mod openrouter;
 mod picker;
 mod transcribe;
 mod view;
 
+pub use commits::spawn_commit_notes;
 pub(crate) use deck::Chapter;
 pub use deck::{load as load_notes, NotesData};
 pub use openrouter::{default_model, load_providers, ModelMenuRow, AUTO_PROVIDER};
@@ -39,6 +41,9 @@ pub enum NotesEvent {
     Ready(PathBuf),
     /// Notes failed because nothing was said — see [`NoSpeech`].
     NoSpeech(NoSpeech),
+    /// A GitHub sign-in just finished: the token, for the App to save in
+    /// Settings so the next summary needs no sign-in.
+    GitHubToken(String),
 }
 
 /// Every closed chapter finished transcribing and none produced a word.

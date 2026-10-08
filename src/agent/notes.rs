@@ -19,8 +19,33 @@ This is a teleprompter. Tighten the rambling, keep what landed, drop whatever wa
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 struct NotesExtraction {
-    #[serde(alias = "slides")]
+    #[serde(alias = "slides", deserialize_with = "lenient_chapters")]
     chapters: Vec<ExtractedChapter>,
+}
+
+/// Chapters as objects, as the schema asks — or as JSON strings of objects,
+/// which some models return inside the array and which failed the whole deck
+/// over a quoting habit. The schema the model is shown is unchanged.
+fn lenient_chapters<'de, D>(deserializer: D) -> std::result::Result<Vec<ExtractedChapter>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Object(ExtractedChapter),
+        Quoted(String),
+    }
+    Vec::<Either>::deserialize(deserializer)?
+        .into_iter()
+        .map(|item| match item {
+            Either::Object(chapter) => Ok(chapter),
+            Either::Quoted(text) => serde_json::from_str(&text).map_err(|err| {
+                let head: String = text.chars().take(200).collect();
+                serde::de::Error::custom(format!("{err}: a chapter came back as {head:?}"))
+            }),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -68,6 +93,44 @@ fn clean_list(items: Vec<String>) -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+pub const COMMITS_SYSTEM: &str = "You turn a developer's commits since their last video into \
+speaking notes for the next one: what they shipped, as talking points they can record from.\n\n\
+Output a JSON object with a `chapters` array. One chapter per feature, fix or theme worth \
+talking about — group related commits across repositories, lead with what a viewer would \
+care about most, and leave out chores (formatting, version bumps, typo fixes) unless they \
+are all there is.\n\n\
+Each chapter:\n\
+- title: 2-5 words naming the change.\n\
+- points: what changed and why it matters to someone using it, as short fragments. Aim for \
+3-5; never more than 6. Plain words, not commit-message jargon.\n\
+- cues: a demo idea or a question to answer on camera, where one is obvious. Omit otherwise.\n\n\
+Say only what the commits support; do not invent features or results.";
+
+/// A Speaking notes deck from GitHub commits — see [`crate::github`]. Same deck
+/// shape as [`extract_notes`], so the pane shows it the same way.
+pub fn extract_commit_notes(
+    commits: &str,
+    title: &str,
+    model: &str,
+    provider: Option<&str>,
+    prompt_root: Option<&std::path::Path>,
+) -> Result<(NotesData, super::trace::LlmStep)> {
+    let preamble = prompt::resolve(prompt::COMMITS, COMMITS_SYSTEM, prompt_root);
+    let (extracted, step) = super::extract::extract::<NotesExtraction>(
+        prompt::COMMITS,
+        "commit_notes",
+        &preamble,
+        commits.to_string(),
+        model,
+        provider,
+    )?;
+    let data = extracted.into_notes(title, None);
+    if data.chapters.is_empty() {
+        bail!("OpenRouter returned no talking points");
+    }
+    Ok((data, step))
 }
 
 pub fn user_prompt(chapters: &[(u32, String)], title: &str, extra: Option<&str>) -> String {
@@ -159,5 +222,22 @@ mod tests {
         let extracted: NotesExtraction =
             serde_json::from_str(r#"{"slides":[{"title":"Hi","points":["a"]}]}"#).unwrap();
         assert_eq!(extracted.chapters[0].title, "Hi");
+    }
+}
+
+#[cfg(test)]
+mod lenient_tests {
+    use super::*;
+
+    /// Some models quote each chapter as a JSON string inside the array; the
+    /// deck reads the same either way.
+    #[test]
+    fn quoted_chapters_read_like_objects() {
+        let quoted = r#"{"chapters":["{\"title\":\"Faster renders\",\"points\":[\"Half the time\"]}",{"title":"New layout","points":["Outline cards"]}]}"#;
+        let parsed: NotesExtraction = serde_json::from_str(quoted).unwrap();
+        let notes = parsed.into_notes("t", None);
+        assert_eq!(notes.chapters.len(), 2);
+        assert_eq!(notes.chapters[0].title, "Faster renders");
+        assert_eq!(notes.chapters[1].points, ["Outline cards"]);
     }
 }

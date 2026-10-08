@@ -16,13 +16,26 @@ export const BRAND = {
   mustard: "#FFEEE5",
   lightMustard: "#FFF9F6",
   blue: "#579DC4",
+  // The chapter card's own colours (Figma "Chapter Card", node 67:987), so a
+  // thumbnail reads as the same family as the cards inside the video.
+  paper: "#FFFFFF",
+  chapterPeach: "#FDEEE6",
+  chapterBlush: "#FFF4EE",
+  chapterMuted: "#555554",
 } as const;
 
 export type ThemeName = "light" | "dark";
 
 export interface Theme {
-  /** Behind the text panel. */
+  /** Behind the text panel on the landscape card, under the arcs. */
   panel: string;
+  /** The portrait card's panel: flat, as the portrait chapter card is. */
+  portraitPanel: string;
+  /** The chapter card's two arcs, sweeping in from the left behind the type. */
+  arcOuter: string;
+  arcInner: string;
+  /** The kicker, set like the chapter card's CHAPTER label. */
+  kicker: string;
   /** Behind the whole card, seen only in the seam and the scrim. */
   ground: string;
   title: string;
@@ -33,20 +46,31 @@ export interface Theme {
 }
 
 /**
- * Light is the site's own look; dark is the one that survives a YouTube grid,
- * where every neighbouring thumbnail is fighting for the same eye.
+ * Light is the chapter card's look and the default; dark is the one that
+ * survives a YouTube grid, where every neighbouring thumbnail is fighting for
+ * the same eye.
  */
 export const THEMES: Record<ThemeName, Theme> = {
   light: {
-    panel: BRAND.white,
+    panel: BRAND.paper,
+    portraitPanel: BRAND.chapterPeach,
+    arcOuter: BRAND.chapterBlush,
+    arcInner: BRAND.chapterPeach,
+    kicker: BRAND.chapterMuted,
     ground: BRAND.lightMustard,
     title: BRAND.black,
-    description: BRAND.darkGrey,
+    description: BRAND.chapterMuted,
     accent: BRAND.orange,
     rule: BRAND.lightGray,
   },
+  // The chapter card's layout on ink, arcs and all, a shade apart so they read
+  // as the same shapes without competing with the headline.
   dark: {
     panel: BRAND.black,
+    portraitPanel: BRAND.black,
+    arcOuter: "#222220",
+    arcInner: "#292927",
+    kicker: "#A5A5A0",
     ground: "#141414",
     title: BRAND.white,
     // Not `darkGrey` on black: #626262 on #1D1D1D is a 2.6:1 contrast ratio and

@@ -43,6 +43,7 @@ mod distribute;
 mod edit;
 mod face;
 mod figure;
+mod github;
 mod hotkeys;
 mod layouts;
 mod longform;
@@ -180,6 +181,7 @@ fn main() -> Result<()> {
                         // The CLI frames across only; a landscape still has no
                         // vertical travel in either layout.
                         focus_y: 0.5,
+                        ..card::Card::default()
                     },
                     still: still.as_deref().map(std::path::PathBuf::from),
                     // Use the selected orientation throughout rasterisation.

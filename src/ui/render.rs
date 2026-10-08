@@ -36,8 +36,12 @@ fn environment() -> Environment<'static> {
         .expect("components template");
     env.add_template("reflect.html", REFLECT)
         .expect("reflect template");
+    env.add_template("pane_style.html", include_str!("templates/pane_style.html"))
+        .expect("pane style");
     env.add_template("video.html", VIDEO)
         .expect("video template");
+    env.add_template("thumbnail.html", include_str!("templates/thumbnail.html"))
+        .expect("thumbnail template");
     env.add_template("edit.html", EDIT).expect("edit template");
     env.add_template("substack.html", SUBSTACK)
         .expect("substack template");
@@ -141,6 +145,42 @@ mod tests {
         }
     }
 
+    /// A project after a render: the set, the photo and screen, a candidate,
+    /// a reference, and a card whose words were written for it.
+    fn rendered_art() -> minijinja::Value {
+        context! {
+            artwork => vec![
+                context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
+                context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
+                context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
+            ],
+            artwork_notice => None::<String>,
+            still => context! { url => "file:///tmp/still.jpg" },
+            screen => context! { url => "file:///tmp/screen.jpg" },
+            brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
+            candidates => vec![
+                context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
+            ],
+            models => vec![
+                context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
+            ],
+            references => vec![
+                context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
+            ],
+            active_id => "thumb-a", can_generate => true, blocked => None::<String>,
+            card => context! {
+                format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
+                kicker => "SAAGA",
+                themes => vec![
+                    context! { id => "dark", label => "dark", selected => true },
+                    context! { id => "light", label => "light", selected => false },
+                ],
+                focus => "0.34", can_draw => true, hint => "Redraws all three.",
+                follows_video => false,
+            },
+        }
+    }
+
     fn no_clips() -> minijinja::Value {
         context! { clips => Vec::<()>::new(), blocked => "Nothing rendered yet — run Render." }
     }
@@ -193,13 +233,28 @@ mod tests {
         assert!(!html.contains("id=\"copy\""));
         assert!(html.contains("Nothing written yet"));
         assert!(html.contains("No artwork yet"));
+        assert!(html.contains("Nothing rendered yet"));
+        assert!(html.contains("name=\"notes\""));
+        assert!(!html.contains("<fieldset disabled>"));
+    }
+
+    /// The Thumbnails page before anything exists: the words to type, both
+    /// retakes, and a redraw that is not offered until there is a photo.
+    #[test]
+    fn an_empty_thumbnails_page_offers_the_words_and_the_retakes() {
+        let html = page(
+            "thumbnail.html",
+            context! { art => empty_art(), photo_countdown => 3 },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(
+            html.contains(r#"data-field="title""#) && html.contains(r#"data-field="description""#)
+        );
+        assert!(html.contains("No artwork yet"));
         assert!(html.contains("No photo yet"));
         // Both retakes are offered whatever the state: the photo, and the screen
         // on its own so a good photo survives a slide change.
         assert!(html.contains("captureFrame") && html.contains("captureScreen"));
-        assert!(html.contains("Nothing rendered yet"));
-        assert!(html.contains("name=\"notes\""));
-        assert!(!html.contains("<fieldset disabled>"));
         // Nothing to redraw from, so the button is not offered.
         let redraw = html.find("generateArtwork").expect("the redraw button");
         assert!(html[..redraw].rfind("disabled").is_some());
@@ -214,36 +269,7 @@ mod tests {
             context! {
                 brief => crate::video_brief::Brief { notes: "".into(), title: "Ship it anyway".into(), description: "Why the queue fell over.".into() },
                 root => "/tmp/project", busy => false, model => "m",
-                art => context! {
-                    artwork => vec![
-                        context! { id => "horizontal", url => "file:///tmp/sets/a/horizontal.jpg", label => "horizontal · 1280×720", selected => true },
-                        context! { id => "vertical", url => "file:///tmp/sets/a/vertical.jpg", label => "vertical · 720×1280", selected => true },
-                        context! { id => "og", url => "file:///tmp/sets/a/og.jpg", label => "og · 1200×630", selected => true },
-                    ],
-                    artwork_notice => None::<String>,
-                    still => context! { url => "file:///tmp/still.jpg" },
-                    screen => context! { url => "file:///tmp/screen.jpg" },
-                    brief => context! { title => "SHIP IT", description => "Presenter in a studio" },
-                    candidates => vec![
-                        context! { id => "thumb-a", url => "file:///tmp/a.jpg", label => "Nano Banana 2", selected => true },
-                    ],
-                    models => vec![
-                        context! { id => "bytedance-seed/seedream-5-0-pro", label => "Seedream 5 Pro", selected => true },
-                    ],
-                    references => vec![
-                        context! { name => "ref.jpg", url => "file:///tmp/ref.jpg", active => true },
-                    ],
-                    active_id => "thumb-a", can_generate => true, blocked => None::<String>,
-                    card => context! {
-                        format => "horizontal", title => "Ship it anyway", description => "Why the queue fell over.",
-                        kicker => "SAAGA",
-                        themes => vec![
-                            context! { id => "dark", label => "dark", selected => true },
-                            context! { id => "light", label => "light", selected => false },
-                        ],
-                        focus => "0.34", can_draw => true, hint => "Redraws all three.",
-                    },
-                },
+                art => rendered_art(),
                 review => context! {
                     blocked => None::<String>,
                     clips => vec![
@@ -302,24 +328,13 @@ mod tests {
         let art = html.find("horizontal.jpg").expect("the artwork set");
         let clips = html.find("longform.mp4").expect("the clips");
         assert!(copy < art && art < clips, "copy, then artwork, then review");
-        // All three pictures, the photo they were drawn from, and the screen.
-        assert!(html.contains("vertical.jpg") && html.contains("og.jpg"));
-        assert!(html.contains("still.jpg") && html.contains("screen.jpg"));
         // The two clips, shaped like their video.
         assert!(html.contains("clip landscape") && html.contains("clip portrait"));
         assert!(html.contains("12.5 MB"));
-        // The corrections are on the page: retake the photo, redraw, tweak the design.
-        assert!(html.contains("captureFrame"));
-        assert!(html.contains("generateArtwork"));
-        assert!(html.contains("saveCard"));
-        assert!(html.contains(r#"data-form="card""#));
-        assert!(html.contains(r#"data-field="kicker""#));
-        assert!(
-            html.contains(r#"value="0.34""#),
-            "the focus is where it was left"
-        );
-        // The design controls and the AI experiments still have a home, folded away.
-        assert_eq!(html.matches("<details class=\"acc\">").count(), 2);
+        // The artwork is a glance here; its controls are on the Thumbnails tab.
+        assert!(!html.contains(r#"data-form="card""#));
+        assert!(!html.contains("generateArtwork"));
+        assert!(html.contains("Thumbnails"));
         // The pipeline strip reads the whole run off the page's own data.
         let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
         assert_eq!(
@@ -328,12 +343,44 @@ mod tests {
             "photo, render, copy and artwork are done: {steps}"
         );
         assert!(steps.contains("YouTube"));
+    }
+
+    /// The Thumbnails page leads with the words, then the set, then the
+    /// optional experiments — and every correction is on it.
+    #[test]
+    fn the_thumbnails_page_leads_with_the_words_then_the_set() {
+        let html = page(
+            "thumbnail.html",
+            context! { art => rendered_art(), photo_countdown => 3 },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        let title = html.find(r#"data-field="title""#).expect("the title box");
+        let set = html.find("horizontal.jpg").expect("the artwork set");
+        let experiments = html.find("AI image experiments").expect("the experiments");
+        assert!(
+            title < set && set < experiments,
+            "words, then the set, then the experiments"
+        );
+        assert!(html.contains("Ship it anyway") && html.contains("Why the queue fell over."));
+        assert!(
+            html.contains("Your words"),
+            "a card with its own words says so"
+        );
+        // All three pictures, the photo they were drawn from, and the screen.
+        assert!(html.contains("vertical.jpg") && html.contains("og.jpg"));
+        assert!(html.contains("still.jpg") && html.contains("screen.jpg"));
+        // The corrections: retake the photo, redraw, save the words and design.
+        assert!(html.contains("captureFrame") && html.contains("generateArtwork"));
+        assert!(html.contains("saveCard") && html.contains(r#"data-form="card""#));
+        assert!(html.contains(r#"data-field="kicker""#));
+        assert!(
+            html.contains(r#"value="0.34""#),
+            "the focus is where it was left"
+        );
         assert!(html.contains("saveBrief") && html.contains(r#"data-form="brief""#));
         assert!(html.contains("selectThumbnail") && html.contains("· live"));
         assert!(html.contains("toggleReference") && html.contains("Drop images here"));
         assert!(html.contains("thumbnailModel") && html.contains("seedream-5-0-pro"));
-        // Nothing sends the reader to a tab that no longer exists.
-        assert!(!html.contains("Thumbnails tab"));
     }
 
     /// A stale set is shown with the reason it is stale, above the pictures it
@@ -355,13 +402,17 @@ mod tests {
             },
         );
         assert!(!html.contains("template error"), "{html}");
-        let notice = html.find("Design changed").expect("the notice");
-        let picture = html.find("horizontal.jpg").expect("the picture");
-        assert!(notice < picture);
         assert!(
             html.contains(r#"class="badge warn">Stale"#),
-            "the card is badged stale"
+            "the glance is badged stale"
         );
+        let thumbnails = page(
+            "thumbnail.html",
+            context! { art => art.clone(), photo_countdown => 3 },
+        );
+        let notice = thumbnails.find("Design changed").expect("the notice");
+        let picture = thumbnails.find("horizontal.jpg").expect("the picture");
+        assert!(notice < picture);
         let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
         assert!(steps.contains(r#"class="stale""#), "{steps}");
     }

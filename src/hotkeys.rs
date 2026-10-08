@@ -30,6 +30,10 @@ pub enum Action {
     /// mouse, and a global chord that overwrites the pasteboard is a bad
     /// neighbour to every other app.
     CopyTranscript,
+    /// Speaking notes from your GitHub commits since the last project — see
+    /// [`crate::notes::spawn_commit_notes`]. No hotkey: it is prep, pressed
+    /// before a take.
+    SummarizeCommits,
     Render,
     /// Render whatever the last render left missing or failed, without
     /// retaking the photo — see `App::run_rerender`. No hotkey: it is pressed

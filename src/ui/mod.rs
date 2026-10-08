@@ -370,6 +370,8 @@ pub struct ControlTargetIvars {
     // Render tab
     render_status: RefCell<Option<Retained<NSTextField>>>,
     thumbnail_status: RefCell<Option<Retained<NSTextField>>>,
+    /// The same line on the Thumbnails tab, where Save and redraw is pressed.
+    thumbnail_tab_status: RefCell<Option<Retained<NSTextField>>>,
     render_summary: RefCell<Option<Retained<NSTextView>>>,
     /// The two bars under Render video and thumbnails — see `layout_left`.
     render_bar: RefCell<Option<Retained<NSProgressIndicator>>>,
@@ -590,6 +592,11 @@ define_class!(
         #[unsafe(method(onCopyTranscript:))]
         fn on_copy_transcript(&self, _sender: Option<&AnyObject>) {
             let _ = self.ivars().tx.send(UiEvent::Action(Action::CopyTranscript));
+        }
+
+        #[unsafe(method(onSummarizeCommits:))]
+        fn on_summarize_commits(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::SummarizeCommits));
         }
 
         #[unsafe(method(onProjectChanged:))]
@@ -828,6 +835,7 @@ impl ControlTarget {
             queue_button: RefCell::new(None),
             render_status: RefCell::new(None),
             thumbnail_status: RefCell::new(None),
+            thumbnail_tab_status: RefCell::new(None),
             render_summary: RefCell::new(None),
             render_bar: RefCell::new(None),
             thumbnail_bar: RefCell::new(None),
@@ -1288,6 +1296,11 @@ impl ControlTarget {
     }
 
     pub fn set_thumbnail_status(&self, text: &str) {
+        // Both copies: the Record tab's, under the render, and the Thumbnails
+        // tab's, where a redraw is pressed.
+        if let Some(field) = self.ivars().thumbnail_tab_status.borrow().clone() {
+            field.setStringValue(&NSString::from_str(text));
+        }
         if let Some(field) = self.ivars().thumbnail_status.borrow().clone() {
             field.setStringValue(&NSString::from_str(text));
         }
@@ -1891,6 +1904,8 @@ pub struct Attached {
     pub publish_pane: WebPane,
     /// The recording page's right-hand pane: details, artwork and review.
     pub video_brief_pane: WebPane,
+    /// The Thumbnails tab: the artwork set, its words, photo and design.
+    pub thumbnail_pane: WebPane,
     pub settings_pane: WebPane,
     pub layout: Layout,
 }
@@ -2381,7 +2396,7 @@ pub fn attach_controls(
     // Ordered so each box below is a contiguous slice. Inserting a button
     // anywhere but the end of its own run means every later slice moves —
     // keep the RECORD/NOTES/SESSION ranges beneath in step with this list.
-    let buttons: [(&str, Sel); 13] = [
+    let buttons: [(&str, Sel); 14] = [
         ("", sel!(onNewChapter:)),                           // 0 ┐
         ("Retake  ⌃⌥T", sel!(onRetake:)),                    // 1 │ Record
         ("Pause  ⌃⌥P", sel!(onTogglePause:)),                // 2 │ title set by set_recording
@@ -2389,17 +2404,18 @@ pub fn attach_controls(
         ("Render video and thumbnails", sel!(onRunRender:)), // 4 │
         ("Re-render missing", sel!(onRerenderMissing:)),     // 5 ┘
         ("Notes", sel!(onNotes:)),                           // 6 ┐ Notes (right pane)
-        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 ┘
-        ("New Project", sel!(onNewProject:)),                // 8 ┐
-        ("New Version", sel!(onNewVersion:)),                // 9 │
-        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 10 │ Session
-        ("", sel!(onToggleRegions:)),                        // 11 │ title set by set_regions
-        ("Open Rendered Video", sel!(onOpenVideo:)),         // 12 ┘
+        ("Copy Transcript", sel!(onCopyTranscript:)),        // 7 │
+        ("Summarize Commits", sel!(onSummarizeCommits:)),    // 8 ┘
+        ("New Project", sel!(onNewProject:)),                // 9 ┐
+        ("New Version", sel!(onNewVersion:)),                // 10 │
+        ("Clean Up Old Recordings", sel!(onCleanUp:)),       // 11 │ Session
+        ("", sel!(onToggleRegions:)),                        // 12 │ title set by set_regions
+        ("Open Rendered Video", sel!(onOpenVideo:)),         // 13 ┘
     ];
     const RECORD: Range<usize> = 0..6;
-    const NOTES: Range<usize> = 6..8;
-    const SESSION: Range<usize> = 8..13;
-    const REGIONS: usize = 11;
+    const NOTES: Range<usize> = 6..9;
+    const SESSION: Range<usize> = 9..14;
+    const REGIONS: usize = 12;
     let mut built = Vec::with_capacity(buttons.len());
     for (title, action) in buttons {
         let button = unsafe {
@@ -2437,6 +2453,10 @@ pub fn attach_controls(
          the photo. Clips already current are skipped; the title, artwork and upload follow.",
     )));
     *target.ivars().rerender_button.borrow_mut() = Some(built[5].clone());
+    built[8].setToolTip(Some(&NSString::from_str(
+        "Speaking notes from your GitHub commits since the last project: what you shipped, \
+         as talking points to record from. Signs in with the gh CLI or Settings → GitHub.",
+    )));
     let render_status = NSTextField::labelWithString(
         &NSString::from_str(
             "Record a video, then render it. One press: photo, cut, title, artwork, YouTube.",
@@ -3235,12 +3255,44 @@ pub fn attach_controls(
     settings_item.setLabel(&NSString::from_str("Settings"));
     settings_item.setView(Some(&settings_view));
 
+    // ==========================================
+    // TAB: THUMBNAILS (the artwork set, and the words on it)
+    // ==========================================
+    // Between the recording and YouTube, because the upload carries it. Its
+    // own page because the words on the thumbnail are edited here, and a form
+    // folded away at the bottom of the Record tab was one nobody found.
+    let thumbnails_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&thumbnails_view);
+    let thumbnail_tab_status = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+    thumbnail_tab_status.setFrame(NSRect::new(
+        NSPoint::new(PAD * 2.0, bounds.size.height - 34.0),
+        NSSize::new(bounds.size.width - PAD * 4.0, 20.0),
+    ));
+    pin_top(&thumbnail_tab_status);
+    thumbnails_view.addSubview(&thumbnail_tab_status);
+    *target.ivars().thumbnail_tab_status.borrow_mut() = Some(thumbnail_tab_status);
+    let thumbnail_pane = WebPane::attach(&thumbnails_view, mtm, tx.clone());
+    thumbnail_pane.set_frame(NSRect::new(
+        NSPoint::new(PAD, PAD),
+        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
+    ));
+    thumbnail_pane.fill_below();
+    let thumbnails_item = unsafe {
+        NSTabViewItem::initWithIdentifier(
+            NSTabViewItem::alloc(),
+            Some(&NSString::from_str("thumbnails")),
+        )
+    };
+    thumbnails_item.setLabel(&NSString::from_str("Thumbnails"));
+    thumbnails_item.setView(Some(&thumbnails_view));
+
     workflow::attach(
         &tab_view,
         bounds,
         mtm,
         &[
             ("draft", &draft_item),
+            ("thumbnails", &thumbnails_item),
             ("youtube", &publish_item),
             ("blog", &blog_item),
             ("post", &post_item),
@@ -3284,6 +3336,7 @@ pub fn attach_controls(
         blog_pane,
         publish_pane,
         video_brief_pane,
+        thumbnail_pane,
         settings_pane,
         layout,
     })

@@ -62,6 +62,8 @@ pub struct CardView {
     /// Whether Redraw artwork does anything, and why not when it does not.
     pub can_draw: bool,
     pub hint: String,
+    /// The title and description still follow the video's copy.
+    pub follows_video: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -217,6 +219,7 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
         focus_y: format!("{:.2}", card.focus_y_clamped()),
         can_draw: !card.is_empty() && has_still,
         hint: card_hint(&card, has_still),
+        follows_video: !card.custom_words,
         title: card.title,
         description: card.description,
         kicker: card.kicker,
@@ -225,9 +228,7 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
 
 fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
     match (card.is_empty(), has_still) {
-        (true, _) => {
-            "No title yet — the render writes one, or type one under Artwork design.".to_string()
-        }
+        (true, _) => "No title yet — the render writes one, or type one above.".to_string(),
         // A set is a photograph with words beside it, so there is nothing to
         // draw without one. The button is disabled to match, rather than taking
         // the press and failing on it.

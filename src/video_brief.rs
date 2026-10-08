@@ -56,8 +56,14 @@ pub fn apply(session: &Session, brief: &Brief) -> Result<()> {
     let metadata = brief.metadata();
     metadata.validate()?;
     let mut card = crate::card::load(&session.root);
-    card.title = metadata.title.clone();
-    card.description = metadata.description.clone();
+    // The thumbnail's words follow the video's until they are written for the
+    // thumbnail on the Thumbnails tab. Before this, every sync — each edit of
+    // the video copy, each render — put the video's title back on the card
+    // and the thumbnail's own words could not be kept.
+    if !card.custom_words {
+        card.title = metadata.title.clone();
+        card.description = metadata.description.clone();
+    }
     save(&session.root, brief)?;
     crate::card::save(&session.root, &card)?;
     crate::publish::metadata::save(session, &metadata)?;
@@ -350,6 +356,32 @@ mod tests {
         std::fs::remove_dir_all(session.root).unwrap();
     }
 
+    /// Words written for the thumbnail survive the video's copy changing; the
+    /// design form is the only thing that sets them.
+    #[test]
+    fn the_thumbnails_own_words_survive_a_sync() {
+        let session = session("custom-words");
+        let mut card = crate::card::Card::default();
+        card.title = "Ship it anyway".into();
+        card.description = "Why the queue fell over.".into();
+        card.custom_words = true;
+        crate::card::save(&session.root, &card).unwrap();
+        let brief = Brief {
+            notes: String::new(),
+            title: "A different video title".into(),
+            description: "And its description.".into(),
+        };
+        apply(&session, &brief).unwrap();
+        let kept = crate::card::load(&session.root);
+        assert_eq!(kept.title, "Ship it anyway");
+        assert_eq!(kept.description, "Why the queue fell over.");
+        assert_eq!(
+            crate::publish::metadata::load(&session).title,
+            "A different video title"
+        );
+        std::fs::remove_dir_all(session.root).unwrap();
+    }
+
     #[test]
     fn applying_copy_updates_both_destinations_and_preserves_design() {
         let session = session("apply");
@@ -395,7 +427,6 @@ mod tests {
         );
         std::fs::remove_dir_all(session.root).unwrap();
     }
-    #[test]
     /// Nothing downstream enforces the artwork budgets any more, so the prompt
     /// is the only thing keeping the copy the right shape. Measured before this
     /// wording, the same model returned a 63-character title and a
@@ -442,6 +473,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn long_copy_is_kept_rather_than_thrown_away() {
         // Over the artwork limits on every axis, and still returned: a long
         // title is a few seconds of editing, where discarding it costs a model

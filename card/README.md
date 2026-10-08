@@ -28,6 +28,14 @@ without it the point is used as a plain `object-position`, as older pages did. T
 vertical component only moves anything when the still is taller than its box — a
 portrait camera. Keep headlines concise; secondary copy is limited to three lines.
 
+The card is styled as the chapter cards inside the video are (Figma "Video Layouts and
+Thumbnails", Chapter Card), so the thumbnail and the video read as one family: Booton,
+embedded in the page because the rasteriser cannot read fonts outside the project folder;
+the kicker set like the chapter card's CHAPTER label, then a thin orange rule, the Bold
+title and the description in muted Regular. The **light** theme, the default, is the
+chapter card's surface — white with its two peach arcs on the landscape card, flat peach on
+the portrait one; **dark** is the same layout on ink with the arcs a shade apart.
+
 The **format** picker chooses the aspect ratio asked of the image models under
 *Optional AI image experiments*. It does not change the artwork set, which is always
 all three, and it is deliberately not part of a set's identity — changing it must not

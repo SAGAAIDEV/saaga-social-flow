@@ -51,15 +51,18 @@ pub enum Group {
     Video,
     /// Transcription.
     Transcript,
+    /// GitHub, for the Speaking notes summarised from your commits.
+    GitHub,
 }
 
 impl Group {
-    pub const ALL: [Group; 5] = [
+    pub const ALL: [Group; 6] = [
         Group::Llm,
         Group::Social,
         Group::Blog,
         Group::Video,
         Group::Transcript,
+        Group::GitHub,
     ];
 
     /// The stable name the webview uses to ask for a test and to place the
@@ -72,6 +75,7 @@ impl Group {
             Group::Blog => "blog",
             Group::Video => "video",
             Group::Transcript => "transcript",
+            Group::GitHub => "github",
         }
     }
 
@@ -86,6 +90,7 @@ impl Group {
             Group::Blog => "Blog (Strapi)",
             Group::Video => "YouTube",
             Group::Transcript => "Transcription",
+            Group::GitHub => "GitHub",
         }
     }
 
@@ -105,6 +110,10 @@ impl Group {
             Group::Video => "Uploading the render to YouTube and setting its thumbnail.",
             Group::Transcript => {
                 "Chapter transcripts. Without it recording still works; transcripts are skipped."
+            }
+            Group::GitHub => {
+                "Summarize Commits, the Speaking notes written from what you shipped. Not \
+                 needed when the gh CLI is signed in."
             }
         }
     }
@@ -260,6 +269,37 @@ pub const FIELDS: &[Field] = &[
         secret: true,
         help: "Unset, chapters record normally and transcripts are written as skipped.",
         url: Some("https://www.assemblyai.com/app/account"),
+    },
+    Field {
+        key: "GITHUB_TOKEN",
+        label: "GitHub token",
+        group: Group::GitHub,
+        need: Need::Optional,
+        secret: true,
+        help: "A token with repo scope, or leave blank to use the gh CLI's sign-in. A Sign in \
+               with GitHub from Summarize Commits saves here.",
+        url: Some("https://github.com/settings/tokens"),
+    },
+    Field {
+        key: "GITHUB_AUTHOR_EMAILS",
+        label: "Other commit emails",
+        group: Group::GitHub,
+        need: Need::Optional,
+        secret: false,
+        help: "Comma-separated emails some repos commit as (a work address, say). GitHub \
+               only credits a commit to you when its email is verified on your account; \
+               these are searched as well. Your global git email is included already.",
+        url: None,
+    },
+    Field {
+        key: "GITHUB_CLIENT_ID",
+        label: "GitHub OAuth client ID",
+        group: Group::GitHub,
+        need: Need::Optional,
+        secret: false,
+        help: "The org's OAuth app with device flow enabled. Set, Summarize Commits offers a \
+               Sign in with GitHub code when there is no token.",
+        url: Some("https://github.com/organizations/SAGAAIDEV/settings/applications"),
     },
 ];
 

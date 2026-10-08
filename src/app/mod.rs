@@ -87,6 +87,7 @@ struct Live {
     /// The recording page's right-hand pane: notes and copy, the artwork set,
     /// and the rendered clips — see `update_video_view`.
     video_brief_pane: ui::WebPane,
+    thumbnail_pane: ui::WebPane,
     settings_pane: ui::WebPane,
     layout: ui::Layout,
 }
@@ -361,6 +362,7 @@ impl App {
             blog_pane: attached.blog_pane,
             publish_pane: attached.publish_pane,
             video_brief_pane: attached.video_brief_pane,
+            thumbnail_pane: attached.thumbnail_pane,
             settings_pane: attached.settings_pane,
             layout: attached.layout,
         })
@@ -505,6 +507,7 @@ impl App {
             Action::NewChapter => self.start_or_cut(),
             Action::Notes => self.build_notes(),
             Action::CopyTranscript => self.copy_transcript(),
+            Action::SummarizeCommits => self.summarize_commits(),
             Action::Render => self.run_render(),
             Action::RerenderMissing => self.run_rerender(),
             Action::GenerateTitles => self.run_generate_titles(),
@@ -1118,6 +1121,20 @@ impl App {
                 self.apply_layout_change();
             }
         }
+    }
+
+    /// Speaking notes from GitHub commits since the last project: prep before
+    /// a take, so nothing is recorded or finished first.
+    fn summarize_commits(&mut self) {
+        if let Some(live) = self.live.as_ref() {
+            live.notes.show_status("Summarizing your GitHub commits…");
+        }
+        crate::notes::spawn_commit_notes(
+            self.session.clone(),
+            self.notes_pick.model().to_string(),
+            self.notes_pick.provider().map(str::to_string),
+            self.notes_tx.clone(),
+        );
     }
 
     fn build_notes(&mut self) {
@@ -2483,6 +2500,20 @@ impl App {
             &access,
             ".video.html",
         );
+        // The Thumbnails tab reads the same artwork, so it repaints with it —
+        // every change that redraws the Video pane's glance redraws this.
+        live.thumbnail_pane.show_local(
+            &ui::render::page(
+                "thumbnail.html",
+                minijinja::context! {
+                    art => art,
+                    photo_countdown => crate::config::load().photo_countdown_secs(),
+                },
+            ),
+            &self.session.root,
+            &access,
+            ".thumbnail.html",
+        );
     }
 
     /// Repaints the Substack tab from the notes on disk.
@@ -3626,6 +3657,15 @@ impl App {
                 crate::notes::NotesEvent::Ready(html) => {
                     live.notes.load(&html);
                     live.notes.reset_slide();
+                }
+                crate::notes::NotesEvent::GitHubToken(token) => {
+                    // Saved like a pasted key, so the next summary signs in
+                    // without a code. The event loop owns the environment.
+                    let fields =
+                        std::collections::BTreeMap::from([("GITHUB_TOKEN".to_string(), token)]);
+                    if let Err(err) = crate::settings::write(&fields) {
+                        eprintln!("stream-recorder: could not save the GitHub sign-in: {err:#}");
+                    }
                 }
                 crate::notes::NotesEvent::NoSpeech(why) => {
                     // The one thing the notes thread cannot know: which mic these
