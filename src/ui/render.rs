@@ -1404,6 +1404,37 @@ mod tests {
         assert!(html.contains("watch?v=abc"));
     }
 
+    #[test]
+    fn the_project_pane_picks_long_or_short() {
+        let pane = |format: &str, fixed: bool| {
+            page(
+                "project.html",
+                context! {
+                    title => "Agent limits", folder => "2026-10-12_09-05-00", root => "/tmp/project",
+                    plan => no_plan_status(),
+                    versions => Vec::<()>::new(), deck => None::<usize>, deck_from_plan => false,
+                    links => Vec::<()>::new(), format => format, format_fixed => fixed,
+                },
+            )
+        };
+        let short = pane("short", false);
+        assert!(!short.contains("template error"), "{short}");
+        assert!(
+            short.contains(r#"{"root":"/tmp/project","type":"projectFormat"}"#),
+            "{short}"
+        );
+        assert!(short.contains(r#"<option value="short" selected>Short · vertical</option>"#));
+        assert!(short.contains("as a Short on its own"));
+        let long = pane("long", false);
+        assert!(long.contains(r#"<option value="long" selected>Long · horizontal</option>"#));
+        assert!(long.contains("its chapters as vertical shorts"));
+        let aside = pane("short", true);
+        assert!(
+            aside.contains("disabled") && aside.contains("always vertical"),
+            "{aside}"
+        );
+    }
+
     /// Un-approving leaves the plan's deck in place, and the summary must not
     /// go on calling it the approved plan's.
     #[test]

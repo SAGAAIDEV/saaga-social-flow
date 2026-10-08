@@ -182,6 +182,12 @@ pub enum WebEvent {
         root: String,
         value: String,
     },
+    /// The format picked on the Project tab: `long` or `short`. Carries the
+    /// project the page was drawn for, like the category.
+    ProjectFormat {
+        root: String,
+        value: String,
+    },
     /// Set a category up everywhere it drives — see [`crate::category::set_up`].
     /// `slug` names an existing Strapi category; empty makes or finds one by
     /// `name`.
@@ -338,6 +344,7 @@ impl WebEvent {
             WebEvent::BlogAuthor { value } => UiEvent::BlogAuthorSelected(value),
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
             WebEvent::ProjectCategory { root, value } => UiEvent::ProjectCategory { root, value },
+            WebEvent::ProjectFormat { root, value } => UiEvent::ProjectFormat { root, value },
             WebEvent::SetUpCategory {
                 root,
                 slug,
@@ -954,6 +961,13 @@ mod tests {
             panic!("expected ProjectCategory");
         };
         assert_eq!(value, "gtm");
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"projectFormat","root":"/p","value":"short"}"#)
+                .unwrap();
+        let UiEvent::ProjectFormat { root, value } = event.into_ui_event() else {
+            panic!("expected ProjectFormat");
+        };
+        assert_eq!((root.as_str(), value.as_str()), ("/p", "short"));
     }
 
     #[test]

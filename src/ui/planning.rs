@@ -64,6 +64,11 @@ pub struct ProjectView {
     pub deck: Option<usize>,
     pub deck_from_plan: bool,
     pub links: Vec<Link>,
+    /// `long` or `short` — see [`crate::sessions::Format`].
+    pub format: &'static str,
+    /// A short beside a video is short whatever is picked, so its Format card
+    /// cannot be changed.
+    pub format_fixed: bool,
     /// The Category card. Filled by the app, which holds the team template;
     /// `None` in a view built from disk alone, and the card is left out.
     pub category: Option<CategoryView>,
@@ -285,6 +290,8 @@ pub fn project_view(session: &Session) -> ProjectView {
         deck,
         deck_from_plan: plan::deck_from_plan(&plan_dir),
         links,
+        format: session.format().slug(),
+        format_fixed: session.parent_root().is_some(),
         category: None,
     }
 }

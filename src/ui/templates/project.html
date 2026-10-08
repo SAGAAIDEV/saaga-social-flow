@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% import "components.html" as ui %}
 {#
-  The Project tab: where the open project stands, and the category it is filed
-  under — the one thing set here. Otherwise read-only: picking, naming,
+  The Project tab: where the open project stands, and what it is — its format
+  and its category, the two things set here. Otherwise read-only: picking, naming,
   starting and cleaning up projects are the native controls above this pane,
   and every card here is a summary of files another tab writes.
 #}
@@ -40,6 +40,25 @@
     {% if deck is none %}No speaking notes yet — an approved plan writes them.
     {% elif deck_from_plan %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written by {% if plan.state == "approved" %}the approved plan{% else %}a plan that is no longer approved{% endif %}.
     {% else %}Speaking notes: {{ deck }} chapter{{ "" if deck == 1 else "s" }}, written from a rehearsal.{% endif %}
+  </p>
+</div>
+
+<!--
+  Long or short. Render, Upload and the Buffer plan follow it: a short project
+  goes down the same road as a short recorded beside a video.
+-->
+<h2>Format</h2>
+<div class="card">
+  <div class="row">
+    <select aria-label="Format" data-send-change='{{ {"type": "projectFormat", "root": root} | tojson }}'{% if format_fixed %} disabled{% endif %}>
+      <option value="long"{% if format == "long" %} selected{% endif %}>Long · horizontal</option>
+      <option value="short"{% if format == "short" %} selected{% endif %}>Short · vertical</option>
+    </select>
+  </div>
+  <p class="why">
+    {% if format_fixed %}A short recorded beside a video is always vertical.
+    {% elif format == "short" %}Render draws the vertical video only, and Upload puts it on YouTube as a Short on its own — three minutes at most. Pick it before Render; after a render, render again.
+    {% else %}Render draws what the boxes above the Render button ask for: the horizontal video, and its chapters as vertical shorts. Pick the format before Render; after a render, render again.{% endif %}
   </p>
 </div>
 

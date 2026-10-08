@@ -8,7 +8,7 @@
 //! A folder keeps its timestamp name forever — it is the stable identity that
 //! paths, the S3 keys and `schedule.jsonl` are all written against. A friendly
 //! name lives beside it in `session.json` and is presentation only, so renaming
-//! a project can never orphan its files.
+//! a project can never orphan its files. So does the project's [`Format`].
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -22,6 +22,43 @@ pub const SESSION_JSON: &str = "session.json";
 pub struct SessionMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<Format>,
+    /// Whatever else a newer build wrote, kept through a rename.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
+}
+
+/// What a project makes: a long video, horizontal, or a short one, vertical.
+///
+/// Picked on the Project tab. A project that never picked is long, which is
+/// what every project was before there was a choice. A short project renders
+/// and uploads the way a short recorded with Start Short does — see
+/// [`crate::session::Session::is_short`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    #[default]
+    Long,
+    Short,
+}
+
+impl Format {
+    /// The value the Project tab posts.
+    pub fn parse(value: &str) -> Option<Format> {
+        match value {
+            "long" => Some(Format::Long),
+            "short" => Some(Format::Short),
+            _ => None,
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Format::Long => "long",
+            Format::Short => "short",
+        }
+    }
 }
 
 /// One recording project as the picker sees it.
@@ -31,6 +68,7 @@ pub struct SessionEntry {
     /// The folder name, e.g. "2026-08-15_02-19-20" — the durable identity.
     pub folder: String,
     pub name: Option<String>,
+    pub format: Format,
     pub files: usize,
     pub bytes: u64,
     pub modified: SystemTime,
@@ -63,8 +101,13 @@ impl SessionEntry {
             Some(name) if !name.trim().is_empty() => name.trim().to_string(),
             _ => format!("({})", self.folder),
         };
+        // A short project says so first, the way a short beside a video does.
+        let kind = match self.format {
+            Format::Short => "Short · ",
+            Format::Long => "",
+        };
         format!(
-            "{title} — {} files, {}",
+            "{kind}{title} — {} files, {}",
             self.files,
             human_bytes(self.bytes)
         )
@@ -178,31 +221,52 @@ pub fn describe(root: &Path) -> Option<SessionEntry> {
         root: root.to_path_buf(),
         folder,
         name: load_name(root),
+        format: load_format(root),
         files: measured.files,
         bytes: measured.bytes,
         modified,
     })
 }
 
+/// `session.json`, or nothing set when it is missing or unreadable.
+fn load_meta(root: &Path) -> SessionMeta {
+    std::fs::read_to_string(root.join(SESSION_JSON))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
 pub fn load_name(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join(SESSION_JSON)).ok()?;
-    let meta: SessionMeta = serde_json::from_str(&text).ok()?;
-    meta.name
+    load_meta(root)
+        .name
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
 }
 
 /// Names a project. An empty name clears it back to the folder timestamp.
 pub fn save_name(root: &Path, name: &str) -> Result<()> {
-    std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
     let name = name.trim();
-    let meta = SessionMeta {
-        name: (!name.is_empty()).then(|| name.to_string()),
-    };
+    let mut meta = load_meta(root);
+    meta.name = (!name.is_empty()).then(|| name.to_string());
+    save_meta(root, &meta)
+}
+
+pub fn load_format(root: &Path) -> Format {
+    load_meta(root).format.unwrap_or_default()
+}
+
+pub fn save_format(root: &Path, format: Format) -> Result<()> {
+    let mut meta = load_meta(root);
+    meta.format = Some(format);
+    save_meta(root, &meta)
+}
+
+fn save_meta(root: &Path, meta: &SessionMeta) -> Result<()> {
+    std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
     let path = root.join(SESSION_JSON);
     std::fs::write(
         &path,
-        serde_json::to_string_pretty(&meta).context("serializing session meta")? + "\n",
+        serde_json::to_string_pretty(meta).context("serializing session meta")? + "\n",
     )
     .with_context(|| format!("writing {}", path.display()))
 }
@@ -485,10 +549,72 @@ mod tests {
             root: PathBuf::from("/tmp").join(folder),
             folder: folder.into(),
             name: name.map(str::to_string),
+            format: Format::Long,
             files,
             bytes,
             modified: SystemTime::UNIX_EPOCH,
         }
+    }
+
+    #[test]
+    fn a_project_that_never_picked_is_long() {
+        let dir = temp("format-default");
+        assert_eq!(load_format(&dir), Format::Long);
+        save_name(&dir, "Named only").unwrap();
+        assert_eq!(load_format(&dir), Format::Long);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The name and the format share `session.json`; writing either must not
+    /// drop the other, or a rename would quietly turn a short back into a long.
+    #[test]
+    fn a_rename_keeps_the_format_and_a_format_keeps_the_name() {
+        let dir = temp("format-rename");
+        save_format(&dir, Format::Short).unwrap();
+        save_name(&dir, "Agent limits").unwrap();
+        assert_eq!(load_format(&dir), Format::Short);
+        save_format(&dir, Format::Short).unwrap();
+        assert_eq!(load_name(&dir).as_deref(), Some("Agent limits"));
+        let text = std::fs::read_to_string(dir.join(SESSION_JSON)).unwrap();
+        assert!(text.contains("\"format\": \"short\""), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rename_keeps_what_a_newer_build_wrote() {
+        let dir = temp("format-other");
+        std::fs::write(dir.join(SESSION_JSON), r#"{"name":"Old","archive":true}"#).unwrap();
+        save_name(&dir, "New").unwrap();
+        let text = std::fs::read_to_string(dir.join(SESSION_JSON)).unwrap();
+        assert!(text.contains("\"archive\": true"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_short_project_says_so_in_the_picker() {
+        let short = SessionEntry {
+            format: Format::Short,
+            ..entry(Some("Agent limits"), "2026-10-12_09-05-00", 3, 1_000)
+        };
+        assert!(
+            short.label().starts_with("Short · Agent limits — "),
+            "{}",
+            short.label()
+        );
+        let long = entry(Some("Ticket loop"), "2026-10-09_15-00-00", 3, 1_000);
+        assert!(
+            long.label().starts_with("Ticket loop — "),
+            "{}",
+            long.label()
+        );
+    }
+
+    #[test]
+    fn only_the_two_formats_parse() {
+        assert_eq!(Format::parse("long"), Some(Format::Long));
+        assert_eq!(Format::parse("short"), Some(Format::Short));
+        assert_eq!(Format::parse("vertical"), None);
+        assert_eq!(Format::Short.slug(), "short");
     }
 
     #[test]

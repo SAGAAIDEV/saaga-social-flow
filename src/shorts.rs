@@ -16,7 +16,8 @@
 //! parent stage scans its own `drafts/`, never `shorts/`. What *is* different
 //! about a short is said in exactly two places — it always renders vertical
 //! ([`crate::config::RenderTargets::for_session`]) and it uploads as a Short
-//! alone ([`crate::publish`]).
+//! alone ([`crate::publish`]). Both ask [`crate::session::Session::is_short`],
+//! which a project whose format is short answers yes to as well.
 //!
 //! Shorts belong to the project, not to a version: an aside recorded during v1
 //! is still worth posting after v2 re-records the video around it.

@@ -108,10 +108,26 @@ impl Session {
         }
     }
 
-    /// Whether this project is a short recorded beside another — see
-    /// [`crate::shorts`].
+    /// Whether this project renders and uploads as a Short: vertical only, and
+    /// up to YouTube on its own. True of a short recorded beside a video (see
+    /// [`crate::shorts`]) and of a project whose format is short. What needs a
+    /// video to go back to asks [`Session::parent_root`] instead.
     pub fn is_short(&self) -> bool {
-        crate::shorts::is_short(&self.root)
+        self.format() == crate::sessions::Format::Short
+    }
+
+    /// Long or short. A short recorded beside a video is short whatever its
+    /// `session.json` says — there is no choice to make for it.
+    pub fn format(&self) -> crate::sessions::Format {
+        if crate::shorts::is_short(&self.root) {
+            crate::sessions::Format::Short
+        } else {
+            crate::sessions::load_format(&self.root)
+        }
+    }
+
+    pub fn set_format(&self, format: crate::sessions::Format) -> Result<()> {
+        crate::sessions::save_format(&self.root, format)
     }
 
     /// The project a short was recorded from, where its take is back to.
@@ -479,6 +495,35 @@ mod tests {
             PathBuf::from("/tmp/rec/schedule/v3")
         );
         assert_eq!(session.version, Some(3));
+    }
+
+    /// A short project goes down the same road as a short beside a video —
+    /// vertical only — but it has no video to belong to.
+    #[test]
+    fn a_short_project_renders_vertical_and_stands_alone() {
+        use crate::sessions::Format;
+        let dir = std::env::temp_dir().join(format!(
+            "stream-recorder-short-format-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let project = Session::open_root(dir.join("2026-10-12_09-05-00")).unwrap();
+        assert!(!project.is_short());
+        project.set_format(Format::Short).unwrap();
+        assert!(project.is_short());
+        assert_eq!(project.parent_root(), None);
+        assert_eq!(project.folder(), "2026-10-12_09-05-00");
+        let targets = crate::config::RenderTargets::default().for_session(&project);
+        assert!(targets.vertical && !targets.horizontal, "{targets:?}");
+        project.set_format(Format::Long).unwrap();
+        assert!(!project.is_short());
+
+        // A short beside a video has no choice to make.
+        let aside = Session::open_root(dir.join("video/shorts/short-01")).unwrap();
+        aside.set_format(Format::Long).unwrap();
+        assert!(aside.is_short());
+        assert_eq!(aside.format(), Format::Short);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A new version is a folder inside the project, so the New Version button
