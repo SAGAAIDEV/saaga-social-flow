@@ -113,7 +113,7 @@
           <label class="label">Artwork title</label>
           <textarea data-field="title" rows="2"
             placeholder="{% if art.card.headline and not art.card.title %}Empty draws the video's title, {{ art.card.headline }}. Type here to draw something else.{% else %}Filled from the video title when you press Write on Video details.{% endif %}">{{ art.card.title }}</textarea>
-          <p class="help">A line break here is a deliberate line break on the card.</p>
+          <p class="help">A line break here is a deliberate line break on the card. A title typed here stays when the video's title is rewritten; clear it to follow the video again.</p>
         </div>
         <div class="grid-3">
           <div class="field">

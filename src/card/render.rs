@@ -213,6 +213,7 @@ mod tests {
     fn card() -> Card {
         Card {
             title: "  Ship it anyway  ".into(),
+            own_title: false,
             description: " Why the queue fell over. ".into(),
             kicker: " saaga ".into(),
             theme: "light".into(),

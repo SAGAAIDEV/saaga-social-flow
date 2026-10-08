@@ -208,6 +208,7 @@ fn main() -> Result<()> {
                     card: card::Card {
                         format: *format,
                         title: title.clone(),
+                        own_title: false,
                         description: description.clone(),
                         kicker: kicker.clone(),
                         theme: theme.clone(),

@@ -16,6 +16,7 @@ fn scratch(name: &str) -> PathBuf {
 fn card() -> Card {
     Card {
         title: "Ship it anyway".into(),
+        own_title: false,
         description: "Why the queue fell over.".into(),
         kicker: "SAAGA".into(),
         theme: "light".into(),
