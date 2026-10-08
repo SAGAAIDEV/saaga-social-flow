@@ -20,6 +20,9 @@
 //! | [`screen_filter`] | resolving a display, and keeping this process's own windows out of it — unless the operator wants the app in the shot |
 //! | [`screen_stream`] | the running `SCStream`: its region, its lifecycle, its clock |
 //! | [`screen_writer`] | the hand-built H.264 settings and the `AVAssetWriter` they configure |
+//!
+//! [`screenshot`] stands beside them: one picture of a whole display, through
+//! the same filter, for when no stream is running.
 
 mod audio_delegate;
 pub mod av;
@@ -35,4 +38,5 @@ pub mod screen_delegate;
 pub mod screen_filter;
 pub mod screen_stream;
 pub mod screen_writer;
+pub mod screenshot;
 mod video_delegate;

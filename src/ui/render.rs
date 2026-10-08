@@ -149,7 +149,7 @@ mod tests {
                     context! { id => "dark", label => "dark", selected => true },
                     context! { id => "light", label => "light", selected => false },
                 ],
-                focus => "0.50", can_draw => false, hint => "Capture your photo first.",
+                focus => "0.50", headline => "", can_draw => false, hint => "Capture your photo first.",
             },
         }
     }
@@ -214,7 +214,7 @@ mod tests {
             "video.html",
             context! {
                 brief => crate::video_brief::Brief { notes: "</textarea><script>bad()</script>".into(), title: "A title".into(), description: "A description".into() },
-                root => "/tmp/project", busy => true, model => "chosen-model",
+                written => true, root => "/tmp/project", busy => true, model => "chosen-model",
                 thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
             },
         );
@@ -263,7 +263,7 @@ mod tests {
                     context! { id => "dark", label => "dark", selected => true },
                     context! { id => "light", label => "light", selected => false },
                 ],
-                focus => "0.34", can_draw => true, hint => "Redraws all three.",
+                focus => "0.34", headline => "Ship it anyway", can_draw => true, hint => "Redraws all three.",
             },
         }
     }
@@ -273,7 +273,7 @@ mod tests {
             "thumbnail.html",
             context! {
                 art => art, review => review, can_approve => review == "drafted",
-                drawing => false, approved_at => None::<String>, title => "Ship it anyway",
+                drawing => false, approved_at => None::<String>,
                 live => false, photo_countdown => 3,
             },
         )
@@ -321,7 +321,7 @@ mod tests {
             "video.html",
             context! {
                 brief => crate::video_brief::Brief { notes: "".into(), title: "Ship it anyway".into(), description: "Why the queue fell over.".into() },
-                root => "/tmp/project", busy => false, model => "m",
+                written => true, root => "/tmp/project", busy => false, model => "m",
                 thumbnail => context! { review => "drafted", has_photo => true },
                 review => context! {
                     blocked => None::<String>,
@@ -512,6 +512,55 @@ mod tests {
             "the card is badged stale"
         );
         assert!(html.contains("Redraw it before it can be approved"));
+    }
+
+    /// A card with no title of its own draws the video's: the page names it
+    /// above the set, offers Draw, and shows it in the Design box only as a
+    /// placeholder, so pressing Draw does not save the borrowed words as typed.
+    #[test]
+    fn an_untitled_card_names_the_video_title_it_will_draw() {
+        let mut art = serde_json::to_value(empty_art()).unwrap();
+        art["still"] = serde_json::json!({ "url": "file:///tmp/still.jpg" });
+        art["card"]["headline"] = "GTM Update 16".into();
+        art["card"]["can_draw"] = true.into();
+        let html = thumbnail_page(minijinja::Value::from_serialize(&art), "none");
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("drawn for <b>GTM Update 16</b>"));
+        let draw = html.find(r#"{"type":"generateArtwork"}"#).expect("Draw");
+        let button = &html[html[..draw].rfind("<button").unwrap()..draw];
+        assert!(!button.contains("disabled"), "{button}");
+        let title = html.find(r#"data-field="title""#).expect("the title box");
+        let close = title + html[title..].find("</textarea>").unwrap();
+        let tag = &html[title..close];
+        assert!(
+            tag.contains("placeholder=\"Empty draws the video's title, GTM Update 16"),
+            "{tag}"
+        );
+        assert!(tag.ends_with('>'), "the box itself is empty: {tag}");
+    }
+
+    /// A title the project only goes by is not one anybody wrote: the badge,
+    /// the strip and the button all say Write is still to do.
+    #[test]
+    fn a_title_nobody_wrote_reads_as_not_yet() {
+        let html = page(
+            "video.html",
+            context! {
+                brief => crate::video_brief::Brief { notes: "".into(), title: "GTM Update 16".into(), description: "".into() },
+                written => false, root => "/tmp/project", busy => false, model => "m",
+                thumbnail => no_thumbnail(), review => no_clips(), youtube => None::<String>, figures => no_figures(),
+            },
+        );
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains(r#"class="badge outline">Not yet"#));
+        assert!(html.contains("Nothing written yet"));
+        assert!(html.contains(">Write title &amp; description<"));
+        let steps = &html[html.find("class=\"steps\"").unwrap()..html.find("</ol>").unwrap()];
+        let copy = steps.find("Copy").unwrap();
+        assert!(
+            !steps[steps[..copy].rfind("<li").unwrap()..copy].contains("done"),
+            "{steps}"
+        );
     }
 
     /// Once the upload has happened the strip says so — the last stage of the

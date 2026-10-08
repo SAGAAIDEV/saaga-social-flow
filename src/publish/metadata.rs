@@ -12,14 +12,20 @@ pub struct Metadata {
 }
 
 pub fn load(session: &Session) -> Metadata {
+    saved(session).unwrap_or_else(|| Metadata {
+        title: session.title(),
+        description: String::new(),
+    })
+}
+
+/// The copy someone gave this video — Write's, an edit on the YouTube tab, or
+/// an older project's prepared post — and `None` where [`load`] would stand
+/// the project's name in for a title nobody wrote.
+pub fn saved(session: &Session) -> Option<Metadata> {
     std::fs::read_to_string(session.root.join(FILE))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .or_else(|| legacy(session))
-        .unwrap_or_else(|| Metadata {
-            title: session.title(),
-            description: String::new(),
-        })
 }
 
 // Existing projects retain their previously prepared YouTube copy.

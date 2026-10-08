@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::card::Card;
 use crate::thumbnail::brief::Brief;
 use crate::thumbnail::{references, schema, still, SavedBrief};
 
@@ -17,8 +18,9 @@ pub struct Pane {
     pub artwork: Vec<Shot>,
     pub artwork_notice: Option<String>,
     pub still: Option<Shot>,
-    /// What was on screen when the still was taken. `None` for a talking-head
-    /// layout, which has no screen to catch.
+    /// The newest screen grab: off the recording's stream when the layout has
+    /// a screen, else a screenshot of the whole display. `None` until one is
+    /// taken.
     pub screen: Option<Shot>,
     /// Never absent, so the boxes are always there to type into. When nothing has
     /// written one they are simply empty — with no step that drafts a brief,
@@ -59,7 +61,14 @@ pub struct CardView {
     /// `0.50`, as the number boxes show it: across, then down.
     pub focus: String,
     pub focus_y: String,
-    /// Whether Redraw artwork does anything, and why not when it does not.
+    /// The words Draw artwork puts on the picture: `title` above, or the
+    /// video's when the card has none — see [`crate::video_brief::card`].
+    /// `title` stays what is saved, so the box is empty while it borrows and
+    /// the video's title shows there only as a placeholder.
+    pub headline: String,
+    /// Whether Draw artwork can be pressed. Only a photo is needed up front: a
+    /// missing title can be typed into the Design box the press saves, and the
+    /// press says so if it is still empty.
     pub can_draw: bool,
     pub hint: String,
 }
@@ -80,8 +89,10 @@ pub struct Ref {
 
 /// `default_brief` is the house style to start a brief from when this project
 /// has not written one — the caller's business, because it comes from global
-/// config and a pane that read it directly could not be tested.
-pub fn build(root: &Path, library_root: &Path, default_brief: Brief) -> Pane {
+/// config and a pane that read it directly could not be tested. `design` is the
+/// card Draw artwork would draw, title borrowed from the video included, for
+/// the same reason: the video's title is the session's to find.
+pub fn build(root: &Path, library_root: &Path, default_brief: Brief, design: Card) -> Pane {
     let rows = schema::load(root);
     let active_id = schema::active(&rows).map(|candidate| candidate.id.clone());
 
@@ -159,7 +170,7 @@ pub fn build(root: &Path, library_root: &Path, default_brief: Brief) -> Pane {
             })
             .unwrap_or_default(),
         models,
-        card: card_view(root, still.is_some()),
+        card: card_view(root, design, still.is_some()),
         // Both halves: a still to draw from, and something to draw.
         can_generate: still.is_some() && !brief.is_empty(),
         blocked,
@@ -189,18 +200,14 @@ fn fake_session(root: &Path) -> crate::session::Session {
     }
 }
 
-/// A `file://` URL for a path on disk, percent-encoded.
-///
-/// These are real filenames chosen by whoever made them. A screenshot dragged
-/// into the style library arrives called `Frame 2085667299.jpg`, and the space
-/// alone makes `file:///…/Frame 2085667299.jpg` an invalid URL — the pane drew a
-/// broken-image glyph and the reference looked like it had failed to upload.
-/// The card's form, read off `card.json`.
+/// The card's form, read off `card.json`, beside the design it would draw.
 ///
 /// `has_still` is passed in rather than re-derived so the hint agrees with the
 /// Still section above it on the same repaint.
-fn card_view(root: &Path, has_still: bool) -> CardView {
+fn card_view(root: &Path, design: Card, has_still: bool) -> CardView {
     let card = crate::card::load(root);
+    let headline = design.title.trim().to_string();
+    let borrowed = card.is_empty() && !headline.is_empty();
     CardView {
         format: card.format,
         themes: crate::card::THEMES
@@ -215,16 +222,17 @@ fn card_view(root: &Path, has_still: bool) -> CardView {
         // of the frame and a whole number would round every one of them away.
         focus: format!("{:.2}", card.focus_clamped()),
         focus_y: format!("{:.2}", card.focus_y_clamped()),
-        can_draw: !card.is_empty() && has_still,
-        hint: card_hint(&card, has_still),
+        can_draw: has_still,
+        hint: card_hint(&headline, borrowed, has_still),
+        headline,
         title: card.title,
         description: card.description,
         kicker: card.kicker,
     }
 }
 
-fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
-    match (card.is_empty(), has_still) {
+fn card_hint(headline: &str, borrowed: bool, has_still: bool) -> String {
+    match (headline.is_empty(), has_still) {
         (true, _) => {
             "No title yet — press Write title & description on Video details, or type one \
              under Design."
@@ -234,13 +242,28 @@ fn card_hint(card: &crate::card::Card, has_still: bool) -> String {
         // draw without one. The button is disabled to match, rather than taking
         // the press and failing on it.
         (false, false) => "No photo yet — Take photo, or choose one.".to_string(),
-        (false, true) => "Draw artwork makes the YouTube thumbnail, the portrait poster, and \
-             the link preview — which is the thumbnail at 1200×630. Draw again after a new \
-             photo or a design change. The AI format picker steers only the image models."
-            .to_string(),
+        (false, true) => {
+            let draws = "Draw artwork makes the YouTube thumbnail, the portrait poster, and \
+                 the link preview — which is the thumbnail at 1200×630. Draw again after a new \
+                 photo or a design change. The AI format picker steers only the image models.";
+            if borrowed {
+                format!(
+                    "{draws} It draws the video's title, {headline}, until you type another \
+                     under Design."
+                )
+            } else {
+                draws.to_string()
+            }
+        }
     }
 }
 
+/// A `file://` URL for a path on disk, percent-encoded.
+///
+/// These are real filenames chosen by whoever made them. A screenshot dragged
+/// into the style library arrives called `Frame 2085667299.jpg`, and the space
+/// alone makes `file:///…/Frame 2085667299.jpg` an invalid URL — the pane drew a
+/// broken-image glyph and the reference looked like it had failed to upload.
 fn file_url(path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
 
@@ -323,7 +346,7 @@ mod tests {
     fn with_no_still_generation_is_blocked_and_says_why() {
         let root = temp("blocked");
         let library = temp("blocked-lib");
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         assert!(!pane.can_generate);
         assert!(pane.blocked.unwrap().contains("Capture a frame"));
         assert!(pane.still.is_none());
@@ -337,7 +360,7 @@ mod tests {
         let root = temp("wordless");
         let library = temp("wordless-lib");
         still::write_bytes(&root, b"frame").unwrap();
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         assert!(!pane.can_generate);
         assert!(pane.blocked.unwrap().contains("Write a title"));
         let _ = std::fs::remove_dir_all(&root);
@@ -349,7 +372,7 @@ mod tests {
     fn the_brief_boxes_exist_before_anything_is_written() {
         let root = temp("empty-brief");
         let library = temp("empty-brief-lib");
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         assert_eq!(pane.brief, Brief::default());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -360,7 +383,7 @@ mod tests {
         let library = temp("still-lib");
         still::write_bytes(&root, b"frame").unwrap();
         write_brief(&root, &brief());
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         assert!(pane.can_generate);
         assert!(pane.blocked.is_none());
         assert_eq!(pane.brief.title, "SHIP IT");
@@ -391,7 +414,7 @@ mod tests {
         }
         crate::thumbnail::activate(&fake_session(&root), "thumb-a").unwrap();
 
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         let ids: Vec<&str> = pane.candidates.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["thumb-b", "thumb-a"], "newest first");
         assert_eq!(pane.active_id.as_deref(), Some("thumb-a"));
@@ -420,7 +443,7 @@ mod tests {
         std::fs::write(library.join("a.jpg"), b"x").unwrap();
         std::fs::write(library.join("b.jpg"), b"x").unwrap();
         references::set_active(&library, "a.jpg", true).unwrap();
-        let pane = build(&root, &library, Brief::default());
+        let pane = build(&root, &library, Brief::default(), Card::default());
         assert_eq!(pane.references.len(), 2);
         assert!(
             pane.references
@@ -452,5 +475,69 @@ mod tests {
             saved.brief.title, "SHIP IT",
             "the other box is not disturbed"
         );
+    }
+
+    fn titled(title: &str) -> Card {
+        Card {
+            title: title.into(),
+            ..Card::default()
+        }
+    }
+
+    /// The session that exposed this: a photo, a video called "GTM Update 16"
+    /// on every tab, and an empty `card.json` because nobody had pressed Write.
+    /// Draw artwork was off and the hint said "No title yet".
+    #[test]
+    fn an_untitled_card_draws_the_video_title_it_is_handed() {
+        let root = temp("borrowed");
+        let library = temp("borrowed-lib");
+        still::write_bytes(&root, b"frame").unwrap();
+        let pane = build(&root, &library, Brief::default(), titled("GTM Update 16"));
+        assert!(pane.card.can_draw);
+        assert_eq!(pane.card.headline, "GTM Update 16");
+        assert_eq!(
+            pane.card.title, "",
+            "the box holds only what is saved; the borrowed title is a placeholder"
+        );
+        assert!(
+            pane.card.hint.contains("GTM Update 16"),
+            "{}",
+            pane.card.hint
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A saved title is the card's own, and the hint has nothing to explain.
+    #[test]
+    fn a_titled_card_draws_its_own_title() {
+        let root = temp("own-title");
+        let library = temp("own-title-lib");
+        still::write_bytes(&root, b"frame").unwrap();
+        crate::card::save(&root, &titled("Ship it anyway")).unwrap();
+        let pane = build(&root, &library, Brief::default(), titled("Ship it anyway"));
+        assert_eq!(pane.card.title, "Ship it anyway");
+        assert_eq!(pane.card.headline, "Ship it anyway");
+        assert!(!pane.card.hint.contains("video's title"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no title anywhere the button still takes a press — the Design box
+    /// it saves is where one gets typed — but with no photo there is nothing to
+    /// draw on, and that one stays off.
+    #[test]
+    fn draw_waits_on_a_photo_and_not_on_a_title() {
+        let root = temp("no-title");
+        let library = temp("no-title-lib");
+        let pane = build(&root, &library, Brief::default(), Card::default());
+        assert!(!pane.card.can_draw, "no photo");
+        assert!(pane.card.hint.contains("No title yet"));
+        still::write_bytes(&root, b"frame").unwrap();
+        let pane = build(&root, &library, Brief::default(), Card::default());
+        assert!(
+            pane.card.can_draw,
+            "a title can be typed into the box the press saves"
+        );
+        assert!(pane.card.hint.contains("No title yet"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

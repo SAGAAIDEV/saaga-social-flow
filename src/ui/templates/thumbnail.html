@@ -3,12 +3,13 @@
 {#
   The Thumbnail tab: the step between recording and YouTube.
 
-  The render drafts the artwork set from the photo it takes and the title it
-  writes, then stops. This page is where the set is looked at — at a size that
-  shows it — redrawn if it needs it, and approved. Approve is the one thing that
-  lets it out: the YouTube upload, the blog and the S3 copy for Buffer all read
-  only an approved set (`card::assets::approved`), and pressing it starts the
-  uploads the render press held back.
+  The photo is taken here and the set drawn here, over it, with the video's
+  title — Write's, or the one the video already goes by until Write runs (see
+  `video_brief::card`). This page is where the set is looked at — at a size
+  that shows it — redrawn if it needs it, and approved. Approve is the one thing
+  that lets it out: the YouTube upload, the blog and the S3 copy for Buffer all
+  read only an approved set (`card::assets::approved`). Approving uploads
+  nothing; each of those is its own press on its own tab.
 
   Moved here from the recording page, where the same controls sat under the
   copy and the set went straight to YouTube without anyone looking at it.
@@ -31,7 +32,7 @@
   <div class="card-hd">
     <div>
       <h2 class="card-title">Artwork</h2>
-      <p class="card-desc">YouTube, the blog and the social image posts all use this set{% if title %}, drawn for <b>{{ title }}</b>{% endif %}.</p>
+      <p class="card-desc">YouTube, the blog and the social image posts all use this set{% if art.card.headline %}, drawn for <b>{{ art.card.headline }}</b>{% endif %}.</p>
     </div>
     {% if review == "approved" %}<span class="badge secondary">Approved</span>
     {% elif review == "drafted" %}<span class="badge">Needs review</span>
@@ -111,7 +112,7 @@
         <div class="field">
           <label class="label">Artwork title</label>
           <textarea data-field="title" rows="2"
-            placeholder="Filled from the video title when you press Write on Video details.">{{ art.card.title }}</textarea>
+            placeholder="{% if art.card.headline and not art.card.title %}Empty draws the video's title, {{ art.card.headline }}. Type here to draw something else.{% else %}Filled from the video title when you press Write on Video details.{% endif %}">{{ art.card.title }}</textarea>
           <p class="help">A line break here is a deliberate line break on the card.</p>
         </div>
         <div class="grid-3">

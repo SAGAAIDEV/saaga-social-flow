@@ -23,8 +23,8 @@ use super::App;
 impl App {
     /// Render all destination formats from one frozen photo and design.
     ///
-    /// Returns whether a job started. The render chain reads it: a refusal
-    /// here — no title, no photo — is the end of that chain, not a step in it.
+    /// Returns whether a job started. A card with no title of its own is drawn
+    /// with the video's — see [`crate::video_brief::card`].
     pub(super) fn draw_card(&mut self) -> bool {
         // A commit prunes the set an upload may be reading from.
         if self.publish_busy || self.blog_busy || self.distribute_busy {
@@ -37,7 +37,18 @@ impl App {
             self.set_thumbnail_status("Already generating artwork…");
             return false;
         }
-        match card::assets::Job::new(&self.session.root, card::load(&self.session.root)) {
+        let root = self.session.root.clone();
+        let design = crate::video_brief::card(&self.session);
+        // A title borrowed from the video goes into `card.json` before it is
+        // drawn: the set's freshness is checked against that file, and a set
+        // drawn with a title the card does not hold would land already stale.
+        if design != card::load(&root) {
+            if let Err(err) = card::save(&root, &design) {
+                self.set_thumbnail_status(&format!("Artwork not drawn: {err:#}"));
+                return false;
+            }
+        }
+        match card::assets::Job::new(&root, design) {
             Ok(job) => {
                 self.card_pending = Some(job);
                 self.draw_next_asset();

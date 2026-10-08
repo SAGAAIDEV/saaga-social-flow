@@ -976,6 +976,13 @@ impl App {
                     Ok(()) => {
                         self.youtube_draft = None;
                         self.update_publish_summary();
+                        // Video details shows the title, and an untitled card
+                        // draws it — see `video_brief::card` — so both tabs
+                        // name the new one.
+                        self.update_video_view();
+                        if crate::card::load(&self.session.root).is_empty() {
+                            self.update_thumbnail_view();
+                        }
                         self.sync_controls();
                         if let Some(live) = &self.live {
                             live.control_target
@@ -2181,24 +2188,36 @@ impl App {
 
     /// The Retake screen button: grab the screen alone and keep the photo.
     ///
-    /// The render and Retake photo take both at one instant so the pair belongs
-    /// together — but once the photo is right, the thing most often wrong is the
-    /// slide behind it, and retaking both to fix the slide throws away the
-    /// expression that was fine. The newest screen grab is the one used, so this
-    /// simply becomes it.
+    /// Retake photo takes both at one instant so the pair belongs together —
+    /// but once the photo is right, the thing most often wrong is the slide
+    /// behind it, and retaking both to fix the slide throws away the expression
+    /// that was fine. The newest screen grab is the one used, so this simply
+    /// becomes it.
+    ///
+    /// Whatever the layout. A layout with a screen slot has a stream to read
+    /// the frame off, cropped as the recording frames it; any other has none,
+    /// and gets one screenshot of the whole display instead, answered in
+    /// `drain_thumbnail`. It used to say "this layout has no screen" and send
+    /// the operator to Split just to press it.
     fn capture_screen(&mut self) {
-        let message = match self.take_screen_grab() {
-            None => "This layout has no screen to grab — pick a layout with one, or snip a figure \
-                 instead"
-                .to_string(),
-            Some(Err(err)) => format!("The screen grab failed: {err:#}"),
-            Some(Ok(shot)) => format!(
-                "Took the screen ({}). Generate thumbnails to use it; the artwork set draws \
-                 over your photo only",
-                file_name(&shot)
-            ),
+        let Some(grab) = self.take_screen_grab() else {
+            // The display picked for recording, else the main one: "No screen"
+            // is about what gets recorded, not about what a thumbnail may show.
+            let display = self
+                .screen_uid
+                .as_deref()
+                .and_then(|uid| uid.parse().ok())
+                .unwrap_or_else(|| objc2_core_graphics::CGMainDisplayID());
+            self.set_thumbnail_status("Taking the screen…");
+            crate::thumbnail::spawn_screen(
+                self.session.root.clone(),
+                display,
+                self.show_app,
+                self.thumbnail_tx.clone(),
+            );
+            return;
         };
-        self.set_thumbnail_status(&message);
+        self.set_thumbnail_status(&screen_grab_status(grab.map_err(|err| format!("{err:#}"))));
         self.update_video_view();
         self.update_thumbnail_view();
     }
@@ -2627,6 +2646,12 @@ impl App {
                         repaint = true;
                     }
                 }
+                crate::thumbnail::ThumbnailEvent::ScreenSaved { root, result } => {
+                    if root == self.session.root {
+                        repaint |= result.is_ok();
+                        self.set_thumbnail_status(&screen_grab_status(result));
+                    }
+                }
                 crate::thumbnail::ThumbnailEvent::Prepared { name, bytes } => {
                     self.store_reference(&name, &bytes);
                     repaint = true;
@@ -2683,6 +2708,7 @@ impl App {
                 "video.html",
                 minijinja::context! {
                     brief => crate::video_brief::load(&self.session),
+                    written => crate::video_brief::written(&self.session),
                     root => self.session.root.to_string_lossy(),
                     busy => busy,
                     model => self.notes_pick.model(),
@@ -2745,6 +2771,7 @@ impl App {
             &self.session.root,
             &library,
             crate::config::load().thumbnail.brief,
+            crate::video_brief::card(&self.session),
         );
         let review = crate::card::assets::review(&self.session.root);
         let drawing = self.card_pending.is_some() || self.card_raster.is_some();
@@ -2762,7 +2789,6 @@ impl App {
                     drawing => drawing,
                     approved_at => crate::card::assets::approval(&self.session.root)
                         .map(|approval| approval.approved_at),
-                    title => crate::video_brief::load(&self.session).title,
                     live => crate::publish::longform(&self.session)
                         .or_else(|| crate::publish::short(&self.session))
                         .is_some(),
@@ -4426,6 +4452,18 @@ fn report_chapter(closed: Option<crate::app::clock::Closed>) {
 }
 
 /// The leaf of a path, for naming a file in a status line.
+/// What Retake screen says about a grab, off the stream or taken on request.
+fn screen_grab_status(grab: Result<std::path::PathBuf, String>) -> String {
+    match grab {
+        Err(err) => format!("The screen grab failed: {err}"),
+        Ok(shot) => format!(
+            "Took the screen ({}). Generate thumbnails to use it; the artwork set draws over \
+             your photo only",
+            file_name(&shot)
+        ),
+    }
+}
+
 fn file_name(path: &std::path::Path) -> String {
     path.file_name()
         .unwrap_or_default()

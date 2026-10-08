@@ -40,16 +40,25 @@ pub fn write_screen(root: &Path, pixels: &CVImageBuffer) -> Result<PathBuf> {
     write_into(root, SCREENS_DIR, "screen", pixels)
 }
 
+/// The same again, for a screenshot taken on request rather than a frame off
+/// the running stream — see [`crate::capture::screenshot`].
+pub fn write_screen_image(root: &Path, image: &objc2_core_graphics::CGImage) -> Result<PathBuf> {
+    store(root, SCREENS_DIR, "screen", &encode_cg(image, MAX_EDGE)?)
+}
+
 fn write_into(root: &Path, subdir: &str, prefix: &str, pixels: &CVImageBuffer) -> Result<PathBuf> {
-    let jpeg = encode(pixels)?;
+    store(root, subdir, prefix, &encode(pixels)?)
+}
+
+fn store(root: &Path, subdir: &str, prefix: &str, jpeg: &[u8]) -> Result<PathBuf> {
     let dir = root.join(subdir);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let path = dir.join(format!(
         "{prefix}-{}.jpg",
-        crate::agent::prompt::hash_of_bytes(&jpeg)
+        crate::agent::prompt::hash_of_bytes(jpeg)
     ));
     if !path.exists() {
-        std::fs::write(&path, &jpeg).with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(&path, jpeg).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(path)
 }
