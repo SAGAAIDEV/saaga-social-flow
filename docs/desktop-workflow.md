@@ -4,8 +4,10 @@ The recorder's workflow steps are declared in `src/ui/workflow.rs`. From
 recording on:
 
 1. **Video recording** — record the session, then press **Render video**. It
-   cuts and renders, and nothing else: the title and description, the
-   thumbnail and the uploads are each their own step after it.
+   cuts and renders. When it finishes, the S3 upload starts by itself, and so
+   does the social copy if this version has none yet (copy already written is
+   never replaced) — so the Buffer rows are there to tick. The title and
+   description, the thumbnail and the YouTube upload are their own steps.
    1. (The photo is no longer taken here — see **Thumbnail**.)
    2. Cuts and renders the longform and the vertical chapters, with progress
       beneath the recording controls. The longform opens on the video's own
@@ -145,14 +147,15 @@ recording on:
    off until the card is empty. The long description is held to one sentence of
    200 characters the same way: not a CMS limit, but it prints under the heading.
    The existing CMS preview and publishing controls remain here.
-5. **Socials** — generate and edit platform copy; build the Buffer plan from the
-   public URLs the S3 upload left behind, review/approve it, and queue it.
-   The Buffer pane's S3 line checks every rendered video against that record —
-   on S3 as it is now, rendered again since the upload, or never uploaded — and
-   Build Plan is off until all of them are up. **Upload to S3** beside it runs
-   the upload by hand for the misses; an object already at its key is not sent
-   again, so a needless press is cheap. Analytics and Reflect are secondary tabs
-   here.
+5. **Socials** — generate and edit platform copy. The Buffer rows build
+   themselves from the copy and the public URLs the S3 upload left behind, each
+   video going to the channels its shape goes to; tick a row and it posts ten
+   seconds later (see `docs/schedule-loop.md`). The Buffer pane's S3 line checks
+   every rendered video against that record — on S3 as it is now, rendered again
+   since the upload, or never uploaded — and the rows wait until all of them are
+   up. **Upload to S3** beside it runs the upload by hand for the misses (the
+   render starts it by itself); an object already at its key is not sent again,
+   so a needless press is cheap. Analytics and Reflect are secondary tabs here.
 
 Edit and Substack are absent from the navigation. Existing recording data, saved
 edits, and backend modules are retained. The order guides the work without requiring
