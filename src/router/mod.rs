@@ -225,6 +225,31 @@ impl Router {
             .context("creating writers for the retaken chapter")
     }
 
+    /// Retake the current chapter in a new layout: discard the open take, let
+    /// the caller change the screen stream, then open the same-numbered
+    /// chapter against whatever it hands back.
+    ///
+    /// [`Router::reopen_with_screen`] with a discard where the finish was —
+    /// the stream moves while no writer is installed, for the reason given
+    /// there — and the number kept, as [`Router::retake_chapter`] keeps it.
+    ///
+    /// **On error the Router is left writerless**, and the chapter's number is
+    /// free again: its take is already in `.discarded/` unless the discard
+    /// itself is what failed.
+    pub fn retake_with_screen(
+        &mut self,
+        reconfigure: impl FnOnce() -> Result<Option<ScreenTrack>>,
+    ) -> Result<()> {
+        let chapter_num = self.current_chapter;
+        let (old_av, old_screen) = self.take_current()?;
+        self.discard_chapter(old_av, old_screen, chapter_num)?;
+
+        self.screen = reconfigure()?;
+
+        self.open_chapter(chapter_num)
+            .context("creating writers for the retaken chapter")
+    }
+
     /// Stop recording: finish the current chapter and clean up.
     /// This should be called when the user presses Quit or the app exits.
     pub fn stop(&mut self) -> Result<()> {

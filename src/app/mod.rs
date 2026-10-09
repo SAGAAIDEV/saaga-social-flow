@@ -237,7 +237,8 @@ pub struct App {
     /// The output size is locked into an `AVAssetWriterInput` when the chapter's
     /// writer is created, so a layout cannot change inside one. Rather than cut a
     /// chapter nobody asked for, the choice is held here and applied by the next
-    /// New Chapter — a layout is something you set for a take, not during it.
+    /// New Chapter or Retake — a layout is something you set for a take, not
+    /// during it.
     pending_pair: Option<Pair>,
     /// The chapter a layout picked by hand is for, so the plan does not pick
     /// over it — see [`App::planned_pair`]. Idle, the next chapter to record;
@@ -620,10 +621,28 @@ impl App {
                     );
                     return;
                 }
-                let Some(router) = self.router.as_mut() else {
+                if self.router.is_none() {
                     eprintln!("stream-recorder: not recording yet — nothing to retake");
                     return;
-                };
+                }
+                // A layout picked mid-take waits for a new writer, and a retake
+                // builds one: the chapter is recorded again in what the Layout
+                // popup already shows, rather than in what it was before.
+                if let Some(pair) = self.pending_pair.take() {
+                    self.pair = pair;
+                    // The pick was spent on this chapter, so the next one
+                    // takes its planned layout again.
+                    self.hand_layout = None;
+                    self.retake_in_layout();
+                    self.clock.discard();
+                    if self.router.is_none() {
+                        // The retake failed and nothing is recording.
+                        self.clock.close();
+                    }
+                    self.sync_controls();
+                    return;
+                }
+                let router = self.router.as_mut().expect("checked above");
                 match router.retake_chapter() {
                     Ok(()) => {
                         println!(
@@ -718,7 +737,8 @@ impl App {
     /// Idle, it applies at once, and the take that follows records in it. Mid-take
     /// it is only remembered: the chapter's writer has already locked its output
     /// size, so applying it here would have to cut a chapter to do it, and a
-    /// chapter boundary is not something a dropdown should invent.
+    /// chapter boundary is not something a dropdown should invent. New Chapter
+    /// applies it, and so does Retake, to the chapter it records again.
     fn select_pair(&mut self, pair: Pair) {
         if self.router.is_none() {
             self.hand_layout = Some(self.next_chapter);
