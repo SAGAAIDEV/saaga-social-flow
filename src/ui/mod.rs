@@ -1459,9 +1459,10 @@ impl ControlTarget {
         }
     }
 
-    /// `pending` names a layout picked mid-take that the next chapter will start
-    /// in. It rides here rather than in its own field because this method owns
-    /// the status line, and two writers would just overwrite each other.
+    /// `pending` names a layout picked mid-take that the next chapter, or a
+    /// retake of this one, will start in. It rides here rather than in its own
+    /// field because this method owns the status line, and two writers would
+    /// just overwrite each other. It retitles Retake as well as New Chapter.
     ///
     /// `hold` says why an open chapter is not rolling, if it is not — see
     /// [`Hold`]. It sets the Pause button's title and whether it is offered at
@@ -1521,6 +1522,11 @@ impl ControlTarget {
             Some(Hold::Paused) => "Resume  ⌃⌥P",
             _ => "Pause  ⌃⌥P",
         }));
+        // A layout picked mid-take is applied by either button, so both say so.
+        retake.setTitle(&NSString::from_str(match pending {
+            Some(_) => "Retake ▸ new layout  ⌃⌥T",
+            None => "Retake  ⌃⌥T",
+        }));
         match chapter {
             None if next.is_retake() => {
                 // The press says what it is about to do to a chapter that
@@ -1561,7 +1567,7 @@ impl ControlTarget {
                     version.map(|n| format!("v{n} ")).unwrap_or_default()
                 );
                 let waiting = pending
-                    .map(|layout| format!(" — {layout} starts at the next chapter"))
+                    .map(|layout| format!(" — {layout} starts at the next chapter or retake"))
                     .unwrap_or_default();
                 let line = match hold {
                     Some(Hold::Paused) => format!(

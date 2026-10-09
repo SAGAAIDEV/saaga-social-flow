@@ -46,6 +46,15 @@ use crate::overlay::{ChildLink, DrawnRegion, RegionOverlay};
 use crate::region::placement::{self, Placement, MIN_ZOOM};
 use crate::region::PointRect;
 
+/// What a layout change mid-take does with the chapter that is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reopen {
+    /// Keep it, and open the next chapter in the new layout.
+    NextChapter,
+    /// Throw it away, and record the same chapter again in the new layout.
+    Retake,
+}
+
 impl App {
     /// The layout the 2x2 currently names.
     pub(super) fn layout(&self) -> &'static Layout {
@@ -410,6 +419,18 @@ impl App {
     /// "stop", and a talking-head chapter should not have a live `SCStream`
     /// burning an encoder on frames nothing will read.
     pub(super) fn apply_layout_change(&mut self) {
+        self.change_layout(Reopen::NextChapter);
+    }
+
+    /// Retake the open chapter in the layout just made current — one picked
+    /// mid-take, which would otherwise wait for New Chapter. The same change
+    /// as [`App::apply_layout_change`], with the take thrown away instead of
+    /// kept. The caller has checked something is recording.
+    pub(super) fn retake_in_layout(&mut self) {
+        self.change_layout(Reopen::Retake);
+    }
+
+    fn change_layout(&mut self, reopen: Reopen) {
         let wants = self.screen_wanted().is_some();
         let capture = self.current_capture();
 
@@ -429,7 +450,8 @@ impl App {
         }
 
         // Recording: finish this chapter, change the stream while no writer is
-        // installed, open the next one. Safe to do without waiting for a human
+        // installed, open the next one — or, for a retake, discard this chapter
+        // and open its number again. Safe to do without waiting for a human
         // — unlike a device switch — because nothing here touches the capture
         // session or the audio device, so no audio format can move underneath
         // the replacement writer. See the module docs for why that distinction
@@ -441,7 +463,7 @@ impl App {
             let screen_uid = self.screen_uid.clone();
             let show_app = self.show_app;
             let show_cursor = !self.hide_mouse;
-            router.reopen_with_screen(|| {
+            let reconfigure = || {
                 match (wants, screen.is_some()) {
                     (true, true) => screen.as_mut().expect("checked").set_capture(capture)?,
                     (true, false) => {
@@ -461,7 +483,11 @@ impl App {
                     (false, false) => {}
                 }
                 screen_track(screen.as_ref())
-            })
+            };
+            match reopen {
+                Reopen::NextChapter => router.reopen_with_screen(reconfigure),
+                Reopen::Retake => router.retake_with_screen(reconfigure),
+            }
         };
 
         match reopened {
@@ -474,12 +500,17 @@ impl App {
                 );
             }
             Err(e) => {
-                // The finished chapter is safely on disk; recovery is the same
+                // The finished (or discarded) chapter is safely on disk; recovery is the same
                 // as every other screen failure — drop the Router and let the
                 // next New Chapter press build a fresh one.
                 eprintln!("stream-recorder: layout change failed: {e:#}");
                 if let Some(current) = self.router.as_ref().map(|r| r.current_chapter_number()) {
-                    self.next_chapter = self.chapter_after(current);
+                    // A failed retake has already set its take aside, so its
+                    // number is the one still to record.
+                    self.next_chapter = match reopen {
+                        Reopen::NextChapter => self.chapter_after(current),
+                        Reopen::Retake => current,
+                    };
                 }
                 self.router = None;
             }
