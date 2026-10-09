@@ -11,13 +11,14 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::{sel, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAutoresizingMaskOptions, NSButton, NSButtonType, NSScrollView, NSTextField, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use super::schema::{PlanItem, SchedulePlan};
+use crate::ui::ControlTarget;
 
 const PAD: f64 = 10.0;
 const ROW_H: f64 = 24.0;
@@ -40,11 +41,18 @@ pub struct ScheduleForm {
     document: Retained<NSView>,
     placeholder: Retained<NSTextField>,
     rows: RefCell<Vec<Row>>,
+    /// Told whenever a switch flips — a tick is what sends a post, after the
+    /// wait in `schedule::countdown`.
+    target: Retained<ControlTarget>,
     mtm: MainThreadMarker,
 }
 
 impl ScheduleForm {
-    pub fn attach(parent: &NSView, mtm: MainThreadMarker) -> ScheduleForm {
+    pub fn attach(
+        parent: &NSView,
+        target: &Retained<ControlTarget>,
+        mtm: MainThreadMarker,
+    ) -> ScheduleForm {
         let scroll = NSScrollView::initWithFrame(
             NSScrollView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, 100.0)),
@@ -57,7 +65,7 @@ impl ScheduleForm {
         scroll.setDocumentView(Some(&document));
         parent.addSubview(&scroll);
         let placeholder = NSTextField::labelWithString(
-            &NSString::from_str("Build a plan, then approve the posts to queue."),
+            &NSString::from_str("Build a plan, then tick the posts to send."),
             mtm,
         );
         document.addSubview(&placeholder);
@@ -66,6 +74,7 @@ impl ScheduleForm {
             document,
             placeholder,
             rows: RefCell::new(Vec::new()),
+            target: target.clone(),
             mtm,
         }
     }
@@ -83,7 +92,7 @@ impl ScheduleForm {
     /// is unchanged.
     ///
     /// The summary refreshes on unrelated events (a distribute finishing, a version
-    /// switch), and a tick lives only in the checkbox until Queue writes it. Rebuilding
+    /// switch), and a tick on screen is never older than the file. Rebuilding
     /// blindly from disk would silently clear review work mid-session, so on-screen
     /// state wins for a row that is still the same video, platform and copy.
     pub fn show(&self, plan: &SchedulePlan) {
@@ -160,8 +169,8 @@ impl ScheduleForm {
         let approve = unsafe {
             NSButton::buttonWithTitle_target_action(
                 &NSString::from_str(&row_title(item)),
-                None,
-                None,
+                Some(&self.target),
+                Some(sel!(onScheduleRowToggled:)),
                 self.mtm,
             )
         };

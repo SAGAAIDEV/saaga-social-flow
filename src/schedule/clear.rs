@@ -356,7 +356,7 @@ mod tests {
 
     /// The state a hand-cleared queue leaves behind: the ledger still claims 16
     /// live posts and Buffer has none of them. Reconciling has to free those rows
-    /// without a delete call, or Build Plan skips every chapter forever.
+    /// without a delete call, or the plan skips every chapter forever.
     #[test]
     fn a_post_deleted_by_hand_is_reconciled_rather_than_deleted_again() {
         let queued = row("a", "post-a", false);

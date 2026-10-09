@@ -22,21 +22,20 @@ pub const SYSTEM_PROMPT: &str = r#"You are an expert social media copywriter and
 You turn recorded video projects and chapter transcripts into high-performing, platform-native social media posts.
 
 You must generate tailored posts. Use only the platforms that match the video type:
-- horizontal / longform: linkedin, facebook
-- vertical / chapter: twitter, bluesky, instagram, facebook, youtube_shorts, tiktok
+- horizontal / longform: linkedin, twitter
+- vertical / chapter: youtube_shorts, linkedin, twitter, instagram, tiktok, bluesky
 
 Platform rules:
 1. "twitter": Max 280 characters. High-impact hook, 1-2 hashtags.
 2. "bluesky": Max 300 characters. Direct, authentic thought.
 3. "instagram": Engaging hook, line breaks, CTA, 3-5 hashtags.
-4. "facebook": Conversational narrative, end with a question.
-5. "youtube_shorts": Catchy title (<= 90 chars) and brief description including #Shorts.
-6. The full video already has its own YouTube upload; do not generate another YouTube longform post.
-7. "tiktok": Hook in the first line, caption <= 150 chars, 3-5 hashtags.
-8. "linkedin": Professional insight, opening line, takeaway, 3-5 tags.
+4. "youtube_shorts": Catchy title (<= 90 chars) and brief description including #Shorts.
+5. The full video already has its own YouTube upload; do not generate another YouTube longform post.
+6. "tiktok": Hook in the first line, caption <= 150 chars, 3-5 hashtags.
+7. "linkedin": Professional insight, opening line, takeaway, 3-5 tags.
 
 Use provided published video/article URLs exactly when relevant. Never invent a URL or promote a private video or draft article.
-Write one entry per video, and only the platforms listed above for its type."#;
+Write one entry per video, and only the platforms listed for it."#;
 
 /// What the model returns. Separate from [`PostsManifest`] so the model is never
 /// asked to fill in bookkeeping it knows nothing about — version, prompt hash,
@@ -191,6 +190,12 @@ fn build_user_prompt(
     out.push_str("Generate posts for the following videos:\n\n");
     for v in videos {
         out.push_str(&format!("--- Video ID: {} ({}) ---\n", v.id, v.video_type));
+        // Per video, from the routing table the planner enforces, so a prompt
+        // overlay written before the routing changed still asks for the right
+        // platforms.
+        if let Some(shape) = crate::schedule::channels::Shape::parse(&v.video_type) {
+            out.push_str(&format!("Platforms: {}\n", shape.platforms().join(", ")));
+        }
         out.push_str(&format!("Topic/Title: {}\n", v.title));
         if !v.points.is_empty() {
             out.push_str("Key points:\n");
@@ -379,6 +384,54 @@ mod tests {
         assert!(!SYSTEM_PROMPT.contains("\"items\""));
         // The guidance it exists for is still there.
         assert!(SYSTEM_PROMPT.contains("Max 280 characters"));
+    }
+
+    /// The prompt's two lists are the planner's routing table, written out. A
+    /// list that drifted would have the model write copy the planner then
+    /// refuses to post, or leave a platform with nothing to post.
+    #[test]
+    fn the_prompt_lists_the_platforms_the_planner_routes() {
+        use crate::schedule::channels::Shape;
+        for (line, shape) in [
+            ("- horizontal / longform: ", Shape::Horizontal),
+            ("- vertical / chapter: ", Shape::Vertical),
+        ] {
+            let listed = SYSTEM_PROMPT
+                .lines()
+                .find_map(|l| l.strip_prefix(line))
+                .unwrap_or_else(|| panic!("no {line:?} line"));
+            assert_eq!(listed, shape.platforms().join(", "), "{shape:?}");
+        }
+        assert!(!SYSTEM_PROMPT.contains("facebook"), "nothing routes there");
+    }
+
+    /// Each video is told its own platforms, so an overlay that still carries
+    /// the old lists cannot route a video by itself.
+    #[test]
+    fn each_video_in_the_user_prompt_names_its_platforms() {
+        let videos = vec![
+            VideoContext {
+                id: "longform".into(),
+                video_type: "horizontal".into(),
+                title: "Rust agents".into(),
+                points: Vec::new(),
+                transcript_text: String::new(),
+            },
+            VideoContext {
+                id: "chapter-01".into(),
+                video_type: "vertical".into(),
+                title: "One agent".into(),
+                points: Vec::new(),
+                transcript_text: String::new(),
+            },
+        ];
+        let prompt = build_user_prompt(&videos, "Demo", None, &[], None);
+        assert!(prompt
+            .contains("--- Video ID: longform (horizontal) ---\nPlatforms: linkedin, twitter\n"));
+        assert!(prompt.contains(
+            "--- Video ID: chapter-01 (vertical) ---\n\
+             Platforms: youtube_shorts, linkedin, twitter, instagram, tiktok, bluesky\n"
+        ));
     }
 
     /// A truncated response used to yield captions with empty bodies that looked

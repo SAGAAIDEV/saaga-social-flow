@@ -179,6 +179,13 @@ pub struct App {
     /// Queue posts publicly, so a second press (or a double click) must not start
     /// a second thread — two concurrent queues cannot see each other's ledger rows.
     schedule_busy: bool,
+    /// The wait between ticking a post and it being sent — see
+    /// `schedule::countdown`.
+    schedule_countdown: crate::schedule::countdown::Countdown,
+    /// The saved Buffer plan may be behind its inputs — the posts, the S3
+    /// uploads, the ledger or the project itself changed. The plan rebuilds
+    /// on the next idle tick; there is no button for it.
+    schedule_replan: bool,
     /// Same guard for the analytics pull: it appends to `analytics.jsonl`, and two
     /// concurrent pulls could not see each other's rows.
     analytics_busy: bool,
@@ -587,9 +594,17 @@ impl App {
             Action::EditBlogPrompt => self.edit_blog_prompt(),
             Action::RefreshBlogLibrary => self.refresh_blog_library(),
             Action::Distribute => self.run_distribute(),
-            Action::SchedulePlan => self.run_schedule_plan(),
             Action::ScheduleApproveAll => self.approve_all_schedule(),
-            Action::ScheduleQueue => self.run_schedule_queue(),
+            Action::ScheduleTicked => self.schedule_ticked(),
+            Action::ScheduleQueue => {
+                // Post Now is the countdown ending early — unless a job is
+                // running, which refuses the press and leaves the countdown to
+                // send once it finishes.
+                if !self.schedule_busy {
+                    self.schedule_countdown.cancel();
+                }
+                self.run_schedule_queue();
+            }
             Action::ScheduleClear => self.run_schedule_clear(),
             Action::YoutubeUpload => self.run_youtube_upload(),
             Action::YoutubeThumbnail => self.run_youtube_thumbnail(),
@@ -1210,6 +1225,8 @@ impl App {
     fn refresh_version_views(&mut self) {
         // Typed for the version being left; this one has its own copy.
         self.youtube_draft = None;
+        // Its plan may predate a change to the routing or the posts.
+        self.schedule_replan = true;
         self.reload_deck();
         self.preselect_planned_layout();
         if let Some(live) = self.live.as_ref() {
@@ -1708,6 +1725,7 @@ impl App {
         match crate::posts::save_manifest(&posts_dir, &manifest) {
             Ok(path) => {
                 self.posts_manifest = Some(manifest);
+                self.schedule_replan = true;
                 live.control_target
                     .set_posts_status(&format!("Saved posts → {}", path.display()));
             }
@@ -2154,19 +2172,19 @@ impl App {
         self.sync_controls();
     }
 
-    /// Step 1: read posts + links + channels and write schedule.json. No posting.
+    /// Reads posts + links + channels and writes schedule.json. No posting.
+    ///
+    /// Started by [`App::tick_schedule`] whenever an input changed, never by a
+    /// press. A project that cannot be planned yet (no posts, nothing on S3,
+    /// no Buffer key) is left alone: the tab's status already names what it
+    /// is waiting for, and the event that supplies it asks again.
     fn run_schedule_plan(&mut self) {
-        if self.schedule_busy {
-            self.set_schedule_status("A schedule job is already running…");
-            return;
-        }
         let stages = self.stages();
-        if let Some(reason) = stages.plan.missing() {
-            self.set_schedule_status(reason);
+        if stages.plan.missing().is_some() {
             return;
         }
         self.schedule_busy = true;
-        self.set_schedule_status("Building the Buffer plan…");
+        self.set_schedule_status("Updating the Buffer posts…");
         crate::schedule::spawn_plan(self.session.clone(), self.schedule_tx.clone());
         self.sync_controls();
     }
@@ -3198,16 +3216,69 @@ impl App {
             return;
         };
         if live.schedule_form.approve_all() == 0 {
-            self.set_schedule_status("Nothing to approve — press Build Plan first.");
+            self.set_schedule_status("Nothing to approve yet.");
             return;
         }
-        match self.save_schedule_approvals() {
-            Ok(approved) => self.set_schedule_status(&format!(
-                "Approved {approved} post(s) — press Queue to Buffer to send."
-            )),
-            Err(err) => self.set_schedule_status(&format!("Could not save approvals: {err:#}")),
+        self.schedule_ticked();
+    }
+
+    /// A switch flipped (or Approve All flipped them all): the ticks are saved
+    /// and the countdown starts again, or stops when nothing is left ticked.
+    /// Nothing is sent from here — see `schedule::countdown` for why.
+    fn schedule_ticked(&mut self) {
+        let approved = match self.save_schedule_approvals() {
+            Ok(count) => count,
+            Err(err) => {
+                self.schedule_countdown.cancel();
+                self.set_schedule_status(&format!("Could not save approvals: {err:#}"));
+                return;
+            }
+        };
+        if approved == 0 {
+            let msg = if self.schedule_countdown.is_armed() {
+                "Stopped — nothing is ticked, so nothing will be posted."
+            } else {
+                "Nothing ticked."
+            };
+            self.schedule_countdown.cancel();
+            self.set_schedule_status(msg);
+        } else {
+            self.schedule_countdown
+                .arm(std::time::Instant::now(), &self.session.root);
+            self.set_schedule_status(&format!(
+                "Posting {approved} ticked post(s) in {} s — untick to stop, or press Post Now.",
+                crate::schedule::countdown::GRACE.as_secs()
+            ));
         }
         self.update_schedule_summary();
+    }
+
+    /// Sends the ticked posts once the countdown has run out. Waits out a
+    /// schedule job already running rather than skipping the send: the ticks
+    /// are still saved, and the job's own end does not send them.
+    fn tick_schedule(&mut self) {
+        if self.schedule_busy {
+            return;
+        }
+        // Before the countdown: a send reads the saved plan, so it should read
+        // one built from the copy and uploads as they are now. A tick on copy
+        // that has since changed no longer matches, and is not sent.
+        if self.schedule_replan {
+            self.schedule_replan = false;
+            self.run_schedule_plan();
+            if self.schedule_busy {
+                return;
+            }
+        }
+        if !self.schedule_countdown.is_armed() {
+            return;
+        }
+        if self
+            .schedule_countdown
+            .take_due(std::time::Instant::now(), &self.session.root)
+        {
+            self.run_schedule_queue();
+        }
     }
 
     fn run_schedule_queue(&mut self) {
@@ -3230,11 +3301,13 @@ impl App {
             }
         };
         if approved == 0 {
-            self.set_schedule_status("Nothing approved — tick the posts to send first.");
+            self.set_schedule_status("Nothing ticked — tick the posts to send first.");
             return;
         }
         self.schedule_busy = true;
-        self.set_schedule_status(&format!("Queueing {approved} approved post(s) to Buffer…"));
+        self.set_schedule_status(&format!(
+            "Posting {approved} ticked post(s) through Buffer…"
+        ));
         crate::schedule::spawn_queue(self.session.clone(), self.schedule_tx.clone());
         self.sync_controls();
     }
@@ -3556,8 +3629,7 @@ impl App {
             return Ok(0);
         };
         let dir = self.session.schedule_dir();
-        let mut plan =
-            crate::schedule::load_plan(&dir).context("no saved plan — press Build Plan first")?;
+        let mut plan = crate::schedule::load_plan(&dir).context("no posts to send yet")?;
         live.schedule_form.apply(&mut plan);
         let approved = plan.sendable().count();
         crate::schedule::save_plan(&dir, &plan)?;
@@ -3961,11 +4033,11 @@ impl App {
                     saved.sendable().count()
                 )
             }
-            // With no plan yet, what Build Plan is waiting for is the whole
+            // With no plan yet, what the plan is waiting for is the whole
             // story — and the gate already knows which of the three it is.
             None => match self.stages().plan.missing() {
                 Some(reason) => reason.to_string(),
-                None => "Every video is on S3 — press Build Plan".to_string(),
+                None => "Every video is on S3 — the posts appear here in a moment".to_string(),
             },
         };
         live.control_target.set_schedule_status(&status);
@@ -4031,7 +4103,9 @@ impl App {
                     hosting.hosted(),
                     hosting.rows.len()
                 ));
-                info.push_str("Press Build Plan to see what would be queued.\n");
+                info.push_str(
+                    "The posts appear here once they are generated and the videos are on S3.\n",
+                );
             }
         }
         live.control_target.set_schedule_info(&info);
@@ -4209,6 +4283,7 @@ impl App {
                     ));
                     live.posts_form.show(&manifest);
                     self.posts_manifest = Some(manifest);
+                    self.schedule_replan = true;
                     self.update_schedule_summary();
                     // The gates are read off disk, and this job is what puts
                     // posts.json there — the two stages waiting on it (YouTube,
@@ -4244,8 +4319,9 @@ impl App {
                         path.display()
                     );
                     // The check gets the last word on the S3 line — "All 9
-                    // video(s) on S3." — the plan's gate reopens under it, and
-                    // the recording page lists where everything went.
+                    // video(s) on S3." — the plan rebuilds under it, and the
+                    // recording page lists where everything went.
+                    self.schedule_replan = true;
                     self.update_schedule_summary();
                     self.update_video_view();
                     self.sync_controls();
@@ -4266,22 +4342,34 @@ impl App {
         for event in events {
             match event {
                 crate::schedule::ScheduleEvent::Status(msg) => self.set_schedule_status(&msg),
-                crate::schedule::ScheduleEvent::Planned(path, plan) => {
+                crate::schedule::ScheduleEvent::Planned(path, plan, missing) => {
                     self.schedule_busy = false;
                     // Re-read from disk first, so the preview is the file Queue
                     // will use — then overwrite the status it left behind.
                     self.update_schedule_summary();
                     let ready = plan.queueable().count();
-                    self.set_schedule_status(&format!(
-                        "Plan saved → {} ({ready} ready / {} skipped)",
+                    let mut msg = format!(
+                        "Posts updated → {} ({ready} ready / {} skipped)",
                         path.display(),
                         plan.items.len() - ready
-                    ));
+                    );
+                    // A platform with no copy has no row to show it, so the gap
+                    // is named here or nowhere.
+                    if !missing.is_empty() {
+                        msg = format!(
+                            "{msg} — no copy yet for {}: press Generate All Posts on the Post tab",
+                            missing.join("; ")
+                        );
+                    }
+                    self.set_schedule_status(&msg);
                     // The plan it just wrote is what unlocks Approve and Queue.
                     self.sync_controls();
                 }
                 crate::schedule::ScheduleEvent::Queued(outcome) => {
                     self.schedule_busy = false;
+                    // A failed post comes back sendable (and unticked) only
+                    // from a fresh plan.
+                    self.schedule_replan = true;
                     self.update_schedule_summary();
                     let mut msg = format!("{} → {}", outcome.summary(), outcome.ledger.display());
                     // A live post with no ledger row is the one thing the next plan
@@ -4311,7 +4399,10 @@ impl App {
                     if !outcome.unrecorded.is_empty() {
                         msg = format!("{msg} — UNRECORDED: {}", outcome.unrecorded.join(", "));
                     }
-                    self.set_schedule_status(&format!("{msg}. Press Build Plan to re-plan."));
+                    // Every cleared post is sendable again, which only a fresh
+                    // plan can see.
+                    self.schedule_replan = true;
+                    self.set_schedule_status(&format!("{msg}."));
                     self.sync_controls();
                 }
                 crate::schedule::ScheduleEvent::Failed(msg) => {
@@ -4441,6 +4532,7 @@ impl ApplicationHandler for App {
         }
         self.tick_timer();
         self.tick_plan();
+        self.tick_schedule();
         self.drain_plan();
         self.drain_notes();
         self.drain_render();

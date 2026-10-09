@@ -12,7 +12,7 @@ use crate::posts::schema::{PlatformPost, PostsManifest};
 use super::buffer::Channel;
 use super::channels::{
     channel_block, channel_label, channels_for, fans_out, handle_note, passed_over_note,
-    preferred_handle, resolve_channel, scheduling_type_for,
+    preferred_handle, resolve_channel, route_block, scheduling_type_for, Shape,
 };
 use super::copy::{copy_hash, length_note, render_text};
 use super::ledger;
@@ -21,8 +21,9 @@ use super::schema::{PlanItem, SchedulePlan, ScheduleRow};
 
 /// Prompt that produced the copy carried by every planned item.
 const PROMPT_ID: &str = "posts.social";
-/// Buffer share mode — everything goes to the channel queue, never shareNow.
-const MODE: &str = "addToQueue";
+/// Buffer share mode. An approved post goes out the moment it is sent, not at
+/// the channel's next queue slot — approving it is the decision to post.
+const MODE: &str = "shareNow";
 
 #[tracing::instrument(
     skip(posts, links, channels, queued),
@@ -47,6 +48,12 @@ pub fn build_plan(
             .unwrap_or_default()
             .to_string();
         let orientation = orientation_of(links, &video.video_id);
+        // The shape the video was uploaded with, or failing that the one the
+        // copy was written for. Neither recorded (an older project) means no
+        // routing at all, rather than a guess that could drop a post.
+        let shape = orientation
+            .and_then(Shape::parse)
+            .or_else(|| Shape::parse(&video.video_type));
         for post in &video.posts {
             // The one platform where the label can disagree with the file. Both
             // YouTube flavours ride the same channel and YouTube decides which it
@@ -89,6 +96,9 @@ pub fn build_plan(
             // connected channel for one that fans out — see `channels_for`. The
             // channel is part of each row's identity, so the page and the profile
             // are approved, queued and deduped apart.
+            // Asked before the channel: where a shape goes is the decision, and
+            // a platform it does not go to is not waiting on a connection.
+            let unrouted = shape.and_then(|shape| route_block(&post.platform, shape));
             for resolved in channels_for(&post.platform, channels) {
                 let channel_id = resolved.as_ref().map(|c| c.id.as_str()).unwrap_or("");
                 let already =
@@ -98,6 +108,7 @@ pub fn build_plan(
                 // the label as posts.json wrote it, and a Short mislabelled "youtube"
                 // must report the channel problem rather than claim it was uploaded.
                 let skip = match &resolved {
+                    _ if unrouted.is_some() => unrouted.clone(),
                     Err(why) => Some(why.clone()),
                     // Not Buffer's any more. A direct upload sets the title,
                     // description, category, privacy *and* thumbnail in one call,
@@ -191,6 +202,32 @@ pub fn build_plan(
         version,
         items,
     }
+}
+
+/// The platforms each video's shape goes to that it has no copy for, one entry
+/// per video: `"chapter-01: linkedin, twitter"`.
+///
+/// Copy written before the routing changed has gaps the plan cannot show as
+/// rows — there is nothing to post — so the plan's status names them. YouTube
+/// is left out: the longform and a short project's Short are the app's own
+/// uploads, which need no post.
+pub fn missing_copy(posts: &PostsManifest, links: &DistributeLinks) -> Vec<String> {
+    posts
+        .items
+        .iter()
+        .filter_map(|video| {
+            let shape = orientation_of(links, &video.video_id)
+                .and_then(Shape::parse)
+                .or_else(|| Shape::parse(&video.video_type))?;
+            let missing: Vec<&str> = shape
+                .platforms()
+                .into_iter()
+                .filter(|platform| *platform != "youtube_shorts")
+                .filter(|platform| !video.posts.iter().any(|post| post.platform == *platform))
+                .collect();
+            (!missing.is_empty()).then(|| format!("{}: {}", video.video_id, missing.join(", ")))
+        })
+        .collect()
 }
 
 /// How this video was distributed — "landscape" or "portrait" — from links.json.
@@ -563,8 +600,10 @@ mod tests {
         assert!(find(&plan, "youtube_shorts").skip.is_none());
     }
 
+    /// Facebook has no channel in Buffer either, but that is not why it is
+    /// skipped: no shape goes there, and the plan says that first.
     #[test]
-    fn facebook_skips_because_no_channel_is_connected() {
+    fn facebook_skips_because_no_shape_goes_there() {
         let plan = plan_for(
             &manifest("longform", &["facebook"]),
             &links(&["longform"]),
@@ -573,9 +612,140 @@ mod tests {
         let item = find(&plan, "facebook");
         assert_eq!(
             item.skip.as_deref(),
-            Some("no facebook channel connected to Buffer")
+            Some("facebook is not posted for horizontal videos")
         );
         assert_eq!(item.channel_id, "");
+    }
+
+    /// The routing asked for on 2026-10-09. A horizontal video goes to
+    /// LinkedIn (page and profile) and X, whatever else the model wrote copy
+    /// for.
+    #[test]
+    fn a_horizontal_video_goes_to_linkedin_and_x_only() {
+        let plan = plan_for(
+            &manifest(
+                "longform",
+                &["linkedin", "twitter", "instagram", "tiktok", "bluesky"],
+            ),
+            &links_with_thumbnail(),
+            &[],
+        );
+        let sendable: Vec<(&str, &str)> = plan
+            .queueable()
+            .map(|i| (i.platform.as_str(), i.channel_name.as_str()))
+            .collect();
+        assert_eq!(
+            sendable,
+            [
+                ("linkedin", "saagasolve"),
+                ("linkedin", "amovfx"),
+                ("twitter", "AndrewOsee59559")
+            ]
+        );
+        for platform in ["instagram", "tiktok", "bluesky"] {
+            assert_eq!(
+                find(&plan, platform).skip,
+                Some(format!("{platform} is not posted for horizontal videos"))
+            );
+        }
+    }
+
+    /// And a vertical one now reaches LinkedIn too, on both channels.
+    #[test]
+    fn a_vertical_video_goes_to_both_linkedin_channels_and_the_vertical_platforms() {
+        let plan = plan_for(
+            &manifest(
+                "chapter-01",
+                &[
+                    "youtube_shorts",
+                    "linkedin",
+                    "twitter",
+                    "instagram",
+                    "tiktok",
+                    "bluesky",
+                    "facebook",
+                ],
+            ),
+            &links_with_thumbnail(),
+            &[],
+        );
+        let mut sendable: Vec<(&str, &str)> = plan
+            .queueable()
+            .map(|i| (i.platform.as_str(), i.channel_name.as_str()))
+            .collect();
+        sendable.sort_unstable();
+        assert_eq!(
+            sendable,
+            [
+                ("bluesky", "saaga-dev.bsky.social"),
+                ("instagram", "saagasocials"),
+                ("linkedin", "amovfx"),
+                ("linkedin", "saagasolve"),
+                ("tiktok", "andrewmelnychukos"),
+                ("twitter", "AndrewOsee59559"),
+                ("youtube_shorts", "SAAGA Solve"),
+            ]
+        );
+        assert_eq!(
+            find(&plan, "facebook").skip.as_deref(),
+            Some("facebook is not posted for vertical videos")
+        );
+    }
+
+    /// The shape the video was uploaded with beats the one posts.json's model
+    /// wrote down — the file on S3 is the thing that gets posted.
+    #[test]
+    fn the_uploaded_shape_wins_over_posts_json() {
+        let mut links = links(&["chapter-01"]);
+        links.items[0].orientation = Some("landscape".into());
+        let plan = plan_for(&manifest("chapter-01", &["instagram"]), &links, &[]);
+        assert_eq!(
+            find(&plan, "instagram").skip.as_deref(),
+            Some("instagram is not posted for horizontal videos")
+        );
+    }
+
+    /// A project that recorded no shape anywhere is not routed by a guess.
+    #[test]
+    fn a_video_with_no_shape_on_record_is_not_routed() {
+        let mut posts = manifest("longform", &["instagram"]);
+        posts.items[0].video_type = String::new();
+        let plan = plan_for(&posts, &links(&["longform"]), &[]);
+        assert!(find(&plan, "instagram").skip.is_none());
+    }
+
+    /// Copy written before the routing changed has no LinkedIn post for a
+    /// chapter. There is no row to show the gap, so the plan's status names it.
+    #[test]
+    fn missing_copy_names_each_video_and_the_platforms_it_lacks() {
+        let posts = PostsManifest {
+            version: Some(3),
+            prompt_version: Some(2),
+            prompt_hash: "feedfacefeedface".into(),
+            items: vec![
+                vp("longform", &["linkedin", "twitter"]),
+                vp(
+                    "chapter-01",
+                    &[
+                        "youtube_shorts",
+                        "twitter",
+                        "instagram",
+                        "tiktok",
+                        "bluesky",
+                    ],
+                ),
+                // No YouTube Short copy is not a gap: a short project's Short
+                // is the app's own upload.
+                vp(
+                    "chapter-02",
+                    &["linkedin", "twitter", "instagram", "tiktok"],
+                ),
+            ],
+        };
+        assert_eq!(
+            missing_copy(&posts, &links(&["longform", "chapter-01", "chapter-02"])),
+            ["chapter-01: linkedin", "chapter-02: bluesky"]
+        );
     }
 
     /// The account has a LinkedIn page and a LinkedIn profile, and the longform
@@ -722,8 +892,8 @@ mod tests {
 
     #[test]
     fn matching_ledger_row_skips_as_already_queued() {
-        let posts = manifest("longform", &["bluesky"]);
-        let links = links(&["longform"]);
+        let posts = manifest("chapter-01", &["bluesky"]);
+        let links = links(&["chapter-01"]);
         let planned = plan_for(&posts, &links, &[]);
         let item = find(&planned, "bluesky");
         assert!(item.skip.is_none());
@@ -736,7 +906,7 @@ mod tests {
         );
 
         // A different platform with the same hash is untouched.
-        let other = plan_for(&manifest("longform", &["instagram"]), &links, &[row]);
+        let other = plan_for(&manifest("chapter-01", &["instagram"]), &links, &[row]);
         assert!(find(&other, "instagram").skip.is_none());
     }
 
@@ -744,18 +914,18 @@ mod tests {
     /// out loud that the same video is already live, or Queue duplicates it.
     #[test]
     fn regenerated_copy_is_queueable_but_warns_about_the_live_post() {
-        let links = links(&["longform"]);
-        let first = plan_for(&manifest("longform", &["bluesky"]), &links, &[]);
+        let links = links(&["chapter-01"]);
+        let first = plan_for(&manifest("chapter-01", &["bluesky"]), &links, &[]);
         let row = row_from(find(&first, "bluesky"), "post-7", "2026-08-14T23:12:04Z");
 
-        let mut rewritten = manifest("longform", &["bluesky"]);
+        let mut rewritten = manifest("chapter-01", &["bluesky"]);
         rewritten.items[0].posts[0].content = "a completely different hook".into();
         let again = plan_for(&rewritten, &links, &[row]);
         let item = find(&again, "bluesky");
         assert!(item.skip.is_none(), "new copy stays queueable");
         assert_eq!(
             item.reason,
-            "hub video — warning: already queued as post-7 on 2026-08-14T23:12:04Z with different copy"
+            "vertical chapter — warning: already queued as post-7 on 2026-08-14T23:12:04Z with different copy"
         );
     }
 
@@ -839,6 +1009,9 @@ mod tests {
         );
         assert!(plan.items.iter().all(|item| !item.approved));
         assert!(plan.items.iter().all(|item| !item.needs_approval));
+        // Approving is the decision to post, so a sent post goes out at once
+        // rather than waiting for the channel's next Buffer slot.
+        assert!(plan.items.iter().all(|item| item.mode == "shareNow"));
         assert_eq!(plan.sendable().count(), 0);
         // Twitter, plus one row per LinkedIn channel.
         assert_eq!(plan.queueable().count(), 3);

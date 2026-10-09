@@ -360,6 +360,9 @@ pub fn run_record_session(
         clock: crate::app::clock::RecordClock::default(),
         due_checked: None,
         schedule_busy: false,
+        schedule_countdown: crate::schedule::countdown::Countdown::default(),
+        // The project opened at launch gets a fresh plan, like any other.
+        schedule_replan: true,
         live: None,
         router: None,
         connection: Some(connection),

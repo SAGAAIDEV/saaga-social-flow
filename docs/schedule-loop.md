@@ -2,7 +2,7 @@
 
 Queue posts through Buffer, pull performance, and rewrite prompts. Do not skip the ledger.
 
-Pipeline today: Draft → Render → Post → **Distribute** (S3) → **Schedule** (Buffer: Build Plan, then Queue).
+Pipeline today: Draft → Render → Post → **Distribute** (S3) → **Schedule** (Buffer: the plan builds itself; a tick sends).
 
 > Every GraphQL shape below was introspected against the live api. Where an earlier
 > draft of this doc guessed (`assets: [{source, type: VIDEO}]`, `MutationSuccess`,
@@ -13,7 +13,7 @@ Distribute writes `{root}/distribute/vN/links.json` (public URLs). Posts live in
 
 ## Rule
 
-**Queue first. Agent later.** A Rig extractor proposes a typed plan. You tap Queue. Buffer `addToQueue` picks slots.
+**Approve first. Agent later.** A Rig extractor proposes a typed plan. You tick the posts to send, and they go out through Buffer straight away (`shareNow`).
 
 Do not give a Rig agent Buffer tools until a few weeks of `analytics.jsonl` exist. Without numbers it dumps every chapter everywhere at once.
 
@@ -25,7 +25,7 @@ Do not give a Rig agent Buffer tools until a few weeks of `analytics.jsonl` exis
 - **Key input fields** (required: `channelId`, `mode`, `schedulingType`):
   - `channelId: ChannelId!` — which IG/TikTok/YouTube channel
   - `text: String` — caption
-  - `mode: ShareMode!` — always `addToQueue`. Enum is lowercase camel: `addToQueue`, `customScheduled`, `shareNext`, `shareNow`
+  - `mode: ShareMode!` — `shareNow` since 2026-10-09 (`addToQueue` before). Enum is lowercase camel: `addToQueue`, `customScheduled`, `shareNext`, `shareNow`
   - `schedulingType: SchedulingType!` — `automatic` | `notification`. Reminder-only channels (`Channel.metadata.defaultToReminders`) need `notification`
   - `dueAt: DateTime` — only set if `mode: customScheduled`
   - `assets: [AssetInput!]` — `AssetInput` is `@oneOf` keyed by media kind: `[{ video: { url: "https://s3.../video.mp4", metadata: { title } } }]`. The field is `url`, **not** `source`, and there is no `type: VIDEO`
@@ -36,28 +36,44 @@ Do not give a Rig agent Buffer tools until a few weeks of `analytics.jsonl` exis
     - `facebook: { type: "post" }` — `PostTypeFacebook!` is required
     - `linkedin`, `twitter`, `bluesky` take metadata but we send none
 
-## Cadence — delegated to Buffer, not implemented here
+## Where a video goes: by its shape
 
-The intended rhythm: YouTube longform is the hub, verticals are clips released over
-days, not a simultaneous blast. Short-form (IG Reels + TikTok) wants **3 chapters
-per day** — morning (8a), noon (12p), night (8p).
+Since 2026-10-09 a video's shape decides its destinations, from one table in
+`src/schedule/channels.rs` (`Shape::services`):
 
-**None of that is scheduling code, and deliberately so.** Every item goes out as
-`mode: addToQueue` in one burst; the channel's own Buffer posting schedule decides
-when each one fires. Configure the slots in Buffer, not here. `Channel.postingSchedule`
-comes back from the channels query if a future version wants to show them.
+| Channel | Horizontal | Vertical |
+|---|---|---|
+| LinkedIn, page and profile | ✓ | ✓ |
+| X (`BUFFER_TWITTER_HANDLE`) | ✓ | ✓ |
+| YouTube | the app's own upload (YouTube tab) | Shorts |
+| Instagram, TikTok, Bluesky | | ✓ |
+| Facebook | | |
 
-A per-platform cadence table (LinkedIn "next business day", one chapter per day)
-would need `mode: customScheduled` plus `dueAt`, which nothing in this stage sets.
+The shape is the orientation the video was uploaded to S3 with (`links.json`),
+or failing that the `video_type` in `posts.json`. The copy prompt is given each
+video's platforms, and the planner skips any other platform with the reason
+("instagram is not posted for horizontal videos"). The plan's status names any routed
+platform a video has no copy for, since there is no row to show it.
+
+## Cadence — when you tick it
+
+An approved post goes out the moment it is sent: `mode: shareNow`. A tick is
+the approval and the send. Ten seconds after the last tick or untick, every
+ticked post is sent (`src/schedule/countdown.rs`), so a misclick is undone by
+unticking; Post Now sends without waiting. Buffer's per-channel posting slots
+no longer decide anything.
+
+A per-category calendar would need `mode: customScheduled` plus `dueAt` — see
+`docs/posting-schedule-plan.md`.
 
 ## Phase 1 — Queue
 
-The queue is **append-only**. We never remove or reorder. Buffer's native queue handles execution order. Every `createPost` with `mode: addToQueue` goes to the end of the line.
+The ledger is **append-only**. We never remove or reorder.
 
-Two buttons, two jobs — `src/schedule/`:
+Two jobs — `src/schedule/`:
 
-1. **Build Plan** (`plan.rs`) is deterministic, not an extractor. No LLM, no network beyond the channels query. It reads `posts.json`, `distribute/vN/links.json`, the live channel list and `{root}/schedule.jsonl`, and writes `schedule/vN/schedule.json`.
-2. **Queue** (`mod.rs::run_queue`) sends exactly the ready items of the saved plan. The ledger — never the plan — decides what is already live, so pressing Queue twice sends nothing twice.
+1. **Plan** (`plan.rs`) is deterministic, not an extractor. No LLM, no network beyond the channels query. It reads `posts.json`, `distribute/vN/links.json`, the live channel list and `{root}/schedule.jsonl`, and writes `schedule/vN/schedule.json`. There is no button for it: it reruns on its own whenever its inputs change — a project or version opens, posts are generated or saved, an S3 upload finishes, a send or a clear ends (`App::tick_schedule`).
+2. **Send** (`mod.rs::run_queue`, run when the tick countdown ends or on Post Now) sends exactly the ticked, unblocked items of the saved plan. The ledger — never the plan — decides what is already live, so a second send sends nothing twice.
 
 Channels must be asked for by organization:
 
@@ -77,7 +93,7 @@ query Channels($input: ChannelsInput!) {
 
 `ChannelsInput.organizationId` is required. With `BUFFER_ORG_ID` unset, resolve it from `query { account { organizations { id name } } }` and take the first — the code names every organization on stderr when there is more than one, because picking the wrong workspace looks exactly like "no channel connected".
 
-Channel ids are resolved at runtime, never hardcoded: the account has two Twitter profiles and both a LinkedIn page and profile, so a 1:1 platform→channel map loses one. Twitter picks the profile `BUFFER_TWITTER_HANDLE` names; LinkedIn fans out, one plan row per connected channel, each carrying the longform video. `youtube_shorts` is not a channel; it rides the youtube channel.
+Channel ids are resolved at runtime, never hardcoded: the account has two Twitter profiles and both a LinkedIn page and profile, so a 1:1 platform→channel map loses one. Twitter picks the profile `BUFFER_TWITTER_HANDLE` names; LinkedIn fans out, one plan row per connected channel, each carrying the video. `youtube_shorts` is not a channel; it rides the youtube channel.
 
 Writes `SchedulePlan` — one item per (video, platform), carrying the exact payload Queue will send:
 
@@ -94,7 +110,7 @@ Writes `SchedulePlan` — one item per (video, platform), carrying the exact pay
       "url": "https://…/longform.mp4",
       "text": "…",
       "title": "…",
-      "mode": "addToQueue",
+      "mode": "shareNow",
       "scheduling_type": "automatic",
       "needs_approval": false,
       "metadata": {
@@ -114,7 +130,7 @@ Writes `SchedulePlan` — one item per (video, platform), carrying the exact pay
       "platform": "instagram",
       "url": "https://…/vertical/chapter-02.mp4",
       "text": "…",
-      "mode": "addToQueue",
+      "mode": "shareNow",
       "scheduling_type": "automatic",
       "metadata": { "instagram": { "type": "reel", "shouldShareToFeed": true } },
       "reason": "vertical chapter",
@@ -145,7 +161,7 @@ Variables per item:
   "input": {
     "channelId": "…",
     "text": "…",
-    "mode": "addToQueue",
+    "mode": "shareNow",
     "schedulingType": "automatic",
     "needsApproval": false,
     "aiAssisted": true,

@@ -70,7 +70,7 @@ struct Asset {
     chapter: Option<u32>,
 }
 
-/// What the Buffer tab asks before Build Plan: is every video this render
+/// What the Buffer tab asks before it plans: is every video this render
 /// produced on S3, as the file is now?
 ///
 /// Decided from disk alone — no network, no hashing — so the tab can ask on

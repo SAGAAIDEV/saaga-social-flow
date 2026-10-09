@@ -71,8 +71,10 @@ pub enum Action {
     /// render's upload missed, say. No hotkey: it is pressed while reading
     /// that line.
     Distribute,
-    SchedulePlan,
     ScheduleApproveAll,
+    /// One row's approve switch flipped: starts the wait before approved posts
+    /// are sent — see `schedule::countdown`.
+    ScheduleTicked,
     ScheduleQueue,
     /// Delete queued posts from Buffer. Deliberately has no hotkey — it is the
     /// one action here that destroys live work, so it costs a deliberate click

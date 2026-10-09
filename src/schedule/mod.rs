@@ -24,6 +24,7 @@ pub mod buffer;
 pub mod channels;
 pub mod clear;
 pub mod copy;
+pub mod countdown;
 pub mod ledger;
 pub mod meta;
 pub mod metrics;
@@ -39,7 +40,7 @@ use buffer::BufferClient;
 use schema::SCHEDULE_JSONL;
 use send::{post_input, row_for};
 
-/// What one Queue press actually did. `queued` counts posts that reached Buffer,
+/// What one send actually did. `queued` counts posts that reached Buffer,
 /// `unrecorded` names the subset whose ledger append then failed — those are live
 /// but invisible to the next plan, which is the one case worth shouting about.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -54,12 +55,12 @@ pub struct QueueOutcome {
 impl QueueOutcome {
     /// One line for the status bar, naming every count that is not zero.
     pub fn summary(&self) -> String {
-        let mut parts = vec![format!("Queued {} post(s)", self.queued)];
+        let mut parts = vec![format!("Sent {} post(s) to Buffer", self.queued)];
         if self.failed > 0 {
             parts.push(format!("{} failed", self.failed));
         }
         if self.already > 0 {
-            parts.push(format!("{} already queued", self.already));
+            parts.push(format!("{} already sent", self.already));
         }
         if !self.unrecorded.is_empty() {
             parts.push(format!(
@@ -73,8 +74,9 @@ impl QueueOutcome {
 
 pub enum ScheduleEvent {
     Status(String),
-    /// The saved `schedule.json` and the plan it holds.
-    Planned(PathBuf, SchedulePlan),
+    /// The saved `schedule.json`, the plan it holds, and the videos with no
+    /// copy for a platform their shape goes to — see [`plan::missing_copy`].
+    Planned(PathBuf, SchedulePlan, Vec<String>),
     Queued(QueueOutcome),
     /// What a clear would do — the numbers the confirmation dialog shows.
     ClearPreview(clear::Preview),
@@ -141,9 +143,9 @@ pub fn spawn_plan(session: Session, tx: Sender<ScheduleEvent>) {
     if let Err(err) = thread::Builder::new()
         .name("schedule-plan".into())
         .spawn(move || match run_plan(&session, &tx) {
-            Ok((path, plan)) => {
+            Ok((path, plan, missing)) => {
                 eprintln!("stream-recorder: schedule plan → {}", path.display());
-                let _ = tx.send(ScheduleEvent::Planned(path, plan));
+                let _ = tx.send(ScheduleEvent::Planned(path, plan, missing));
             }
             Err(err) => {
                 eprintln!("stream-recorder: schedule plan failed: {err:#}");
@@ -178,7 +180,10 @@ pub fn spawn_queue(session: Session, tx: Sender<ScheduleEvent>) {
     }
 }
 
-fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, SchedulePlan)> {
+fn run_plan(
+    session: &Session,
+    tx: &Sender<ScheduleEvent>,
+) -> Result<(PathBuf, SchedulePlan, Vec<String>)> {
     let status = |msg: String| {
         let _ = tx.send(ScheduleEvent::Status(msg));
     };
@@ -247,7 +252,7 @@ fn run_plan(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<(PathBuf, S
     ));
 
     let path = save_plan(&dir, &built)?;
-    Ok((path, built))
+    Ok((path, built, plan::missing_copy(&posts, &links)))
 }
 
 fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutcome> {
@@ -256,7 +261,7 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
     };
 
     let dir = session.schedule_dir();
-    let mut saved = load_plan(&dir).context("no saved plan — press Build Plan first")?;
+    let mut saved = load_plan(&dir).context("no posts to send yet")?;
     let mut outcome = QueueOutcome {
         ledger: session.root.join(SCHEDULE_JSONL),
         ..QueueOutcome::default()
@@ -275,7 +280,7 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
         status(if ready > 0 {
             format!("{ready} item(s) ready but none approved — tick the ones to send.")
         } else {
-            "Nothing queueable in the saved plan — press Build Plan first.".to_string()
+            "Nothing to send yet.".to_string()
         });
         return Ok(outcome);
     }
@@ -285,7 +290,7 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
     // of a duplicate post on every connected channel.
     let mut rows = ledger::load_rows(&session.root)?;
     let client = BufferClient::from_env()?;
-    status(format!("Queueing {} post(s) to Buffer…", targets.len()));
+    status(format!("Sending {} post(s) to Buffer…", targets.len()));
 
     let project = project_name(session);
     let version = saved.version;
@@ -334,20 +339,25 @@ fn run_queue(session: &Session, tx: &Sender<ScheduleEvent>) -> Result<QueueOutco
                         let mark = format!("queued {} but NOT recorded — do not re-queue", post.id);
                         status(format!("{label} {mark}: {err:#}"));
                         skip_item(&mut saved, *index, mark);
+                        // The next plan cannot see this post, so it must not
+                        // find it still ticked either.
+                        untick_item(&mut saved, *index);
                     }
                 }
             }
             Err(err) => {
                 // No ledger row, so a retry is safe — but a timeout can hide a post
-                // that did land, so the retry has to be a deliberate Build Plan
-                // rather than an automatic second send.
+                // that did land, so the retry has to be a deliberate tick rather
+                // than an automatic second send. Unticked here, it comes back
+                // from the next plan unticked, and the next send leaves it alone.
                 outcome.failed += 1;
                 status(format!("{label} failed: {err:#}"));
                 skip_item(
                     &mut saved,
                     *index,
-                    format!("failed: {err:#} — Build Plan to retry"),
+                    format!("failed: {err:#} — tick it again to retry"),
                 );
+                untick_item(&mut saved, *index);
             }
         }
     }
@@ -391,6 +401,13 @@ fn version_mismatch(session: Option<u32>, posts: Option<u32>, links: u32) -> Opt
 fn skip_item(plan: &mut SchedulePlan, index: usize, reason: String) {
     if let Some(item) = plan.items.get_mut(index) {
         item.skip = Some(reason);
+    }
+}
+
+/// Takes the approval off one item, so a re-plan carries it back unticked.
+fn untick_item(plan: &mut SchedulePlan, index: usize) {
+    if let Some(item) = plan.items.get_mut(index) {
+        item.approved = false;
     }
 }
 
@@ -461,13 +478,25 @@ mod tests {
         assert_eq!(plan.queueable().count(), 1);
     }
 
+    /// A failed send comes back from the next plan unticked, so it is only
+    /// retried by a deliberate tick — a timeout can hide a post that landed.
+    #[test]
+    fn untick_item_clears_only_the_named_approval() {
+        let mut plan = plan_with(vec![item("instagram", None), item("tiktok", None)]);
+        untick_item(&mut plan, 0);
+        assert!(!plan.items[0].approved);
+        assert!(plan.items[1].approved);
+        untick_item(&mut plan, 9);
+        assert!(plan.items[1].approved);
+    }
+
     #[test]
     fn the_summary_names_every_non_zero_count() {
         let mut outcome = QueueOutcome {
             queued: 12,
             ..QueueOutcome::default()
         };
-        assert_eq!(outcome.summary(), "Queued 12 post(s)");
+        assert_eq!(outcome.summary(), "Sent 12 post(s) to Buffer");
         outcome.failed = 2;
         outcome.already = 3;
         outcome
@@ -475,7 +504,7 @@ mod tests {
             .push("chapter-01 → tiktok = post-9".into());
         assert_eq!(
             outcome.summary(),
-            "Queued 12 post(s), 2 failed, 3 already queued, 1 NOT recorded in the ledger"
+            "Sent 12 post(s) to Buffer, 2 failed, 3 already sent, 1 NOT recorded in the ledger"
         );
     }
 
