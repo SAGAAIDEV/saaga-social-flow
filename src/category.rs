@@ -10,6 +10,9 @@
 //! Setting a category up — new or existing — is [`set_up`]: the Strapi row if
 //! there is none, a public playlist if the category has none, and the team
 //! template entry that ties them together.
+//!
+//! Shorts are the exception to "a category is a topic": a short is filed as a
+//! demo or an opinion — see [`SHORT_CATEGORIES`].
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +20,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::blog::library::Entry;
+use crate::sessions::Format;
 use crate::team::{self, Category, Loaded, Saved};
 
 const FILE: &str = "category.json";
@@ -31,6 +35,53 @@ pub struct Choice {
 
 fn path(root: &Path) -> PathBuf {
     root.join(FILE)
+}
+
+/// One of the two categories a short is filed under.
+///
+/// A long video is filed by topic — the Strapi list. A short is not: it is a
+/// demo or an opinion, whatever it is about, and its playlist, hashtags and
+/// place in the posting calendar follow that. These two exist before Strapi
+/// has a row for them, so a short can be filed under one straight away; the
+/// card's Save makes the row and the playlist, as for any category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShortCategory {
+    pub slug: &'static str,
+    pub name: &'static str,
+    /// What makes a short one of these — for whoever plans, records or files it.
+    pub definition: &'static str,
+}
+
+pub const SHORT_CATEGORIES: [ShortCategory; 2] = [
+    ShortCategory {
+        slug: "demos",
+        name: "Demos",
+        definition: "Shows one thing working. The screen carries it: one task done start to \
+                     finish, with the result on screen in the first seconds and then how it got \
+                     there. Proof, not explanation — it answers \"does it work, and what does it \
+                     look like?\"",
+    },
+    ShortCategory {
+        slug: "opinions",
+        name: "Opinions",
+        definition: "Argues one take. The camera carries it: the claim in the first line, the \
+                     reason behind it, one example that backs it, and a line to remember or a \
+                     question for the viewer. A stance, not a tutorial — it answers \"what do we \
+                     think, and why?\"",
+    },
+];
+
+/// The short category named `slug`, if it is one.
+pub fn short_category(slug: &str) -> Option<&'static ShortCategory> {
+    SHORT_CATEGORIES
+        .iter()
+        .find(|category| category.slug == slug)
+}
+
+/// Whether a project of `format` can be filed under `slug`: a short under one
+/// of the two short categories, a long video under any other — a topic.
+pub fn fits(slug: &str, format: Format) -> bool {
+    short_category(slug).is_some() == (format == Format::Short)
 }
 
 /// The project's category, or `None` when none is picked (or the file is
@@ -202,6 +253,20 @@ pub fn set_up(name: &str, existing: Option<Entry>, hashtags: Vec<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_short_is_a_demo_or_an_opinion_and_a_long_video_is_neither() {
+        assert!(fits("demos", Format::Short));
+        assert!(fits("opinions", Format::Short));
+        assert!(
+            !fits("agents", Format::Short),
+            "a short is not filed by topic"
+        );
+        assert!(!fits("demos", Format::Long), "a long video is not a demo");
+        assert!(fits("agents", Format::Long));
+        assert_eq!(short_category("opinions").map(|c| c.name), Some("Opinions"));
+        assert_eq!(short_category("agents"), None);
+    }
 
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

@@ -93,9 +93,23 @@ pub struct CurrentCategory {
     pub hashtags: String,
 }
 
+/// What one of the short categories means, as the card spells it out.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShortDefinition {
+    pub name: &'static str,
+    pub definition: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CategoryView {
     pub options: Vec<CategoryOption>,
+    /// A short project: the options are the two short categories, each
+    /// defined under the dropdown, and new categories are not made here.
+    pub short: bool,
+    pub definitions: Vec<ShortDefinition>,
+    /// The project is filed under a category for the other format — a short
+    /// under a topic, or a long video under Demos — said so it gets re-picked.
+    pub misfit: Option<String>,
     pub current: Option<CurrentCategory>,
     /// The standing blog default a project with no category still files under.
     pub fallback: Option<String>,
@@ -108,12 +122,17 @@ pub struct CategoryView {
 
 /// The Category card for the project at `root`.
 ///
-/// The options are the Strapi categories as last read, plus the project's own
-/// when the list does not have it — set up by a teammate since this Mac read
-/// the list — so the dropdown never shows a different category from the one
-/// the project is filed under.
+/// A long project's options are the Strapi categories as last read — the
+/// topics — and a short project's are the two short categories
+/// ([`crate::category::SHORT_CATEGORIES`]), whether Strapi has them yet or not.
+/// Either way the project's own category is added when the list does not have
+/// it — set up by a teammate since this Mac read the list, or picked before
+/// the format changed — so the dropdown never shows a different category from
+/// the one the project is filed under.
+#[allow(clippy::too_many_arguments)]
 pub fn category_view(
     root: &Path,
+    format: crate::sessions::Format,
     library: &crate::blog::library::Library,
     team: &crate::team::TeamTemplate,
     fallback: Option<String>,
@@ -121,19 +140,35 @@ pub fn category_view(
     can_save: bool,
     status: &str,
 ) -> CategoryView {
+    use crate::category::{fits, short_category, SHORT_CATEGORIES};
+
+    let short = format == crate::sessions::Format::Short;
     let choice = crate::category::load(root);
     let selected = choice.as_ref().map(|choice| choice.slug.as_str());
-    let mut options: Vec<CategoryOption> = std::iter::once(CategoryOption {
+    let mut options = vec![CategoryOption {
         slug: String::new(),
         label: "— none —".into(),
         selected: selected.is_none(),
-    })
-    .chain(library.categories.iter().map(|entry| CategoryOption {
-        slug: entry.slug.clone(),
-        label: entry.name.clone(),
-        selected: selected == Some(entry.slug.as_str()),
-    }))
-    .collect();
+    }];
+    if short {
+        options.extend(SHORT_CATEGORIES.iter().map(|category| CategoryOption {
+            slug: category.slug.into(),
+            label: category.name.into(),
+            selected: selected == Some(category.slug),
+        }));
+    } else {
+        options.extend(
+            library
+                .categories
+                .iter()
+                .filter(|entry| short_category(&entry.slug).is_none())
+                .map(|entry| CategoryOption {
+                    slug: entry.slug.clone(),
+                    label: entry.name.clone(),
+                    selected: selected == Some(entry.slug.as_str()),
+                }),
+        );
+    }
     if let Some(choice) = &choice {
         if !options.iter().any(|option| option.selected) {
             options.push(CategoryOption {
@@ -152,8 +187,34 @@ pub fn category_view(
         slug: category.slug,
         name: category.name,
     });
+    let misfit = choice
+        .as_ref()
+        .filter(|choice| !fits(&choice.slug, format))
+        .map(|choice| match short {
+            true => format!(
+                "{} is a topic, and a short is filed as a demo or an opinion — pick one.",
+                choice.name
+            ),
+            false => format!(
+                "{} is for shorts, and a long video is filed by topic — pick one.",
+                choice.name
+            ),
+        });
+    let definitions = match short {
+        true => SHORT_CATEGORIES
+            .iter()
+            .map(|category| ShortDefinition {
+                name: category.name,
+                definition: category.definition,
+            })
+            .collect(),
+        false => Vec::new(),
+    };
     CategoryView {
         options,
+        short,
+        definitions,
+        misfit,
         fallback: fallback.filter(|_| current.is_none()),
         current,
         busy,
@@ -752,6 +813,7 @@ pub fn plan_page(view: &PlanView) -> String {
 mod tests {
     use super::*;
     use crate::plan::schema::{Cta, Hook, PlanBody, PlanChapter};
+    use crate::sessions::Format;
 
     fn project(tag: &str) -> Session {
         let root = std::env::temp_dir().join(format!("ui-planning-{}-{tag}", std::process::id()));
@@ -816,6 +878,7 @@ mod tests {
         let team = crate::team::TeamTemplate::default();
         let none = category_view(
             &session.root,
+            Format::Long,
             &library,
             &team,
             Some("AI Literacy".into()),
@@ -842,6 +905,7 @@ mod tests {
         });
         let view = category_view(
             &session.root,
+            Format::Long,
             &library,
             &team,
             Some("AI Literacy".into()),
@@ -861,6 +925,79 @@ mod tests {
         assert_eq!(current.hashtags, "#SEO #AIAgents");
     }
 
+    /// A short is offered the two short categories, defined on the card, and
+    /// never the topics; a long video is offered the topics and never those
+    /// two, even once Strapi has rows for them.
+    #[test]
+    fn a_short_is_filed_as_a_demo_or_an_opinion() {
+        let session = project("short-category");
+        let entry = |slug: &str, name: &str| crate::blog::library::Entry {
+            id: 1,
+            name: name.into(),
+            slug: slug.into(),
+            detail: None,
+        };
+        let library = crate::blog::library::Library {
+            categories: vec![entry("gtm", "GTM"), entry("demos", "Demos")],
+            ..Default::default()
+        };
+        let team = crate::team::TeamTemplate::default();
+        let view = |format| {
+            category_view(
+                &session.root,
+                format,
+                &library,
+                &team,
+                None,
+                false,
+                true,
+                "",
+            )
+        };
+        let slugs = |view: &CategoryView| -> Vec<String> {
+            view.options.iter().map(|o| o.slug.clone()).collect()
+        };
+
+        let short = view(Format::Short);
+        assert_eq!(slugs(&short), ["", "demos", "opinions"]);
+        assert!(short.short);
+        let names: Vec<_> = short.definitions.iter().map(|d| d.name).collect();
+        assert_eq!(names, ["Demos", "Opinions"]);
+        assert_eq!(short.misfit, None);
+
+        let long = view(Format::Long);
+        assert_eq!(slugs(&long), ["", "gtm"]);
+        assert!(!long.short && long.definitions.is_empty());
+
+        // Picked as a short, then the project became long: still shown, and
+        // flagged so it is picked again.
+        crate::category::save(
+            &session.root,
+            Some(&crate::category::Choice {
+                slug: "opinions".into(),
+                name: "Opinions".into(),
+            }),
+        )
+        .unwrap();
+        let long = view(Format::Long);
+        assert!(long
+            .options
+            .iter()
+            .any(|o| o.slug == "opinions" && o.selected));
+        assert!(long.misfit.unwrap().contains("Opinions is for shorts"));
+        assert_eq!(view(Format::Short).misfit, None);
+
+        let html = project_page(&session, view(Format::Short));
+        assert!(
+            html.contains("Shows one thing working"),
+            "the definitions are on the card"
+        );
+        assert!(
+            !html.contains("<form id=\"category-new\""),
+            "a short makes no new categories"
+        );
+    }
+
     #[test]
     fn a_project_with_no_plan_says_how_to_start_one() {
         let session = project("no-plan");
@@ -873,6 +1010,7 @@ mod tests {
             &session,
             category_view(
                 &session.root,
+                Format::Long,
                 &crate::blog::library::Library::default(),
                 &crate::team::TeamTemplate::default(),
                 None,

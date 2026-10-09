@@ -41,6 +41,13 @@ impl App {
                     slug: known.slug.clone(),
                     name: known.name.clone(),
                 })
+            })
+            // A short category nobody has set up yet: filed now, made by Save.
+            .or_else(|| {
+                category::short_category(slug).map(|short| Choice {
+                    slug: short.slug.into(),
+                    name: short.name.into(),
+                })
             });
         self.category.status = match category::save(&self.session.root, choice.as_ref()) {
             Ok(()) => match &choice {
@@ -165,6 +172,7 @@ impl App {
     pub(super) fn category_view(&self) -> CategoryView {
         crate::ui::planning::category_view(
             &self.session.root,
+            self.session.format(),
             &crate::blog::library::load(),
             &self.team_template(),
             crate::config::load().blog_category_name,

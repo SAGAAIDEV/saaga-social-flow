@@ -43,8 +43,9 @@ content: **category → project → videos**, plus the calendars that schedule i
    keep.
 2. **`socials/` is for everyone on the team.** It is not locked down like
    `meetings/`: the dev login and the solve task role read and write it.
-3. **Category, then project, then videos.** A category is a topic area. A
-   project is one topic in it, planned once, that makes one or more videos.
+3. **Category, then project, then videos.** A category is a topic area for
+   long videos; shorts have two categories of their own, demos and opinions
+   (decision 16). A project is one topic in it, planned once, that makes one or more videos.
    There is always a `videos/` folder, even for a single video, so the layout
    keeps one shape.
 4. **Planning starts at the project.** The project plan takes a topic, a
@@ -98,6 +99,27 @@ content: **category → project → videos**, plus the calendars that schedule i
     act on: uploads, social posts, and a morning report built from the day's
     work (which replaces `/morning`). `socials/activity/` is reserved for them;
     the design is its own plan.
+16. **Shorts are filed as demos or opinions.** A long video is filed by
+    topic. A short is filed by what kind of short it is, whatever it is about,
+    and there are two kinds. Each is a category like any other — one slug for
+    the folder, the Strapi category, the YouTube playlist and the hashtags —
+    and both are defined in `src/category.rs` (`SHORT_CATEGORIES`):
+    - **`demos`: shows one thing working.** The screen carries it: one task
+      done start to finish, with the result on screen in the first seconds and
+      then how it got there. Proof, not explanation. It answers *does it work,
+      and what does it look like?* Usually recorded in Split.
+    - **`opinions`: argues one take.** The camera carries it: the claim in the
+      first line, the reason behind it, one example that backs it, and a line
+      to remember or a question for the viewer. A stance, not a tutorial. It
+      answers *what do we think, and why?* Usually recorded as Talking Head.
+
+    A short-format project picks one of the two on the Project tab, which
+    offers nothing else; a long project is never offered them. The topic a
+    short touches, when it has one, is the `topic` field of its
+    `metadata.json`, so a demo of an agents feature is still found with the
+    agents work. An aside recorded with Start Short is filed as a demo or an
+    opinion too, which sets its playlist and hashtags, while its files stay in
+    the project of the video it was recorded beside (decision 5).
 
 ## Layout
 
@@ -113,7 +135,8 @@ socials/
   calendars/
     YYYY-MM.json                    the month's slots across all categories (see Calendars)
   activity/                         reserved for events (decision 15)
-  <category>/                       agents | education | go-to-market | ai-seo-automation | uncategorized
+  <category>/                       long: agents | education | go-to-market | ai-seo-automation
+                                    short: demos | opinions — and uncategorized for either
     <project>/                      support-agents-that-file-tickets
       metadata.json                 title, category, format, created, the videos in order
       summary.md                    each video's YouTube title and description, with links
@@ -285,6 +308,27 @@ A video's:
 `status` is the furthest step reached: `planned`, `recorded`, `edited`,
 `rendered`, `published`.
 
+A short project is filed as a demo or an opinion (decision 16), with the topic
+it touches beside it — `socials/opinions/agent-limits-in-60-seconds/`:
+
+```json
+{
+  "project": "agent-limits-in-60-seconds",
+  "title": "What an agent should never do on its own",
+  "category": "opinions",
+  "topic": "agents",
+  "format": "short",
+  "created": "2026-10-09T16:05:00-07:00",
+  "videos": [
+    { "video": "never-let-it-refund", "order": 1,
+      "title": "Never let an agent issue a refund", "format": "short",
+      "status": "published", "recording_id": "2026-10-09_16-10-00",
+      "youtube": "https://youtube.com/shorts/…" }
+  ],
+  "synced_at": "…"
+}
+```
+
 ## Calendars
 
 `socials/calendars/YYYY-MM.json` is one month across every category: one row
@@ -377,7 +421,8 @@ Call it 1–1.5 GB for a four-chapter long video, a few cents a month each.
 
 ## Open decisions
 
-1. **The categories** — with Laura, who is confirming them: which of the
+1. **The topic categories** — with Laura, who is confirming them; the short
+   categories, `demos` and `opinions`, are settled (decision 16). Which of the
    proposed `education`, `go-to-market`, `ai-seo-automation`, `agents` map onto
    the blog's `ai-literacy`, `gtm`, `ai-powered-seo-geo`,
    `ai-powered-marketing`, `ai-powered-content-writing` and `Tools-comparison`,
