@@ -242,8 +242,9 @@ the KMS key.
 
 New file `social-scheduler.tf`, dev only like `lambdas-internal.tf`:
 
-1. `local.social_categories`: the agreed slugs plus `uncategorized`. Adding a
-   category later is one line here.
+1. `local.social_categories`: the agreed topic slugs, the two short
+   categories `demos` and `opinions` (archive plan, decision 16), and
+   `uncategorized`. Adding a category later is one line here.
 2. DynamoDB tables `social-posts-dev` (stream, PITR, the three GSIs) and
    `social-accounts-dev`, both pay per request.
 3. Per category (`for_each`): SQS `social-posts-<cat>` and
@@ -362,8 +363,8 @@ hosted connect page, then lists the accounts and writes the
 3. **Cost.** The Pipedream Connect production plan against the Buffer plan it
    would replace, and X API write access, which is paid.
 4. **The cadence itself** per category: which platforms, how many a week, what
-   times. The categories still depend on the alignment with Laura that the
-   archive plan is waiting on.
+   times. Demos and opinions can start now; the topic categories still depend
+   on the alignment with Laura that the archive plan is waiting on.
 5. **Timezone** for slots. The draft assumes `America/Los_Angeles`.
 6. **Media horizon.** Hold posts past the 30-day expiry (phase 2), or copy the
    finals just in time from the archive (once archive sync exists).

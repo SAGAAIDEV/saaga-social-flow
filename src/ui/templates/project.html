@@ -68,6 +68,9 @@
   in Strapi, the YouTube playlist the upload goes into, and the hashtags the
   social posts end with. The playlist and the hashtags are the team's, so a
   Save here changes them for every project in the category.
+
+  A long video is filed by topic. A short is filed as a demo or an opinion —
+  the two short categories, defined on the card — and makes no new ones.
 -->
 <h2>Category</h2>
 <div class="card">
@@ -78,6 +81,10 @@
       {% endfor %}
     </select>
   </div>
+  {% for kind in category.definitions %}
+  <p class="why"><b>{{ kind.name }}</b> — {{ kind.definition }}</p>
+  {% endfor %}
+  {% if category.misfit %}<p class="why">{{ ui.tag("Re-pick", "warn") }} {{ category.misfit }}</p>{% endif %}
   {% if category.current %}
   <div class="link"><span class="name">Blog</span><span>Filed under {{ category.current.name }}</span></div>
   <div class="link"><span class="name">YouTube</span>{% if category.current.playlist_url %}<a href="{{ category.current.playlist_url }}">{{ category.current.playlist_url }}</a>{% else %}<span class="muted">No playlist yet — Save makes one</span>{% endif %}</div>
@@ -92,6 +99,7 @@
   <p class="why">No category — the blog post files under none, the video goes in no playlist, and the posts carry no category hashtags.</p>
   {% endif %}
 </div>
+{% if not category.short %}
 <form id="category-new" class="card">
   <div class="row">
     <input name="name" placeholder="New category, e.g. SEO Agents" style="flex:1">
@@ -100,6 +108,7 @@
   </div>
   <p class="why">Makes the blog category in Strapi and a public YouTube playlist, saves the hashtags for the team, and files this project under it. A name Strapi already has is reused, not duplicated.{% if not category.can_save %} Off until the team template loads from S3 (aws sso login).{% endif %}</p>
 </form>
+{% endif %}
 {% if category.status %}<p class="why">{{ category.status }}</p>{% endif %}
 <script>
 (function () {
@@ -109,7 +118,8 @@
     event.preventDefault();
     send({type: 'setUpCategory', root: root, slug: {{ (category.current.slug if category.current else "") | tojson }}, hashtags: this.elements.hashtags.value});
   });
-  document.getElementById('category-new').addEventListener('submit', function (event) {
+  var create = document.getElementById('category-new');
+  if (create) create.addEventListener('submit', function (event) {
     event.preventDefault();
     send({type: 'setUpCategory', root: root, name: this.elements.name.value, hashtags: this.elements.hashtags.value});
   });
