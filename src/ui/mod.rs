@@ -480,7 +480,6 @@ pub struct ControlTargetIvars {
     posts_button: RefCell<Option<Retained<NSButton>>>,
     /// Upload to S3, on the Buffer tab above the plan it feeds.
     distribute_button: RefCell<Option<Retained<NSButton>>>,
-    plan_button: RefCell<Option<Retained<NSButton>>>,
     approve_button: RefCell<Option<Retained<NSButton>>>,
     queue_button: RefCell<Option<Retained<NSButton>>>,
     publish_button: RefCell<Option<Retained<NSButton>>>,
@@ -877,17 +876,17 @@ define_class!(
             let _ = self.ivars().tx.send(UiEvent::Action(Action::Distribute));
         }
 
-        #[unsafe(method(onSchedulePlan:))]
-        fn on_schedule_plan(&self, _sender: Option<&AnyObject>) {
-            let _ = self.ivars().tx.send(UiEvent::Action(Action::SchedulePlan));
-        }
-
         #[unsafe(method(onScheduleApproveAll:))]
         fn on_schedule_approve_all(&self, _sender: Option<&AnyObject>) {
             let _ = self
                 .ivars()
                 .tx
                 .send(UiEvent::Action(Action::ScheduleApproveAll));
+        }
+
+        #[unsafe(method(onScheduleRowToggled:))]
+        fn on_schedule_row_toggled(&self, _sender: Option<&AnyObject>) {
+            let _ = self.ivars().tx.send(UiEvent::Action(Action::ScheduleTicked));
         }
 
         #[unsafe(method(onScheduleClear:))]
@@ -996,7 +995,6 @@ impl ControlTarget {
             publish_button: RefCell::new(None),
             youtube_thumbnail_button: RefCell::new(None),
             publish_status: RefCell::new(None),
-            plan_button: RefCell::new(None),
             approve_button: RefCell::new(None),
             queue_button: RefCell::new(None),
             render_status: RefCell::new(None),
@@ -1316,7 +1314,6 @@ impl ControlTarget {
             (&ivars.rerender_button, &stages.render),
             (&ivars.posts_button, &stages.posts),
             (&ivars.distribute_button, &stages.distribute),
-            (&ivars.plan_button, &stages.plan),
             (&ivars.approve_button, &stages.approve),
             (&ivars.queue_button, &stages.queue),
             (&ivars.publish_button, &stages.publish),
@@ -3685,24 +3682,9 @@ pub fn attach_controls(
     pin_top_left(&schedule_title);
     schedule_view.addSubview(&schedule_title);
 
-    // Two steps, deliberately separate: Build Plan only reads, Queue only sends
-    // what the plan below already showed.
-    let plan_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Build Plan"),
-            Some(&target),
-            Some(sel!(onSchedulePlan:)),
-            mtm,
-        )
-    };
-    plan_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
-        NSSize::new(120.0, 28.0),
-    ));
-    pin_top_left(&plan_btn);
-    schedule_view.addSubview(&plan_btn);
-    *target.ivars().plan_button.borrow_mut() = Some(plan_btn.clone());
-
+    // No plan button: the rows build themselves whenever the posts or the S3
+    // uploads change (`App::tick_schedule`). A tick below sends that post once
+    // the countdown runs out; Post Now sends everything ticked without waiting.
     let approve_all_btn = unsafe {
         NSButton::buttonWithTitle_target_action(
             &NSString::from_str("Approve All"),
@@ -3712,7 +3694,7 @@ pub fn attach_controls(
         )
     };
     approve_all_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 128.0, bounds.size.height - 84.0),
+        NSPoint::new(PAD * 2.0, bounds.size.height - 84.0),
         NSSize::new(110.0, 28.0),
     ));
     pin_top_left(&approve_all_btn);
@@ -3721,14 +3703,14 @@ pub fn attach_controls(
 
     let queue_btn = unsafe {
         NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Queue to Buffer"),
+            &NSString::from_str("Post Now"),
             Some(&target),
             Some(sel!(onScheduleQueue:)),
             mtm,
         )
     };
     queue_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 246.0, bounds.size.height - 84.0),
+        NSPoint::new(PAD * 2.0 + 118.0, bounds.size.height - 84.0),
         NSSize::new(150.0, 28.0),
     ));
     pin_top_left(&queue_btn);
@@ -3744,13 +3726,13 @@ pub fn attach_controls(
         )
     };
     clear_btn.setFrame(NSRect::new(
-        NSPoint::new(PAD * 2.0 + 404.0, bounds.size.height - 84.0),
+        NSPoint::new(PAD * 2.0 + 276.0, bounds.size.height - 84.0),
         NSSize::new(130.0, 28.0),
     ));
     pin_top_left(&clear_btn);
     schedule_view.addSubview(&clear_btn);
 
-    // The row above the plan answers the question Build Plan depends on: is
+    // The row above the plan answers the question the plan depends on: is
     // every rendered video on S3 as it is now? The render uploads on its own
     // when it finishes, so the button is for the miss — an expired AWS login,
     // a re-render whose upload failed — and the line beside it says which
@@ -3798,7 +3780,7 @@ pub fn attach_controls(
     let sched_info_h = 150.0;
     // 34 more than before the S3 row above it existed.
     let sched_form_h = (bounds.size.height - 154.0 - sched_info_h - PAD).max(80.0);
-    let schedule_form = crate::schedule::ScheduleForm::attach(&schedule_view, mtm);
+    let schedule_form = crate::schedule::ScheduleForm::attach(&schedule_view, &target, mtm);
     schedule_form.set_frame(NSRect::new(
         NSPoint::new(PAD * 2.0, PAD * 2.0 + sched_info_h + PAD),
         NSSize::new(sched_w, sched_form_h),
@@ -3820,22 +3802,28 @@ pub fn attach_controls(
     );
     sched_text_view.setEditable(false);
     sched_text_view.setString(&NSString::from_str(
-        "Three steps.\n\n\
-         1. Build Plan — pairs each generated post with its public S3 URL, a live \
-         Buffer channel and the exact metadata it will send (YouTube privacy, \
-         subscriber notification, Instagram reel/feed), then writes \
-         schedule/vN/schedule.json. Nothing is posted.\n\n\
-         2. Approve — tick the posts above that should go out. Nothing is sent \
-         without a tick. Approval is bound to the copy: re-plan and an identical \
-         caption keeps its tick, while a regenerated or edited one comes back \
-         unticked, so you can never approve one caption and ship another. Blocked \
-         rows show why and cannot be ticked.\n\n\
-         3. Queue to Buffer — sends the approved items and nothing else. Every send \
-         is appended to schedule.jsonl at the project root, so a second press \
-         re-sends nothing: anything already in the ledger under the same copy is \
-         skipped. Regenerating the posts changes the copy, which makes an item \
-         queueable again — the plan flags those with a warning naming the post that \
-         is already live.",
+        "The rows above build themselves.\n\n\
+         1. The plan — whenever the posts are generated or edited, or an S3 upload \
+         finishes, each post is paired with its public S3 URL, a live Buffer \
+         channel and the exact metadata it will send (YouTube privacy, subscriber \
+         notification, Instagram reel/feed), and saved to \
+         schedule/vN/schedule.json. Nothing is posted. Where a video goes follows \
+         its shape: horizontal to LinkedIn (page and profile) and X, with YouTube \
+         uploaded from the YouTube tab; vertical to YouTube Shorts, LinkedIn (page \
+         and profile), X, Instagram, TikTok and Bluesky. Anything else is shown \
+         as skipped.\n\n\
+         2. Approve — tick the posts above that should go out. A tick posts it: ten \
+         seconds after the last tick or untick, everything still ticked is sent to \
+         Buffer to publish straight away, so a misclick is undone by unticking. \
+         Post Now sends without waiting. Approval is bound to the copy: re-plan and \
+         an identical caption keeps its tick, while a regenerated or edited one \
+         comes back unticked, so you can never approve one caption and ship \
+         another. Blocked rows show why and cannot be ticked. Every send is \
+         appended to schedule.jsonl at the project root, so nothing is sent twice: \
+         anything already in the ledger under the same copy is skipped. \
+         Regenerating the posts changes the copy, which makes an item sendable \
+         again — the plan flags those with a warning naming the post that is \
+         already live.",
     ));
     sched_scroll.setDocumentView(Some(&sched_text_view));
     schedule_view.addSubview(&sched_scroll);

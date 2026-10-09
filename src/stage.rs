@@ -124,7 +124,10 @@ impl Stages {
             env_set("BUFFER_API_KEY"),
             "BUFFER_API_KEY is unset — add it to stream-recorder/.env",
         );
-        let has_plan = (planned, "No plan yet — press Build Plan");
+        let has_plan = (
+            planned,
+            "No posts to send yet — they appear once the posts are generated and the videos are on S3",
+        );
         // The blog needs the YouTube URL, not the render: the article is built
         // around an embed, and there is no embed before the upload.
         let uploaded = crate::publish::longform(session).is_some();
@@ -336,7 +339,7 @@ mod tests {
 
     const NO_RENDER: &str = "Nothing rendered yet — run Render first";
 
-    /// Build Plan used to wait for a `links.json` to exist. A re-render leaves
+    /// The plan used to wait for a `links.json` to exist. A re-render leaves
     /// the old one in place, so the gate now asks the S3 check and repeats its
     /// line — which names the video that is behind and the button to press.
     #[test]
@@ -358,6 +361,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// What the YouTube gate says with no longform on disk. It follows the
+    /// horizontal Render box in this machine's config, as the gate does, so the
+    /// assertion passes or fails on the code rather than on whose Mac runs it.
+    fn no_longform(session: &Session) -> &'static str {
+        match crate::config::load().render.for_session(session).horizontal {
+            true => "No longform",
+            false => "horizontal longform is switched off",
+        }
+    }
+
     /// The YouTube upload wants the longform itself, so a project with only
     /// vertical chapters must not offer it.
     #[test]
@@ -365,7 +378,8 @@ mod tests {
         let root = temp("publish");
         write(root.join("render/vertical/chapter-01.mp4"));
         let stages = Stages::read(&session(&root), Busy::default());
-        assert!(stages.publish.missing().unwrap().contains("No longform"));
+        let reason = stages.publish.missing().unwrap();
+        assert!(reason.contains(no_longform(&session(&root))), "{reason}");
         write(root.join("render/horizontal/longform.mp4"));
         let stages = Stages::read(&session(&root), Busy::default());
         // YouTube precedes social posts but requires its complete artwork set.
@@ -472,7 +486,8 @@ mod tests {
         assert!(!root.join("render/horizontal/longform.mp4").exists());
         let stages = Stages::read(&session(&root), Busy::default());
         assert!(stages.thumbnail.is_ready());
-        assert!(stages.publish.missing().unwrap().contains("No longform"));
+        let reason = stages.publish.missing().unwrap();
+        assert!(reason.contains(no_longform(&session(&root))), "{reason}");
         // One video, one busy flag: an upload in flight closes both.
         let busy = Busy {
             publish: true,
@@ -541,7 +556,9 @@ mod tests {
         let stages = Stages::read(&session(&root), Busy::default());
         assert_eq!(
             stages.approve.missing(),
-            Some("No plan yet — press Build Plan")
+            Some(
+                "No posts to send yet — they appear once the posts are generated and the videos are on S3"
+            )
         );
         write(root.join("schedule/schedule.json"));
         let stages = Stages::read(&session(&root), Busy::default());

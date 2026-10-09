@@ -22,6 +22,79 @@ pub fn service_for(platform: &str) -> &str {
     }
 }
 
+/// Which way up a video is, which decides where it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    Horizontal,
+    Vertical,
+}
+
+/// The services a horizontal video goes to. YouTube is the app's own upload
+/// (the YouTube tab), so the longform never has a Buffer row there; it is
+/// listed so a stray `youtube` post reads as handled rather than unrouted.
+pub const HORIZONTAL_SERVICES: [&str; 3] = ["youtube", "linkedin", "twitter"];
+
+/// The services a vertical video goes to. LinkedIn means the page and the
+/// profile both — see [`fans_out`].
+pub const VERTICAL_SERVICES: [&str; 6] = [
+    "youtube",
+    "linkedin",
+    "twitter",
+    "instagram",
+    "tiktok",
+    "bluesky",
+];
+
+impl Shape {
+    /// From links.json's `orientation` or posts.json's `video_type`, which
+    /// spell it differently. `None` for anything else: an older project that
+    /// recorded neither is not guessed at.
+    pub fn parse(text: &str) -> Option<Shape> {
+        match text.trim() {
+            "landscape" | "horizontal" => Some(Shape::Horizontal),
+            "portrait" | "vertical" => Some(Shape::Vertical),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Shape::Horizontal => "horizontal",
+            Shape::Vertical => "vertical",
+        }
+    }
+
+    /// Where a video of this shape goes. The one table: the copy prompt is
+    /// given it per video and the planner enforces it, so a model that writes
+    /// copy for a platform off this list cannot get that copy posted.
+    pub fn services(self) -> &'static [&'static str] {
+        match self {
+            Shape::Horizontal => &HORIZONTAL_SERVICES,
+            Shape::Vertical => &VERTICAL_SERVICES,
+        }
+    }
+
+    /// The platform names the copywriter writes for, in posts.json's spelling:
+    /// a Short is `youtube_shorts`, and the longform's YouTube upload is not a
+    /// post at all.
+    pub fn platforms(self) -> Vec<&'static str> {
+        self.services()
+            .iter()
+            .filter_map(|service| match (self, *service) {
+                (Shape::Horizontal, "youtube") => None,
+                (Shape::Vertical, "youtube") => Some("youtube_shorts"),
+                (_, other) => Some(other),
+            })
+            .collect()
+    }
+}
+
+/// `Some(reason)` when a video of `shape` does not go to `platform`.
+pub fn route_block(platform: &str, shape: Shape) -> Option<String> {
+    (!shape.services().contains(&service_for(platform)))
+        .then(|| format!("{platform} is not posted for {} videos", shape.label()))
+}
+
 /// The YouTube flavour a video actually is, from its shape rather than its label.
 ///
 /// Both flavours go to the same channel, and `YoutubePostMetadataInput` has no
@@ -234,6 +307,51 @@ mod tests {
             channel("69267c5429ea336fd631f864", "linkedin", "profile", "amovfx"),
             channel("69267c5429ea336fd631f865", "linkedin", "page", "saagasolve"),
         ]
+    }
+
+    /// The routing as it was asked for on 2026-10-09: LinkedIn (page and
+    /// profile) and X take both shapes, the longform's YouTube is the app's
+    /// upload, and only vertical goes to Instagram, TikTok and Bluesky.
+    /// Facebook takes neither.
+    #[test]
+    fn each_shape_goes_where_it_was_asked_to() {
+        assert_eq!(
+            Shape::Horizontal.platforms(),
+            ["linkedin", "twitter"],
+            "the longform's YouTube upload is not a post"
+        );
+        assert_eq!(
+            Shape::Vertical.platforms(),
+            [
+                "youtube_shorts",
+                "linkedin",
+                "twitter",
+                "instagram",
+                "tiktok",
+                "bluesky"
+            ]
+        );
+        assert_eq!(route_block("youtube", Shape::Horizontal), None);
+        assert_eq!(route_block("youtube", Shape::Vertical), None, "the Short");
+        assert_eq!(
+            route_block("tiktok", Shape::Horizontal).as_deref(),
+            Some("tiktok is not posted for horizontal videos")
+        );
+        for shape in [Shape::Horizontal, Shape::Vertical] {
+            assert!(route_block("facebook", shape).is_some());
+            assert!(route_block("linkedin", shape).is_none());
+            assert!(route_block("twitter", shape).is_none());
+        }
+    }
+
+    #[test]
+    fn both_spellings_of_a_shape_parse_and_nothing_else_does() {
+        assert_eq!(Shape::parse("landscape"), Some(Shape::Horizontal));
+        assert_eq!(Shape::parse("horizontal"), Some(Shape::Horizontal));
+        assert_eq!(Shape::parse("portrait"), Some(Shape::Vertical));
+        assert_eq!(Shape::parse(" vertical "), Some(Shape::Vertical));
+        assert_eq!(Shape::parse("square"), None);
+        assert_eq!(Shape::parse(""), None);
     }
 
     #[test]
