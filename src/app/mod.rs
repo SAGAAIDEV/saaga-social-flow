@@ -118,6 +118,11 @@ pub struct App {
     /// `render/vN` in place, so a second press would have two threads composing
     /// into the same folders.
     render_busy: bool,
+    /// The project the running render belongs to. Its end starts that
+    /// project's S3 upload and copy (`after_render`), and only if it is still
+    /// the open one: a render finishing after a project switch must not upload
+    /// the project now on screen.
+    render_root: Option<std::path::PathBuf>,
     posts_tx: mpsc::Sender<crate::posts::PostsEvent>,
     posts_rx: Receiver<crate::posts::PostsEvent>,
     substack_tx: mpsc::Sender<crate::substack::SubstackEvent>,
@@ -1566,6 +1571,7 @@ impl App {
         self.finish_open_chapter();
         println!("stream-recorder: cutting disfluencies and rendering…");
         self.render_busy = true;
+        self.render_root = Some(self.session.root.clone());
         self.set_render_progress(0.0);
         self.set_render_status(render_status);
         crate::edit::spawn_render(self.session.clone(), self.render_tx.clone());
@@ -1574,9 +1580,9 @@ impl App {
 
     /// The Thumbnail tab's Approve: record that this set may be published.
     ///
-    /// Only that. Uploading is the YouTube tab's job and S3 the Socials tab's,
-    /// each pressed on its own — the render, the thumbnail and the uploads are
-    /// separate steps.
+    /// Only that. Uploading is the YouTube tab's job, and S3 starts at the end
+    /// of a render or from the Socials tab's button — approving artwork uploads
+    /// nothing.
     fn approve_thumbnail(&mut self) {
         let live = crate::publish::longform(&self.session)
             .or_else(|| crate::publish::short(&self.session));
@@ -1676,6 +1682,30 @@ impl App {
         );
     }
 
+    /// A finished render starts the next two steps on its own, so the Buffer
+    /// tab fills in with rows to tick: the S3 upload (cheap when nothing
+    /// changed — an object already at its key is not sent again), and the copy
+    /// when this version has none. Copy already written is never replaced:
+    /// it may carry edits, and regenerating is the Post tab's button.
+    ///
+    /// The copy is written from the closed chapters, the same ones the render
+    /// cut, so a take started since is left recording.
+    fn after_render(&mut self) {
+        let written = crate::posts::load_manifest(&self.session.posts_dir()).is_ok();
+        let next = self.stages().after_render(written);
+        if next.upload {
+            self.start_hosting();
+        }
+        // What holds it — unapproved artwork, an unset bucket — goes on the S3
+        // line, where Upload to S3 waits for it.
+        if let Some(reason) = next.held {
+            self.set_distribute_status(&reason);
+        }
+        if next.posts {
+            self.start_posts();
+        }
+    }
+
     fn run_generate_posts(&mut self) {
         let stages = self.stages();
         if let Some(reason) = stages.posts.missing() {
@@ -1685,6 +1715,11 @@ impl App {
             return;
         }
         self.finish_open_chapter();
+        self.start_posts();
+    }
+
+    /// The copywriter, on what is closed now. Callers check the gate.
+    fn start_posts(&mut self) {
         println!("stream-recorder: generating social media posts…");
         if let Some(live) = self.live.as_ref() {
             // Pressing Generate does not move focus out of the prompt, so the
@@ -1697,8 +1732,7 @@ impl App {
             if changed {
                 self.save_posts_prompt();
             }
-            live.control_target
-                .set_posts_status("Generating posts for 8 platforms…");
+            live.control_target.set_posts_status("Generating posts…");
         }
         crate::posts::spawn_generate_posts(
             self.session.clone(),
@@ -2991,6 +3025,7 @@ impl App {
             return;
         }
         self.render_busy = true;
+        self.render_root = Some(self.session.root.clone());
         self.set_render_progress(0.0);
         self.set_edit_status(&format!("Cutting chapter {chapter:02}…"));
         crate::edit::spawn_recut(self.session.clone(), vec![chapter], self.render_tx.clone());
@@ -4227,6 +4262,10 @@ impl App {
                 crate::edit::RenderEvent::Progress(fraction) => self.set_render_progress(fraction),
                 crate::edit::RenderEvent::Ready(dir) => {
                     self.render_busy = false;
+                    let ours = self
+                        .render_root
+                        .take()
+                        .is_some_and(|root| root == self.session.root);
                     self.set_render_progress(1.0);
                     self.show_render_progress(&format!(
                         "Render ready — clips are under Video details. Next: write the title \
@@ -4245,9 +4284,13 @@ impl App {
                     self.update_schedule_summary();
                     self.update_project_view();
                     self.sync_controls();
+                    if ours {
+                        self.after_render();
+                    }
                 }
                 crate::edit::RenderEvent::Failed(msg) => {
                     self.render_busy = false;
+                    self.render_root = None;
                     self.show_render_progress(&msg);
                     self.sync_controls();
                 }
@@ -4286,11 +4329,11 @@ impl App {
                     self.schedule_replan = true;
                     self.update_schedule_summary();
                     // The gates are read off disk, and this job is what puts
-                    // posts.json there — the two stages waiting on it (YouTube,
-                    // which takes its title and description from it, and Build
-                    // Plan) stay switched off until something re-reads. Without
-                    // this they wait for the next unrelated event, which looks
-                    // exactly like the button being broken.
+                    // posts.json there — the stages waiting on it (YouTube,
+                    // which takes its title and description from it, and the
+                    // Buffer plan) stay switched off until something re-reads.
+                    // Without this they wait for the next unrelated event, which
+                    // looks exactly like the button being broken.
                     self.sync_controls();
                 }
             }

@@ -48,6 +48,31 @@ impl Gate {
     }
 }
 
+/// What a finished render starts by itself — see `App::after_render`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AfterRender {
+    /// Start the S3 upload.
+    pub upload: bool,
+    /// Why the upload cannot start, for the S3 line. `None` when it starts or
+    /// one is already running.
+    pub held: Option<String>,
+    /// Write the social copy.
+    pub posts: bool,
+}
+
+impl Stages {
+    /// The upload whenever it can run, and the copy only for a version that
+    /// has none: copy already written may carry edits, and replacing it is the
+    /// Post tab's button.
+    pub fn after_render(&self, posts_written: bool) -> AfterRender {
+        AfterRender {
+            upload: self.distribute.is_ready(),
+            held: self.distribute.missing().map(str::to_string),
+            posts: !posts_written && self.posts.is_ready(),
+        }
+    }
+}
+
 /// Jobs already in flight, which block their own stage without anything being
 /// absent. Both distribute and schedule write publicly, so a double press must
 /// not start a second thread over the same files.
@@ -497,6 +522,46 @@ mod tests {
             Stages::read(&session(&root), busy).thumbnail,
             Gate::Busy
         ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A finished render uploads whenever the upload can run, and writes copy
+    /// only for a version that has none.
+    #[test]
+    fn a_finished_render_uploads_and_writes_only_missing_copy() {
+        let root = temp("after-render");
+        let ready = |distribute: Gate, posts: Gate| Stages {
+            distribute,
+            posts,
+            ..Stages::read(&session(&root), Busy::default())
+        };
+        let next = ready(Gate::Ready, Gate::Ready).after_render(false);
+        assert_eq!(
+            next,
+            AfterRender {
+                upload: true,
+                held: None,
+                posts: true
+            }
+        );
+        assert!(
+            !ready(Gate::Ready, Gate::Ready).after_render(true).posts,
+            "written copy is never replaced"
+        );
+        let held =
+            ready(Gate::Missing("Approve the artwork".into()), Gate::Ready).after_render(false);
+        assert!(!held.upload);
+        assert_eq!(held.held.as_deref(), Some("Approve the artwork"));
+        assert!(held.posts, "the copy does not wait on the upload");
+        let busy = ready(Gate::Busy, Gate::Missing("Record first".into())).after_render(false);
+        assert_eq!(
+            busy,
+            AfterRender {
+                upload: false,
+                held: None,
+                posts: false
+            }
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

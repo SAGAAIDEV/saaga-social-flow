@@ -315,6 +315,7 @@ pub fn run_record_session(
         deps_rx,
         ffmpeg_notice,
         render_busy: false,
+        render_root: None,
         posts_tx,
         posts_rx,
         substack_tx,
