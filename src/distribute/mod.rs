@@ -9,7 +9,9 @@ use anyhow::{bail, Context, Result};
 use crate::session::Session;
 
 mod s3;
-pub(crate) use s3::{read_team_object, write_team_object, TeamWrite};
+pub(crate) use s3::{
+    list_uploads, read_team_object, write_team_object, Listed, Listing, TeamWrite,
+};
 pub mod schema;
 
 pub use schema::{load, DistributeLinks};

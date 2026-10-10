@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% import "components.html" as ui %}
+
+{#
+  Everything the uploads have put on S3, folded into folders — see `files`.
+  Folders are <details>, so opening one needs no script and no state: a fresh
+  listing redraws the pane with the open project expanded and the rest shut.
+#}
+
+{% block content %}
+<style>
+  ul.tree, ul.tree ul { list-style: none; margin: 0; padding-left: 0; }
+  ul.tree ul { padding-left: 18px; border-left: 1px solid var(--line); margin-left: 6px; }
+  ul.tree li { margin: 0; }
+  ul.tree summary, ul.tree .file {
+    display: flex; align-items: center; gap: 10px;
+    padding: 3px 6px; border-radius: 5px;
+  }
+  ul.tree summary { cursor: pointer; }
+  ul.tree summary:hover, ul.tree .file:hover { background: var(--panel); }
+  ul.tree .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.tree .folder-name { font-weight: 600; }
+  ul.tree .meta { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  ul.tree .file button { padding: 1px 8px; font-size: 12px; }
+  .error { color: var(--bad); margin: 8px 0; white-space: pre-wrap; }
+</style>
+
+<h1>Files</h1>
+<div class="sub">
+  {{ location }}{% if listed_at %} · listed {{ listed_at }}{% endif %}
+</div>
+
+<div class="bar">
+  {{ ui.action("Listing…" if busy else "Refresh", {"type": "refreshFiles"}, primary=true, disabled=busy) }}
+  {% if summary %}{{ ui.tag(summary) }}{% endif %}
+  {% if truncated %}{{ ui.tag("only the first 20,000 shown", "warn") }}{% endif %}
+</div>
+
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+{% if tree %}
+<ul class="tree">
+  {% for node in tree recursive %}
+  {% if node.folder %}
+  <li>
+    <details{% if node.open %} open{% endif %}>
+      <summary>
+        <span class="name folder-name">{{ node.name }}/</span>
+        <span class="meta">{{ node.files }} file(s) · {{ node.size }}{% if node.modified %} · {{ node.modified }}{% endif %}</span>
+      </summary>
+      {% if node.children %}<ul>{{ loop(node.children) }}</ul>{% endif %}
+    </details>
+  </li>
+  {% else %}
+  <li class="file">
+    <span class="name">{{ node.name }}</span>
+    <span class="meta">{{ node.size }}{% if node.modified %} · {{ node.modified }}{% endif %}</span>
+    {% if node.url %}
+      {{ ui.action("Open", {"type": "openUrl", "url": node.url}) }}
+      {{ ui.action("Copy link", {"type": "copyText", "text": node.url}) }}
+    {% endif %}
+  </li>
+  {% endif %}
+  {% endfor %}
+</ul>
+{% elif busy %}
+<p class="empty">Listing {{ location }}…</p>
+{% elif not error %}
+<p class="empty">
+  Nothing listed yet. A render uploads here on its own when it finishes; press
+  Refresh to look again.
+</p>
+{% endif %}
+{% endblock %}

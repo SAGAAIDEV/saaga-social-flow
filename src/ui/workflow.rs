@@ -24,7 +24,7 @@ pub const STEPS: [(&str, &str, &[&str]); 7] = [
     (
         "socials",
         "Socials",
-        &["post", "schedule", "analytics", "reflect"],
+        &["post", "schedule", "files", "analytics", "reflect"],
     ),
 ];
 
@@ -96,7 +96,7 @@ mod tests {
             .iter()
             .flat_map(|(_, _, children)| children.iter().copied())
             .collect();
-        assert_eq!(children.len(), 10);
+        assert_eq!(children.len(), 11);
         // Planned before it is recorded: the plan is per project and outlives
         // versions, and versioning stays with recording.
         let at = |pane: &str| children.iter().position(|c| *c == pane).unwrap();
@@ -107,8 +107,10 @@ mod tests {
         // on the root tab view and the window opens on Project instead.
         assert!(STEPS.iter().any(|(_, _, children)| *children == [OPENS_ON]));
         assert!(!children.contains(&"render"));
-        // The S3 upload is a button on Socials, not a tab of its own.
+        // The S3 upload is a button on Socials, not a tab of its own; what it
+        // uploaded is listed one tab over, after Buffer.
         assert!(!children.contains(&"distribute"));
+        assert_eq!(at("files"), at("schedule") + 1);
         let unique: std::collections::HashSet<_> = children.iter().collect();
         assert_eq!(unique.len(), children.len());
         assert!(!children.contains(&"edit"));

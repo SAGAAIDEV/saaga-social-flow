@@ -329,6 +329,7 @@ pub fn run_record_session(
         distribute_tx,
         distribute_rx,
         distribute_busy: false,
+        files: crate::files::FilesState::new(),
         schedule_tx,
         schedule_rx,
         analytics_tx,

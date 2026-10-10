@@ -228,6 +228,14 @@ pub enum WebEvent {
         text: String,
     },
 
+    /// The Files tab: list the upload bucket again.
+    RefreshFiles,
+    /// Open `url` in the browser. Only an `https://` URL is opened — see
+    /// [`crate::files::openable`].
+    OpenUrl {
+        url: String,
+    },
+
     /// The Settings form. Only the boxes that were filled in travel: the pane
     /// is never handed a stored secret, so an untouched box arrives absent
     /// rather than empty, and `settings::write` leaves what it does not hear
@@ -360,6 +368,8 @@ impl WebEvent {
             WebEvent::RenderTarget { name, value } => UiEvent::RenderTarget { name, value },
             WebEvent::RepairBlog => UiEvent::RepairBlog,
             WebEvent::CopyText { text } => UiEvent::CopyText(text),
+            WebEvent::RefreshFiles => UiEvent::RefreshFiles,
+            WebEvent::OpenUrl { url } => UiEvent::OpenUrl(url),
             WebEvent::SaveSettings { fields } => UiEvent::SaveSettings(fields),
             WebEvent::TestSettings { service } => UiEvent::TestSettings(service),
             WebEvent::PhotoCountdown { value } => UiEvent::PhotoCountdown(value),
@@ -665,6 +675,23 @@ mod tests {
             all,
             WebEvent::CopyText {
                 text: "one\ntwo".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_files_messages_parse() {
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"refreshFiles"}"#).unwrap(),
+            WebEvent::RefreshFiles
+        );
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(
+                r#"{"type":"openUrl","url":"https://cdn.example.com/a.mp4"}"#
+            )
+            .unwrap(),
+            WebEvent::OpenUrl {
+                url: "https://cdn.example.com/a.mp4".into()
             }
         );
     }

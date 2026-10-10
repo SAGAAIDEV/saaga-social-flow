@@ -98,6 +98,8 @@ struct Live {
     settings_pane: ui::WebPane,
     /// The Project tab's summary — see `update_project_view`.
     project_pane: ui::WebPane,
+    /// Socials → Files — see `update_files_view`.
+    files_pane: ui::WebPane,
     /// The Plan tab's pane — see `update_plan_view`.
     plan_pane: ui::WebPane,
     layout: ui::Layout,
@@ -178,6 +180,8 @@ pub struct App {
     /// Same guard for the upload: it pushes to public S3 and rewrites
     /// `links.json`, so a double press would re-upload every asset.
     distribute_busy: bool,
+    /// Socials → Files: the S3 listing and what it last brought back.
+    files: crate::files::FilesState,
     schedule_tx: mpsc::Sender<crate::schedule::ScheduleEvent>,
     schedule_rx: Receiver<crate::schedule::ScheduleEvent>,
     /// True while a plan or queue job is in flight. Both touch the same files and
@@ -408,6 +412,7 @@ impl App {
             settings_pane: attached.settings_pane,
             project_pane: attached.project_pane,
             plan_pane: attached.plan_pane,
+            files_pane: attached.files_pane,
             layout: attached.layout,
         })
     }
@@ -1058,6 +1063,8 @@ impl App {
             UiEvent::RemoveReference(name) => self.remove_reference(&name),
             UiEvent::ProjectNameChanged(name) => self.rename_project(&name),
             UiEvent::CopyText(text) => self.copy_text(&text),
+            UiEvent::RefreshFiles => self.refresh_files(),
+            UiEvent::OpenUrl(url) => self.open_url(&url),
             UiEvent::CopyYoutubeRefreshToken => self.copy_youtube_refresh_token(),
             UiEvent::OpenChapter(chapter) => self.open_edit_chapter(chapter),
             UiEvent::SaveEdit { chapter, spans } => self.save_edit_spans(chapter, &spans),
@@ -1258,6 +1265,8 @@ impl App {
         self.update_schedule_summary();
         // The open version's row, and its deck, are on the Project tab.
         self.update_project_view();
+        // The Files tab opens this project's folder.
+        self.update_files_view();
         self.sync_plan_rehearsal();
         self.sync_controls();
     }
@@ -4367,6 +4376,8 @@ impl App {
                     self.schedule_replan = true;
                     self.update_schedule_summary();
                     self.update_video_view();
+                    // What it just put there, on the Files tab.
+                    self.refresh_files();
                     self.sync_controls();
                 }
                 crate::distribute::DistributeEvent::Failed(msg) => {
@@ -4375,6 +4386,37 @@ impl App {
                     self.sync_controls();
                 }
             }
+        }
+    }
+
+    /// Lists the upload bucket on a thread, unless a listing is running.
+    fn refresh_files(&mut self) {
+        if self.files.refresh() {
+            self.update_files_view();
+        }
+    }
+
+    fn drain_files(&mut self) {
+        if self.files.drain() {
+            self.update_files_view();
+        }
+    }
+
+    /// Socials → Files, with the open project's folder expanded.
+    fn update_files_view(&self) {
+        if let Some(live) = self.live.as_ref() {
+            let pane = self.files.pane(&self.session.folder());
+            live.files_pane.show(&ui::render::page("files.html", &pane));
+        }
+    }
+
+    fn open_url(&self, url: &str) {
+        if !crate::files::openable(url) {
+            eprintln!("stream-recorder: not opening {url:?}: only https:// links are opened");
+            return;
+        }
+        if let Err(err) = std::process::Command::new("open").arg(url).status() {
+            eprintln!("stream-recorder: could not open {url}: {err}");
         }
     }
 
@@ -4495,6 +4537,8 @@ impl ApplicationHandler for App {
                 // S3, on a thread: the links box and the YouTube footer fill in
                 // when it lands.
                 self.load_team_template();
+                // S3 again: the Files tab fills in when the listing lands.
+                self.refresh_files();
                 self.refresh_banner();
                 // Before the picker is filled, so it never lists a folder that is
                 // about to go. Never the open project, whatever state it is in.
@@ -4587,6 +4631,7 @@ impl ApplicationHandler for App {
         self.drain_blog();
         self.drain_titles();
         self.drain_distribute();
+        self.drain_files();
         self.drain_schedule();
         self.drain_publish();
         self.drain_analytics();

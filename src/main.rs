@@ -45,6 +45,7 @@ mod distribute;
 mod edit;
 mod face;
 mod figure;
+mod files;
 mod hotkeys;
 mod layouts;
 mod longform;

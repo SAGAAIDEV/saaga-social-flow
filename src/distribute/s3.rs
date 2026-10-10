@@ -466,6 +466,83 @@ pub(crate) fn write_team_object(
     })
 }
 
+/// One object under the upload prefix.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Listed {
+    /// The key below the prefix: `<project>/v1/landscape-1a2b3c4d.mp4`.
+    pub path: String,
+    pub size: u64,
+    /// Seconds since the Unix epoch.
+    pub modified: Option<i64>,
+    /// Where the platforms fetch it — the same URL the upload recorded.
+    pub url: String,
+}
+
+/// Everything the uploads have put on S3, for the Files tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Listing {
+    /// `s3://<bucket>/<prefix>/`, for the pane's heading.
+    pub location: String,
+    pub objects: Vec<Listed>,
+    /// More than [`MAX_LISTED`] objects: the rest were not fetched.
+    pub truncated: bool,
+}
+
+/// A ceiling on one listing, so a prefix that grew far past what the uploads
+/// write cannot hold the pane on a long walk. Each page is a thousand keys.
+const MAX_LISTED: usize = 20_000;
+
+/// Lists every object under `S3_PREFIX` in `S3_BUCKET`, page by page.
+pub fn list_uploads() -> Result<Listing> {
+    let config = Config::from_env()?;
+    let prefix = format!("{}/", config.prefix);
+    let location = format!("s3://{}/{prefix}", config.bucket);
+    team_runtime()?.block_on(async {
+        let client = client(&config).await;
+        let mut objects = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let page = client
+                .list_objects_v2()
+                .bucket(&config.bucket)
+                .prefix(&prefix)
+                .set_continuation_token(token.take())
+                .send()
+                .await
+                .map_err(|err| explain_team(&format!("listing {location}"), &err))?;
+            for object in page.contents() {
+                let Some(key) = object.key() else { continue };
+                let Some(path) = key.strip_prefix(&prefix).filter(|p| !p.is_empty()) else {
+                    continue;
+                };
+                objects.push(Listed {
+                    path: path.to_string(),
+                    size: object.size().unwrap_or(0).max(0) as u64,
+                    modified: object.last_modified().map(|t| t.secs()),
+                    url: config.public_url(key),
+                });
+            }
+            if objects.len() >= MAX_LISTED {
+                objects.truncate(MAX_LISTED);
+                return Ok(Listing {
+                    location,
+                    objects,
+                    truncated: true,
+                });
+            }
+            match page.next_continuation_token() {
+                Some(next) if page.is_truncated() == Some(true) => token = Some(next.to_string()),
+                _ => break,
+            }
+        }
+        Ok(Listing {
+            location,
+            objects,
+            truncated: false,
+        })
+    })
+}
+
 fn team_runtime() -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -657,6 +734,24 @@ fn percent_encode(text: &str, keep_slash: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The Files tab's listing against the real bucket. Read-only. Run with
+    /// `sops exec-env dev.sops.env 'cargo test --release -- --ignored lists_the_live'`.
+    #[test]
+    #[ignore = "lists the real upload bucket; needs S3_* from dev.sops.env and an aws sso login"]
+    fn lists_the_live_upload_bucket() {
+        let listing = super::list_uploads().expect("listing the upload bucket");
+        println!(
+            "{} object(s) under {}",
+            listing.objects.len(),
+            listing.location
+        );
+        for object in listing.objects.iter().take(5) {
+            println!("  {} ({} B) {}", object.path, object.size, object.url);
+        }
+        assert!(listing.location.starts_with("s3://"));
+        assert!(listing.objects.iter().all(|o| !o.path.is_empty()));
+    }
+
     use super::*;
     use std::path::PathBuf;
 
