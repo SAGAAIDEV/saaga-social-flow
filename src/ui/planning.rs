@@ -69,6 +69,13 @@ pub struct ProjectView {
     /// A short beside a video is short whatever is picked, so its Format card
     /// cannot be changed.
     pub format_fixed: bool,
+    /// A plan has been built, and it was shaped for this format, so the
+    /// Format card cannot be changed — see [`Session::set_format`].
+    pub format_planned: bool,
+    /// `one-off` or `series` — see [`crate::sessions::Kind`].
+    pub kind: &'static str,
+    /// A short beside a video is one video, so it has no kind to pick.
+    pub kind_fixed: bool,
     /// The Category card. Filled by the app, which holds the team template;
     /// `None` in a view built from disk alone, and the card is left out.
     pub category: Option<CategoryView>,
@@ -353,6 +360,9 @@ pub fn project_view(session: &Session) -> ProjectView {
         links,
         format: session.format().slug(),
         format_fixed: session.parent_root().is_some(),
+        format_planned: session.planned(),
+        kind: session.kind().slug(),
+        kind_fixed: session.parent_root().is_some(),
         category: None,
     }
 }
@@ -490,6 +500,9 @@ pub struct ChapterView {
     pub layout_key: String,
     /// "0:45", from the plan's estimate.
     pub est: Option<String>,
+    /// Whether its chapter card is on, for a body chapter of a long video —
+    /// the only chapter that can have one. `None` draws no choice.
+    pub card: Option<bool>,
 }
 
 /// One entry in a chapter's layout picker.
@@ -549,6 +562,8 @@ pub struct PlanView {
     /// Whether this recording version has chapters to plan from.
     pub can_rehearse: bool,
     pub layouts: Vec<LayoutOption>,
+    /// What the planner is told the project is: "a long video in Agents".
+    pub planning_for: String,
 }
 
 /// `45` → `0:45`, `125` → `2:05`.
@@ -611,6 +626,7 @@ fn chapter_view(n: usize, chapter: &crate::plan::schema::PlanChapter) -> Chapter
         layout: chapter.layout.map(crate::layouts::Pair::as_str),
         layout_key: chapter.layout.map(pair_key).unwrap_or_default(),
         est: chapter.est_seconds.map(mmss),
+        card: (chapter.kind == ChapterKind::Body).then_some(chapter.card),
     }
 }
 
@@ -703,6 +719,9 @@ pub fn plan_from_fields(base: &Plan, fields: &BTreeMap<String, String>) -> Plan 
         if let Some(value) = fields.get(&key("layout")) {
             chapter.layout = serde_json::from_value(serde_json::Value::String(value.clone())).ok();
         }
+        if let Some(value) = fields.get(&key("card")) {
+            chapter.card = value != "off";
+        }
         if let Some(value) = fields.get(&key("est")) {
             // Blank clears the estimate; anything unreadable — "1:" on the way
             // to "1:30" — keeps the last one rather than dropping it.
@@ -755,7 +774,16 @@ pub fn plan_view(session: &Session, live: PlanLive) -> PlanView {
     let chosen = selected.map(|n| (n, plan::load(&dir, n)));
     let (plan, unreadable) = match &chosen {
         None => (None, None),
-        Some((_, Ok(plan))) => (Some(plan_shown(plan)), None),
+        Some((_, Ok(plan))) => {
+            let mut shown = plan_shown(plan);
+            // A short is vertical only, and only the horizontal video has cards.
+            if session.is_short() {
+                for chapter in &mut shown.chapters {
+                    chapter.card = None;
+                }
+            }
+            (Some(shown), None)
+        }
         Some((n, Err(err))) => (None, Some(format!("Plan {n} could not be read: {err:#}"))),
     };
     let chosen = chosen.and_then(|(_, plan)| plan.ok());
@@ -773,6 +801,15 @@ pub fn plan_view(session: &Session, live: PlanLive) -> PlanView {
         locked: locked(live, chosen.as_ref()),
         can_rehearse: can_rehearse(session),
         layouts: layout_options(),
+        planning_for: planning_for(&plan::brief(session)),
+    }
+}
+
+/// "a long video in Agents", or "a short with no category yet".
+fn planning_for(brief: &crate::agent::plan::Brief) -> String {
+    match &brief.category {
+        Some(category) => format!("a {} in {category}", brief.format.noun()),
+        None => format!("a {} with no category yet", brief.format.noun()),
     }
 }
 
@@ -833,6 +870,7 @@ mod tests {
             show: String::new(),
             layout: None,
             est_seconds: Some(40),
+            card: true,
         }
     }
 
@@ -1275,6 +1313,48 @@ mod tests {
         let view = plan_view(&session, PlanLive::default());
         assert_eq!(view.locked, None);
         assert!(!view.plan.unwrap().approved);
+    }
+
+    /// A body chapter of a long video offers its card; the hook and CTA do
+    /// not, and a short — vertical only — offers none. The choice posts as
+    /// `on` or `off`.
+    #[test]
+    fn a_body_chapter_of_a_long_video_offers_its_card() {
+        let session = project("card-choice");
+        let dir = plan::dir(&session);
+        plan::save_new(&dir, plan("One")).unwrap();
+        let long = plan_page(&plan_view(&session, PlanLive::default()));
+        assert!(long.contains(r#"data-field="ch2.card""#), "{long}");
+        assert!(
+            !long.contains(r#"data-field="ch1.card""#),
+            "the hook has no card"
+        );
+        assert!(
+            !long.contains(r#"data-field="ch3.card""#),
+            "the CTA has no card"
+        );
+
+        assert!(
+            long.contains("Planning a long video with no category yet"),
+            "{long}"
+        );
+
+        let short = project("card-choice-short");
+        short.set_format(Format::Short).unwrap();
+        plan::save_new(&plan::dir(&short), plan("One")).unwrap();
+        let short = plan_page(&plan_view(&short, PlanLive::default()));
+        assert!(!short.contains(r#".card""#), "a short has no cards");
+        assert!(
+            short.contains("Planning a short with no category yet"),
+            "{short}"
+        );
+
+        let mut fields = BTreeMap::new();
+        fields.insert("ch2.card".to_string(), "off".to_string());
+        let edited = plan_from_fields(&plan("One"), &fields);
+        assert!(!edited.body.chapters[1].card);
+        fields.insert("ch2.card".to_string(), "on".to_string());
+        assert!(plan_from_fields(&edited, &fields).body.chapters[1].card);
     }
 
     #[test]

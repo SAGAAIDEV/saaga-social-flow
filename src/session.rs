@@ -126,8 +126,37 @@ impl Session {
         }
     }
 
+    /// Fixed once a plan is built: the planner shaped it for this format — a
+    /// long video's chapters, or a short's one — and the render cuts by that
+    /// shape, so a plan built for one format is wrong for the other.
     pub fn set_format(&self, format: crate::sessions::Format) -> Result<()> {
+        if format != self.format() && self.planned() {
+            anyhow::bail!(
+                "the format is fixed once a plan is built: this project's plan is for a {}. \
+                 Start a new project for the other format.",
+                self.format().noun()
+            );
+        }
         crate::sessions::save_format(&self.root, format)
+    }
+
+    /// Whether any plan version has been built for this project.
+    pub fn planned(&self) -> bool {
+        !crate::plan::versions(&crate::plan::dir(self)).is_empty()
+    }
+
+    /// One-off or series. A short recorded beside a video is one video, so
+    /// it is always a one-off.
+    pub fn kind(&self) -> crate::sessions::Kind {
+        if self.parent_root().is_some() {
+            crate::sessions::Kind::OneOff
+        } else {
+            crate::sessions::load_kind(&self.root)
+        }
+    }
+
+    pub fn set_kind(&self, kind: crate::sessions::Kind) -> Result<()> {
+        crate::sessions::save_kind(&self.root, kind)
     }
 
     /// The project a short was recorded from, where its take is back to.
@@ -517,6 +546,17 @@ mod tests {
         assert!(targets.vertical && !targets.horizontal, "{targets:?}");
         project.set_format(Format::Long).unwrap();
         assert!(!project.is_short());
+
+        // Once a plan is built, the format it was built for stays.
+        std::fs::create_dir_all(crate::plan::dir(&project)).unwrap();
+        std::fs::write(crate::plan::dir(&project).join("v1.json"), "{}").unwrap();
+        assert!(project.planned());
+        let err = project.set_format(Format::Short).unwrap_err().to_string();
+        assert!(err.contains("plan is for a long video"), "{err}");
+        assert!(!project.is_short());
+        project
+            .set_format(Format::Long)
+            .expect("saving the same format is no change");
 
         // A short beside a video has no choice to make.
         let aside = Session::open_root(dir.join("video/shorts/short-01")).unwrap();

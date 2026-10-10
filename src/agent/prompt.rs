@@ -35,6 +35,10 @@ pub const SHORTS: &str = "shorts.suggestions";
 /// a section of [`NOTES`]: notes tighten a rehearsal that already happened,
 /// this plans a video before any of it is recorded.
 pub const PLAN: &str = "plan.video";
+/// The plan for a short-format project — see [`super::plan::SHORT_SYSTEM`].
+/// Its own id, not a variant of [`PLAN`]: a short is one chapter with no
+/// outline or closing chapter, and tuning one shape must not retune the other.
+pub const PLAN_SHORT: &str = "plan.short";
 /// The summary of the final video — see [`crate::summary`]. Its own id: it
 /// describes what was said, where the blog and posts are written to be read.
 pub const SUMMARY: &str = "video.summary";
@@ -114,6 +118,7 @@ pub fn builtin(prompt_id: &str) -> Option<&'static str> {
         TITLES => Some(super::titles::SYSTEM),
         OUTLINE => Some(super::outline::SYSTEM),
         PLAN => Some(super::plan::SYSTEM),
+        PLAN_SHORT => Some(super::plan::SHORT_SYSTEM),
         SUMMARY => Some(super::summary::SYSTEM),
         CRITIQUE => Some(super::critique::SYSTEM),
         SHORTS => Some(super::shorts::SYSTEM),

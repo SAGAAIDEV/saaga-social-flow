@@ -95,6 +95,8 @@
 <h1>Plan</h1>
 <p class="sub">Talk the idea through, add instructions, and build a plan: hook, chapters,
   call to action and how to record it. The approved plan becomes the speaking notes.</p>
+<p class="sub">Planning {{ planning_for }}. The format and category are set on the
+  Project tab; the format is fixed once a plan is built.</p>
 
 <h2>Your idea</h2>
 <div class="bar">
@@ -284,6 +286,14 @@
     </label>
     {{ field("Length", ch ~ "est", chapter.est or "", lock, hint="0:45") }}
   </div>
+  {% if chapter.card is not none %}
+  <label class="field"><span>Chapter card — its number and title, in front of it in the long video</span>
+    <select data-field="{{ ch }}card" {% if lock %}disabled{% endif %}>
+      <option value="on" {% if chapter.card %}selected{% endif %}>Card in front of it</option>
+      <option value="off" {% if not chapter.card %}selected{% endif %}>No card — it carries on from the chapter before</option>
+    </select>
+  </label>
+  {% endif %}
 </div>
 {% else %}
 <p class="empty">This plan has no chapters.</p>

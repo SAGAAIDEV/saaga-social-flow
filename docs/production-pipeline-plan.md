@@ -34,9 +34,13 @@ capability, not a calendar.
 3. **Social posts are native video, with the blog URL added by the app.** The
    model no longer decides whether the link appears. A post waits until the blog
    it links to is live. Shorts cut from a long video link to that video's blog
-   post.
+   post. A short never gets a blog post of its own, so a standalone short (a
+   short-format project) posts with no link and does not wait.
 4. **No cadence.** Buffer posts go out on a tick with `shareNow`, as now.
-5. **Storage.** `saaga-internal-dev/socials/` is the private record, and the
+5. **Instagram and TikTok say "link in bio".** They do not make caption links
+   clickable, so their posts leave the URL out and end on a "link in bio" line;
+   the bio link points at the blog. LinkedIn, X and Bluesky carry the URL.
+6. **Storage.** `saaga-internal-dev/socials/` is the private record, and the
    plan is the first thing saved there. It went live with saaga-terraform PR #42
    on 2026-10-10. The finals Buffer fetches go to `saaga-dev-cdn/socials/`
    (`cdn.saagasolve.dev`). `saaga-screencast-media` is retired, which replaces
@@ -73,15 +77,28 @@ capability, not a calendar.
 
 ### Planning
 
+- **The format is fixed once a plan is built.** The plan is shaped for it,
+  so the Format card locks; the other format is a new project.
 - **The planner gets the format and the category.** A short is planned as a
-  short (one point, a hook in the first line, under a minute), and `demos` /
-  `opinions` use their definitions from `src/category.rs`. A long video keeps
-  hook, outline, body chapters and CTA.
-- **A chapter card is a plan field.** Add `card: bool` to `PlanChapter`,
-  defaulting to on for long-form body chapters and off otherwise, and editable
-  on the Plan tab. `compose` writes a card only where it is on.
+  short (one point, a hook in the first line, under a minute) in one body
+  chapter, with its own prompt (`plan.short`), and `demos` / `opinions` use
+  their definitions from `src/category.rs`. One chapter because the render
+  leaves the outline and CTA chapters out of every vertical, and posts each
+  chapter of a short as a clip. A long video keeps hook, outline, body
+  chapters and CTA.
+- **A chapter card is a plan field.** `card` on `PlanChapter`, on unless turned
+  off, read only for body chapters, and editable on the Plan tab for a long
+  video. `compose` writes a card only where it is on, and the cards count
+  themselves, so turning one off leaves no gap in the numbers.
 - **The plan saves to S3** after every build, refine, approve and un-approve:
-  `plan/` goes to `saaga-internal-dev/socials/<category>/<project>/plan/`.
+  `plan/` goes to `saaga-internal-dev/socials/<category>/<project>/videos/<video>/plan/`.
+  That is a video's plan. The project-level `socials/<category>/<project>/plan/`
+  is the series plan (Phase 7), as in the archive layout. A one-off's video is
+  named like its project, so its plan is at
+  `socials/<category>/<project>/videos/<project>/plan/`.
+- **The S3 folder name** is the project's name in URL form
+  (`support-agents-that-file-tickets`), or its folder timestamp when it has no
+  name. A rename moves the folder, as a category change does.
   `INTERNAL_BUCKET` and `INTERNAL_PREFIX` go in `dev.sops.env`, so the whole
   team writes to the same place. The sync is never fatal; a failure is a status
   line, and the next save retries. A category change moves the folder (copy,
@@ -126,8 +143,8 @@ capability, not a calendar.
 - **YouTube:** a manual press after the render review, plus tags at upload
   from the copy and the category hashtags. The title and description get an
   **Approve that sticks**, like the thumbnail's. It is saved with the copy,
-  locks it, and drops if the copy changes, and Upload waits for it. This is
-  being built first, on its own branch, ahead of the phases below.
+  locks it, and drops if the copy changes, and Upload waits for it. Built
+  ahead of the phases and merged on 2026-10-10 (`3bc84c3`).
 - **Blog:** unchanged: Write Article, then Publish, after YouTube.
 - **Socials:**
   - A Buffer row for a long video, or for a short cut from one, waits until
@@ -138,7 +155,9 @@ capability, not a calendar.
   - Publishing the blog sets `schedule_replan`, so the rows appear on their
     own.
   - Per platform: LinkedIn, X and Bluesky carry the URL in the text. Instagram
-    and TikTok do not make caption links clickable (see open question 2).
+    and TikTok end on "link in bio" instead (decision 5).
+  - A standalone short has no blog, so its posts carry no link and go out as
+    soon as they are approved.
   - Copy keeps being written at render time. Only the link waits.
 - **Slack** also posts the blog URL when the blog publishes.
 
@@ -164,27 +183,31 @@ Each phase is a branch and a merge, in this order. Phases 1–4 complete the
 pipeline for one-off videos; 5–6 make it fast; 7 adds series; 8 is the rest of
 the archive.
 
+Before Phase 4, one real short goes end to end: render, check it on Socials →
+Files, approve and upload on the YouTube tab. Nothing has been uploaded to
+`saaga-dev-cdn/socials` yet, and Phase 4's links depend on it.
+
 | # | Phase | Size | Depends on |
 |---|---|---|---|
-| 1 | Project `kind`; planner gets format and category; `card` per chapter | S | — |
+| 1 | Project `kind`; planner gets format and category (a short is one chapter); `card` per chapter | S | — |
 | 2 | Plan saved to `saaga-internal-dev/socials/`; the Files tab shows that bucket too | S–M | — |
 | 3 | Recording page: Video details goes, its pieces move | M | — |
 | 4 | Socials wait for the blog and carry its URL; YouTube tags; Slack on blog publish | M | — |
 | 5 | Each chapter renders on a GPU machine when it closes | L | — |
-| 6 | `infra/gpu-render` moves into saaga-terraform (import), then a warm machine per session | M | 5 |
+| 6a | `infra/gpu-render` moves into saaga-terraform (import). Can start any time: Jean's review takes time | S–M | — |
+| 6b | A warm machine per recording session | M | 5, 6a |
 | 7 | Series: series plan, episodes as sub-projects, Project tab list | L | 1, 2 |
 | 8 | Archive sync for everything else (`socials-archive-plan.md` phases 4, 6, 7) on this layout | M–L | 2 |
 
 ## Open questions
 
-1. **Standalone shorts** (short-format projects) have no blog today; the blog
-   step skips shorts. What should their posts link to: the YouTube Short, or
-   nothing?
-2. **Instagram and TikTok** do not make links in captions clickable. Should
-   those posts say "link in bio" with the URL left out, or carry the URL
-   anyway?
+Questions 1 and 2 (what standalone shorts link to, and the link on Instagram
+and TikTok) were answered on 2026-10-10: decisions 3 and 5.
+
 3. **Series on YouTube:** a playlist per series beside the category playlist,
    and a series page on the blog?
 4. **Mixed episodes:** can one series hold both long and short episodes?
 5. **Render review:** with every chapter rendered as it closes, does anything
    still wait for a person before YouTube, beyond the review on the YouTube tab?
+   Proposed: no; the rendered clips on the YouTube tab, checked before Upload,
+   are the review. Settle in Phase 5.

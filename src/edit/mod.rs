@@ -332,6 +332,7 @@ fn compose_and_render(
     )?;
     let cta = crate::plan::cta_chapter_of(session);
     let intro = crate::plan::outline_chapter_of(session);
+    let uncarded = crate::plan::uncarded_chapters_of(session, &numbers);
     for n in cta.into_iter().chain(intro) {
         drop_cta_short(&session.render_dir(), n)?;
     }
@@ -344,6 +345,7 @@ fn compose_and_render(
         &outlines,
         cta,
         intro,
+        &uncarded,
         targets,
     )?;
     if plan.is_empty() {

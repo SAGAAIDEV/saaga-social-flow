@@ -206,6 +206,7 @@ mod tests {
                         show: String::new(),
                         layout,
                         est_seconds: None,
+                        card: true,
                     })
                     .collect(),
                 ..PlanBody::default()

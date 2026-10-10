@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% import "components.html" as ui %}
 {#
-  The Project tab: where the open project stands, and what it is — its format
-  and its category, the two things set here. Otherwise read-only: picking, naming,
+  The Project tab: where the open project stands, and what it is — its format,
+  whether it is a one-off or a series, and its category, the things set here. Otherwise read-only: picking, naming,
   starting and cleaning up projects are the native controls above this pane,
   and every card here is a summary of files another tab writes.
 #}
@@ -45,20 +45,42 @@
 
 <!--
   Long or short. Render, Upload and the Buffer plan follow it: a short project
-  goes down the same road as a short recorded beside a video.
+  goes down the same road as a short recorded beside a video. Fixed once a
+  plan is built, because the planner shapes the plan for the format.
 -->
 <h2>Format</h2>
 <div class="card">
   <div class="row">
-    <select aria-label="Format" data-send-change='{{ {"type": "projectFormat", "root": root} | tojson }}'{% if format_fixed %} disabled{% endif %}>
+    <select aria-label="Format" data-send-change='{{ {"type": "projectFormat", "root": root} | tojson }}'{% if format_fixed or format_planned %} disabled{% endif %}>
       <option value="long"{% if format == "long" %} selected{% endif %}>Long · horizontal</option>
       <option value="short"{% if format == "short" %} selected{% endif %}>Short · vertical</option>
     </select>
   </div>
   <p class="why">
     {% if format_fixed %}A short recorded beside a video is always vertical.
+    {% elif format_planned %}Fixed: the plan was built for a {{ "short" if format == "short" else "long video" }}, and a plan is shaped for its format. Start a new project for the other format.
     {% elif format == "short" %}Render draws the vertical video only, and Upload puts it on YouTube as a Short on its own — three minutes at most. Pick it before Render; after a render, render again.
     {% else %}Render draws what the boxes above the Render button ask for: the horizontal video, and its chapters as vertical shorts. Pick the format before Render; after a render, render again.{% endif %}
+  </p>
+</div>
+
+<!--
+  One video or a series of them. A series plans its episodes up front and
+  records each inside the project; until that is built (Phase 7 of
+  docs/production-pipeline-plan.md) a series records as a one-off does.
+-->
+<h2>One-off or series</h2>
+<div class="card">
+  <div class="row">
+    <select aria-label="One-off or series" data-send-change='{{ {"type": "projectKind", "root": root} | tojson }}'{% if kind_fixed %} disabled{% endif %}>
+      <option value="one-off"{% if kind == "one-off" %} selected{% endif %}>One-off · one video</option>
+      <option value="series"{% if kind == "series" %} selected{% endif %}>Series · episodes</option>
+    </select>
+  </div>
+  <p class="why">
+    {% if kind_fixed %}A short recorded beside a video is one video.
+    {% elif kind == "series" %}A series will plan its episodes up front and record each one here as a video of its own. That is not built yet: for now this project records one video, like a one-off.
+    {% else %}One video: one plan, one recording, one upload.{% endif %}
   </p>
 </div>
 

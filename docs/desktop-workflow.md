@@ -1,7 +1,18 @@
 # Desktop content workflow
 
-The recorder's workflow steps are declared in `src/ui/workflow.rs`. From
-recording on:
+The recorder's workflow steps are declared in `src/ui/workflow.rs`.
+
+Before recording, the **Project** tab says what the project is: long or short,
+one-off or series, and its category. The format is fixed once a plan is built,
+because the plan is shaped for it. A series records exactly like a one-off
+until episodes are built (Phase 7 of `docs/production-pipeline-plan.md`). The
+**Plan** tab's planner is told the format and the category before it reads the
+idea. A long video is planned as hook, outline, body chapters and call to
+action. A short is planned as one chapter that opens on its hook and follows
+the demos or opinions definition. Each body chapter of a long video has a
+**Chapter card** choice, on unless you turn it off.
+
+From recording on:
 
 1. **Video recording** — record the session, then press **Render video**. It
    cuts and renders. When it finishes, the S3 upload starts by itself, and so
@@ -10,10 +21,11 @@ recording on:
    description, the thumbnail and the YouTube upload are their own steps.
    1. (The photo is no longer taken here — see **Thumbnail**.)
    2. Cuts and renders the longform and the vertical chapters, with progress
-      beneath the recording controls. The longform opens on the video's own
-      title, and every chapter after the first gets a card carrying the
-      chapter's own number — the same one the vertical cut, the notes and the
-      blog use, so the first card a viewer meets reads "Chapter 02". Three
+      beneath the recording controls. The longform opens on chapter one's
+      footage. Every chapter after it gets a card with its number and title,
+      counted from "01", except the plan's outline and call to action and any
+      chapter whose card the plan turned off; the next card counts on from the
+      last one shown. Three
       boxes directly above **Render video** — **Horizontal**,
       **Vertical**, **Shorts** — decide what is produced; all three are on by
       default and remembered. A render draws only what the ticked outputs still

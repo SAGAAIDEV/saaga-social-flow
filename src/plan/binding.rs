@@ -43,6 +43,12 @@ pub struct Binding {
     pub points: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<Pair>,
+    /// The chapter's card choice — see [`PlanChapter::card`].
+    #[serde(
+        default = "super::schema::on",
+        skip_serializing_if = "super::schema::is_on"
+    )]
+    pub card: bool,
 }
 
 pub fn path(session_dir: &Path, n: u32) -> PathBuf {
@@ -73,6 +79,7 @@ pub fn bind(session_dir: &Path, n: u32, plan: Option<&Plan>) -> Result<()> {
         title: chapter.title.clone(),
         points: chapter.points.clone(),
         layout: chapter.layout,
+        card: chapter.card,
     };
     let text = serde_json::to_string_pretty(&binding).context("serializing plan binding")?;
     std::fs::write(&target, text + "\n").with_context(|| format!("writing {}", target.display()))
@@ -104,6 +111,7 @@ pub fn resolve(plan_dir: &Path, session_dir: &Path, n: u32) -> Option<PlanChapte
         show: String::new(),
         layout: binding.layout,
         est_seconds: None,
+        card: binding.card,
     }))
 }
 
@@ -129,6 +137,7 @@ mod tests {
             cues: Vec::new(),
             show: String::new(),
             layout: Some(Pair::Split),
+            card: true,
             est_seconds: None,
         }
     }

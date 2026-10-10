@@ -155,6 +155,7 @@ pub fn run(
     let input = crate::plan::load_input(&plan_dir);
     let note = rewrite_note(&critique);
     let sources = crate::agent::plan::Sources {
+        brief: crate::plan::brief(session),
         instructions: input.instructions,
         typed: String::new(),
         takes: Vec::new(),

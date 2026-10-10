@@ -430,6 +430,7 @@ mod tests {
             show: String::new(),
             layout: None,
             est_seconds: None,
+            card: true,
         };
         let plan = crate::plan::Plan {
             body: PlanBody {

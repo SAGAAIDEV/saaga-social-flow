@@ -195,6 +195,11 @@ pub enum WebEvent {
         root: String,
         value: String,
     },
+    /// One-off or series, picked on the Project tab: `one-off` or `series`.
+    ProjectKind {
+        root: String,
+        value: String,
+    },
     /// Set a category up everywhere it drives — see [`crate::category::set_up`].
     /// `slug` names an existing Strapi category; empty makes or finds one by
     /// `name`.
@@ -362,6 +367,7 @@ impl WebEvent {
             WebEvent::BlogCategory { value } => UiEvent::BlogCategorySelected(value),
             WebEvent::ProjectCategory { root, value } => UiEvent::ProjectCategory { root, value },
             WebEvent::ProjectFormat { root, value } => UiEvent::ProjectFormat { root, value },
+            WebEvent::ProjectKind { root, value } => UiEvent::ProjectKind { root, value },
             WebEvent::SetUpCategory {
                 root,
                 slug,
@@ -1004,6 +1010,12 @@ mod tests {
             panic!("expected ProjectFormat");
         };
         assert_eq!((root.as_str(), value.as_str()), ("/p", "short"));
+        let event: WebEvent =
+            serde_json::from_str(r#"{"type":"projectKind","root":"/p","value":"series"}"#).unwrap();
+        let UiEvent::ProjectKind { root, value } = event.into_ui_event() else {
+            panic!("expected ProjectKind");
+        };
+        assert_eq!((root.as_str(), value.as_str()), ("/p", "series"));
     }
 
     #[test]
