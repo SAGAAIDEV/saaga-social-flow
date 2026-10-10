@@ -15,20 +15,31 @@
 .link a { color: var(--accent); word-break: break-all; }
 .link .none { color: var(--dim); font-size: 12px; }
 .links .bar { margin: 8px 0 0; }
+#youtube-details [readonly] { color: var(--dim); }
+.approved { color: var(--ok); }
 </style>
 <h1>YouTube</h1>
-<p class="sub">Save the video details, choose visibility above, then upload. Next: Blog (Strapi).</p>
-{% if youtube %}<p class="sub">This video is on YouTube: saving the details also changes its title and description there.</p>{% endif %}
+<p class="sub">Write or edit the title and description, approve them, choose visibility above, then upload: Upload sends exactly what is approved. Next: Blog (Strapi).</p>
+{% if youtube %}<p class="sub">This video is on YouTube: approving changes its title and description there.</p>{% endif %}
 <form id="youtube-details">
   <p><label for="youtube-title">Title</label></p>
-  <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%">
+  <input id="youtube-title" name="title" value="{{ metadata.title }}" maxlength="100" required style="width:100%"{% if approved %} readonly{% endif %}>
   <p><label for="youtube-description">Description</label></p>
-  <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit">{{ metadata.description }}</textarea>
-  <div class="bar"><button type="submit">Save video details</button>
+  <textarea id="youtube-description" name="description" rows="8" maxlength="5000" style="width:100%;font:inherit"{% if approved %} readonly{% endif %}>{{ metadata.description }}</textarea>
+  {% if approved %}
+  <div class="bar">
+    <span class="approved">✓ Approved{% if approved_at %} · {{ approved_at }}{% endif %}</span>
+    <button type="button" id="unapprove-copy" data-send='{{ {"type": "unapproveYoutube"} | tojson }}'>Un-approve</button>
+  </div>
+  <p class="sub">Locked: Save, Write and the Video tab cannot change it. Un-approve to edit, then approve again.</p>
+  {% else %}
+  <div class="bar"><button type="button" id="approve-copy" class="primary"{% if writing %} disabled{% endif %}>Approve title &amp; description</button>
+    <button type="submit">Save video details</button>
     <button type="button" id="write-copy"{% if writing %} disabled{% endif %}
       data-send='{{ {"type": "generateVideoCopy", "fields": {"root": root}} | tojson }}'>{% if writing %}Writing…{% elif written %}Rewrite title &amp; description{% else %}Write title &amp; description{% endif %}</button>
-    {% if unsaved %} <span class="sub">Unsaved edits — Upload shows them and saves them first.</span>{% endif %}</div>
-  <p class="sub">Write drafts both from the transcript, steered by the notes on the Video tab, and replaces what is above{% if unsaved %}, unsaved edits included{% endif %}.</p>
+    {% if unsaved %} <span class="sub">Unsaved edits — Save or Approve keeps them.</span>{% endif %}</div>
+  <p class="sub">Approve saves what is above and locks it; Upload waits for it. Write drafts both from the transcript, steered by the notes on the Video tab, and replaces what is above{% if unsaved %}, unsaved edits included{% endif %}.</p>
+  {% endif %}
 </form>
 {% if youtube or short %}
 <div class="links">
@@ -71,7 +82,15 @@
 })();
 document.getElementById('youtube-details').addEventListener('submit', function(event) {
   event.preventDefault();
+  // Approved copy is read-only, and Return in its title box must not save it.
+  if (this.elements.title.readOnly) return;
   send({type: 'saveYoutube', fields: {title: this.elements.title.value, description: this.elements.description.value}});
+});
+// What is on screen is what gets approved, saved first in the same step.
+var approveCopy = document.getElementById('approve-copy');
+if (approveCopy) approveCopy.addEventListener('click', function () {
+  var form = document.getElementById('youtube-details');
+  send({type: 'approveYoutube', fields: {title: form.elements.title.value, description: form.elements.description.value}});
 });
 var teamFooter = document.getElementById('team-footer');
 if (teamFooter) teamFooter.addEventListener('submit', function(event) {

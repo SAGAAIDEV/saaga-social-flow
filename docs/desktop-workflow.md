@@ -115,8 +115,16 @@ recording on:
    set's id, so a redraw, a new photo or a design edit needs approving again;
    nothing has to clear it. A project that was already on YouTube before this
    step existed counts as approved until it is approved once.
-3. **YouTube** — edit and save the title and description, choose visibility,
-   connect the channel, and upload (or re-upload) the longform by hand. The
+3. **YouTube** — write or edit the title and description, then **Approve**
+   them. Approve saves and locks them, so Save, Write and the Video tab
+   cannot change them until **Un-approve**. Upload waits for it, and its
+   dialog shows the approved copy read-only. The approval is tied to the copy
+   itself (`youtube-approval.json` holds its fingerprint), so it lapses if
+   the file changes underneath it. On a video already up, Approve is what
+   sends a new title and description to YouTube; Save only keeps them here.
+   A video uploaded before approvals existed counts its copy as approved.
+   Then choose visibility, connect the channel, and upload (or re-upload) the
+   longform by hand. The
    **Visibility** picker is both the setting the next upload goes up with and
    a control on the video already up: moving it makes the longform, and then
    the Short, public, unlisted or private on YouTube straight away, and the

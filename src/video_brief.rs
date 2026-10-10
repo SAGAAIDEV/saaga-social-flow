@@ -109,6 +109,9 @@ pub fn is_own_title(session: &Session, title: &str) -> bool {
 pub fn apply(session: &Session, brief: &Brief) -> Result<()> {
     let metadata = brief.metadata();
     metadata.validate()?;
+    // Before the card or the brief is touched, so approved copy refuses the
+    // whole change rather than half of it.
+    crate::publish::metadata::ensure_unlocked(session, &metadata)?;
     // The title is the thumbnail's headline unless one was typed for it under
     // Design; the description is YouTube's alone — the card does not draw one.
     let mut card = crate::card::load(&session.root);

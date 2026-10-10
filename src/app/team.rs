@@ -157,7 +157,7 @@ impl App {
         }
     }
 
-    /// Saving the video details, when the longform is already on YouTube,
+    /// Approving the video details, when the longform is already on YouTube,
     /// changes its title and description there too. On a thread: it is two
     /// calls to YouTube. The Short keeps its own copy and is left alone.
     pub(super) fn push_youtube_details(&mut self, metadata: &Metadata) {
@@ -166,7 +166,8 @@ impl App {
         };
         if self.team.youtube.is_some() {
             self.set_publish_line(
-                "Still updating YouTube with the last save — save again once it lands.",
+                "Still updating YouTube with the last approval — un-approve and approve again \
+                 once it lands.",
             );
             return;
         }
@@ -190,11 +191,11 @@ impl App {
             }) {
             Ok(_) => {
                 self.team.youtube = Some(rx);
-                self.set_publish_line("Video details saved — updating them on YouTube…");
+                self.set_publish_line("Approved — updating the title and description on YouTube…");
             }
-            Err(err) => {
-                self.set_publish_line(&format!("Saved here, but YouTube was not updated: {err}"))
-            }
+            Err(err) => self.set_publish_line(&format!(
+                "Approved here, but YouTube was not updated: {err}"
+            )),
         }
     }
 
@@ -253,10 +254,10 @@ impl App {
             ),
             TeamEvent::Saved(Err(err)) => self.set_team_status(&format!("Not saved: {err}")),
             TeamEvent::YoutubeDetails(id, Ok(())) => self.set_publish_line(&format!(
-                "Video details saved, and updated on YouTube (https://youtu.be/{id})."
+                "Approved, and updated on YouTube (https://youtu.be/{id})."
             )),
             TeamEvent::YoutubeDetails(_, Err(err)) => self.set_publish_line(&format!(
-                "Video details saved here, but YouTube was not updated: {err}"
+                "Approved here, but YouTube was not updated: {err}"
             )),
         }
         // The footer box is on the YouTube page, which is drawn whole.

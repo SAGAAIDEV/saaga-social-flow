@@ -1019,30 +1019,29 @@ impl App {
                 };
                 match crate::publish::metadata::save(&self.session, &metadata) {
                     Ok(()) => {
-                        self.youtube_draft = None;
-                        self.update_publish_summary();
-                        // Video details shows the title, and an untitled card
-                        // draws it — see `video_brief::card` — so both tabs
-                        // name the new one.
-                        self.update_video_view();
-                        if crate::card::load(&self.session.root).is_empty() {
-                            self.update_thumbnail_view();
-                        }
-                        self.sync_controls();
-                        if let Some(live) = &self.live {
-                            live.control_target
-                                .set_publish_status("Video details saved.");
-                        }
-                        // Already up: the edit is the video's now, on YouTube too.
-                        self.push_youtube_details(&metadata);
+                        self.copy_changed();
+                        // Saved is not approved: YouTube, and the next upload,
+                        // wait for Approve.
+                        let line = match crate::publish::metadata::approved(&self.session) {
+                            Some(_) => "Video details saved.",
+                            None if crate::publish::longform(&self.session).is_some() => {
+                                "Video details saved — approve them to change the video on YouTube."
+                            }
+                            None => "Video details saved — approve them before uploading.",
+                        };
+                        self.set_publish_status(line);
                     }
-                    Err(err) => {
-                        if let Some(live) = &self.live {
-                            live.control_target.set_publish_status(&format!("{err:#}"));
-                        }
-                    }
+                    Err(err) => self.set_publish_status(&format!("{err:#}")),
                 }
             }
+            UiEvent::ApproveYoutube(fields) => {
+                let metadata = crate::publish::metadata::Metadata {
+                    title: fields.get("title").cloned().unwrap_or_default(),
+                    description: fields.get("description").cloned().unwrap_or_default(),
+                };
+                self.approve_youtube(&metadata);
+            }
+            UiEvent::UnapproveYoutube => self.unapprove_youtube(),
             UiEvent::SelectThumbnail(id) => self.select_thumbnail(&id),
             UiEvent::BlogAuthorSelected(id) => self.select_blog_author(&id),
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
@@ -3445,12 +3444,58 @@ impl App {
         self.sync_controls();
     }
 
-    /// Upload, once the person pressing it has seen — and can still change —
-    /// the title and description: the dialog holds them in boxes (see
-    /// [`crate::ui::ControlTarget::confirm_upload`]), starting from the YouTube
-    /// tab's copy, saved or not. What is in the boxes on Upload is saved and
-    /// sent, so nothing goes up that was not on screen. The Short shares them,
-    /// with `#Shorts` added.
+    /// Saves and approves the title and description on screen. Upload waits
+    /// for this, and a video already on YouTube takes the approved copy now.
+    fn approve_youtube(&mut self, metadata: &crate::publish::metadata::Metadata) {
+        match crate::publish::metadata::approve(&self.session, metadata) {
+            Ok(_) => {
+                self.copy_changed();
+                match crate::publish::longform(&self.session) {
+                    // Approved is the video's copy now, on YouTube too; the
+                    // push narrates on the same line.
+                    Some(_) => self.push_youtube_details(metadata),
+                    None => self.set_publish_status(
+                        "Title and description approved — Upload sends exactly this.",
+                    ),
+                }
+            }
+            Err(err) => self.set_publish_status(&format!("Not approved: {err:#}")),
+        }
+    }
+
+    fn unapprove_youtube(&mut self) {
+        match crate::publish::metadata::unapprove(&self.session) {
+            Ok(()) => {
+                self.update_publish_summary();
+                self.update_video_view();
+                self.sync_controls();
+                self.set_publish_status(
+                    "Unlocked — edit the title and description, then approve them again.",
+                );
+            }
+            Err(err) => self.set_publish_status(&format!("Still approved: {err:#}")),
+        }
+    }
+
+    /// What follows a saved or approved title and description: the tabs that
+    /// show them are drawn again.
+    fn copy_changed(&mut self) {
+        self.youtube_draft = None;
+        self.update_publish_summary();
+        // Video details shows the title, and an untitled card draws it — see
+        // `video_brief::card` — so both tabs name the new one.
+        self.update_video_view();
+        if crate::card::load(&self.session.root).is_empty() {
+            self.update_thumbnail_view();
+        }
+        self.sync_controls();
+    }
+
+    /// Upload, with the approved title and description and nothing else: the
+    /// dialog shows them read-only (see
+    /// [`crate::ui::ControlTarget::confirm_upload`]), and changing them is
+    /// Un-approve on the YouTube tab. The Short shares them, with `#Shorts`
+    /// added.
     fn run_youtube_upload(&mut self) {
         if self.publish_busy {
             self.set_publish_status("An upload is already running…");
@@ -3463,45 +3508,20 @@ impl App {
                 return;
             }
         };
-        let saved = crate::publish::metadata::load(&self.session);
-        let mut unsaved = self.youtube_draft.is_some();
-        let mut copy = self.youtube_draft.clone().unwrap_or_else(|| saved.clone());
-        let mut error: Option<String> = None;
-        // Asked again, with the text kept, until the copy is one YouTube will
-        // take or the author cancels — a refusal after the press would lose
-        // what they just typed.
-        let edited = loop {
-            let answer = self.live.as_ref().and_then(|live| {
-                live.control_target
-                    .confirm_upload(&plan, &copy, unsaved, error.as_deref())
-            });
-            let Some((upload, edited)) = answer else {
-                return;
-            };
-            if !upload {
-                // What was typed in the dialog is kept for the next press, as
-                // unsaved edits on the YouTube tab.
-                self.youtube_draft = (edited != saved).then_some(edited);
-                self.update_publish_summary();
-                self.set_publish_status("Upload cancelled — nothing was sent.");
-                return;
-            }
-            match edited.validate() {
-                Ok(()) => break edited,
-                Err(err) => {
-                    error = Some(format!("{err:#}"));
-                    unsaved = edited != saved;
-                    copy = edited;
-                }
-            }
+        // The gate already waits for this; a queued click can still arrive.
+        let Some(copy) = crate::publish::metadata::approved(&self.session) else {
+            self.set_publish_status(
+                "Not uploading: approve the title and description on the YouTube tab first.",
+            );
+            return;
         };
-        if edited != saved {
-            if let Err(err) = crate::publish::metadata::save(&self.session, &edited) {
-                self.set_publish_status(&format!(
-                    "Not uploading — the edits did not save: {err:#}"
-                ));
-                return;
-            }
+        let confirmed = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.control_target.confirm_upload(&plan, &copy));
+        if !confirmed {
+            self.set_publish_status("Upload cancelled — nothing was sent.");
+            return;
         }
         self.youtube_draft = None;
         self.update_publish_summary();
@@ -4030,15 +4050,17 @@ impl App {
             (Some(long), Some(short)) => Some(format!("{long}\n{short}")),
             _ => None,
         };
+        // Locked copy is what the tab shows, whatever was typed before Approve.
+        let approved = crate::publish::metadata::approved(&self.session);
         live.publish_pane.show_local(
             &ui::render::page(
                 "youtube.html",
                 minijinja::context! {
-                    metadata => self
-                        .youtube_draft
-                        .clone()
+                    metadata => approved.clone().or_else(|| self.youtube_draft.clone())
                         .unwrap_or_else(|| crate::publish::metadata::load(&self.session)),
-                    unsaved => self.youtube_draft.is_some(), info => info,
+                    unsaved => approved.is_none() && self.youtube_draft.is_some(), info => info,
+                    approved => approved.is_some(),
+                    approved_at => approved.as_ref().and_then(|_| crate::publish::metadata::approval(&self.session)).map(|a| a.when()),
                     // Write, from this tab as well as Video details: the same
                     // job, so one running locks both buttons.
                     root => self.session.root.to_string_lossy(),
