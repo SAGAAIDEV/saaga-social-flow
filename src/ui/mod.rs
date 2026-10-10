@@ -241,6 +241,9 @@ pub enum UiEvent {
     /// let a brief's stage directions land on the drawn thumbnail.
     SaveCard(std::collections::BTreeMap<String, String>),
     SaveYoutube(std::collections::BTreeMap<String, String>),
+    /// The YouTube tab's Approve: save these and approve them.
+    ApproveYoutube(std::collections::BTreeMap<String, String>),
+    UnapproveYoutube,
     SaveVideoBrief {
         fields: std::collections::BTreeMap<String, String>,
         apply: bool,
@@ -1203,18 +1206,16 @@ impl ControlTarget {
         &self,
         plan: &crate::publish::UploadPlan,
         copy: &crate::publish::metadata::Metadata,
-        unsaved: bool,
-        error: Option<&str>,
-    ) -> Option<(bool, crate::publish::metadata::Metadata)> {
-        let mtm = MainThreadMarker::new()?;
+    ) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
         let alert = NSAlert::new(mtm);
         alert.setMessageText(&NSString::from_str(match plan.videos.len() {
             1 => "Upload this to YouTube?",
             _ => "Upload these to YouTube?",
         }));
-        alert.setInformativeText(&NSString::from_str(&upload_dialog_info(
-            plan, unsaved, error,
-        )));
+        alert.setInformativeText(&NSString::from_str(&upload_dialog_info(plan)));
 
         // Title above description, each labelled with its limit, in one
         // accessory view. Built bottom-up: AppKit's y runs upward.
@@ -1227,8 +1228,7 @@ impl ControlTarget {
             NSView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(W, height)),
         );
-        let title_label =
-            NSTextField::labelWithString(&NSString::from_str("Title — 1 to 100 characters"), mtm);
+        let title_label = NSTextField::labelWithString(&NSString::from_str("Title"), mtm);
         title_label.setFrame(NSRect::new(
             NSPoint::new(0.0, height - LABEL),
             NSSize::new(W, LABEL),
@@ -1241,15 +1241,18 @@ impl ControlTarget {
                 NSSize::new(W, FIELD_H),
             ),
         );
+        // Read, not edited: this is the approved copy, and a change here would
+        // go up unapproved. Selectable, so a line can still be copied.
         title.setBezeled(true);
-        title.setEditable(true);
+        title.setEditable(false);
+        title.setSelectable(true);
         title.setStringValue(&NSString::from_str(&copy.title));
         accessory.addSubview(&title);
         let desc_label = NSTextField::labelWithString(
             &NSString::from_str(if plan.has_short {
-                "Description — up to 5,000 characters. The Short gets it too, with #Shorts added."
+                "Description — the Short gets it too, with #Shorts added."
             } else {
-                "Description — up to 5,000 characters"
+                "Description"
             }),
             mtm,
         );
@@ -1263,13 +1266,9 @@ impl ControlTarget {
         scroll.setHasVerticalScroller(true);
         scroll.setBorderType(NSBorderType::BezelBorder);
         let description = NSTextView::initWithFrame(NSTextView::alloc(mtm), frame);
-        description.setEditable(true);
+        description.setEditable(false);
+        description.setSelectable(true);
         description.setRichText(false);
-        // What is typed goes to YouTube as typed: no curly quotes, no em
-        // dashes from a double hyphen, no link attributes on a pasted URL.
-        description.setAutomaticQuoteSubstitutionEnabled(false);
-        description.setAutomaticDashSubstitutionEnabled(false);
-        description.setAutomaticLinkDetectionEnabled(false);
         description.setFont(Some(&NSFont::systemFontOfSize(12.0)));
         description.setString(&NSString::from_str(&copy.description));
         description.setVerticallyResizable(true);
@@ -1285,20 +1284,10 @@ impl ControlTarget {
         alert.setAccessoryView(Some(&accessory));
         let cancel = alert.addButtonWithTitle(&NSString::from_str("Cancel"));
         alert.addButtonWithTitle(&NSString::from_str("Upload"));
-        // The first button would take Return, and Return is what ends a line
-        // in the title box — so Cancel answers Escape instead, and Return
-        // presses nothing. Upload is only ever a click.
+        // The first button would take Return, so Cancel answers Escape
+        // instead, and Return presses nothing. Upload is only ever a click.
         cancel.setKeyEquivalent(&NSString::from_str("\u{1b}"));
-        // The title box has the caret when the dialog opens, not a button.
-        alert.window().setInitialFirstResponder(Some(&title));
-        let upload = alert.runModal() == 1001;
-        Some((
-            upload,
-            crate::publish::metadata::Metadata {
-                title: title.stringValue().to_string(),
-                description: description.string().to_string(),
-            },
-        ))
+        alert.runModal() == 1001
     }
 
     /// Switches each pipeline button on or off from [`crate::stage::Stages`].
@@ -2282,24 +2271,13 @@ fn layout_plan(width: f64, height: f64, strip: &PlanStrip) {
 
 /// The upload dialog's line above the boxes: which videos go up and who
 /// sees them, whether the copy is unsaved, and why the last try was refused.
-fn upload_dialog_info(
-    plan: &crate::publish::UploadPlan,
-    unsaved: bool,
-    error: Option<&str>,
-) -> String {
-    let mut info = format!(
-        "{} — {}.",
+fn upload_dialog_info(plan: &crate::publish::UploadPlan) -> String {
+    format!(
+        "{} — {}. The approved title and description below go up as they are; to change \
+         them, press Un-approve on the YouTube tab.",
         plan.videos.join(" and "),
         plan.privacy.label().to_lowercase()
-    );
-    info.push_str(" Edit the title and description below; Upload saves them and sends them.");
-    if unsaved {
-        info.push_str(" They start from edits on the YouTube tab that are not saved yet.");
-    }
-    if let Some(error) = error {
-        info = format!("Not uploaded — {error}. Fix it below and press Upload again.\n\n{info}");
-    }
-    info
+    )
 }
 
 /// The group's rows: every button its own row, except a run of buttons tagged
@@ -4201,24 +4179,18 @@ mod tests {
     }
 
     #[test]
-    fn the_upload_dialog_says_what_goes_up_and_why_it_was_refused() {
+    fn the_upload_dialog_says_what_goes_up_and_that_the_copy_is_approved() {
         let plan = crate::publish::UploadPlan {
             videos: vec!["The full video", "The Short"],
             has_short: true,
             privacy: crate::publish::youtube::Privacy::Unlisted,
         };
-        let info = super::upload_dialog_info(&plan, false, None);
+        let info = super::upload_dialog_info(&plan);
         assert!(
             info.starts_with("The full video and The Short — unlisted."),
             "{info}"
         );
-        assert!(!info.contains("not saved"));
-        let again = super::upload_dialog_info(
-            &plan,
-            true,
-            Some("YouTube title must contain 1–100 characters"),
-        );
-        assert!(again.starts_with("Not uploaded — YouTube title must contain 1–100 characters."));
-        assert!(again.contains("not saved yet"));
+        assert!(info.contains("approved title and description"), "{info}");
+        assert!(info.contains("Un-approve"), "{info}");
     }
 }

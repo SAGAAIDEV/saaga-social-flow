@@ -1318,6 +1318,50 @@ mod tests {
         assert!(!html.contains("Template error"));
     }
 
+    /// Approved copy is drawn locked: read-only boxes, the time it was
+    /// approved, Un-approve, and no Save, Write or Approve to go around it.
+    #[test]
+    fn approved_youtube_copy_is_locked_on_the_tab() {
+        let render = |approved: bool| {
+            page(
+                "youtube.html",
+                minijinja::context! {
+                    metadata => crate::publish::metadata::Metadata {
+                        title: "Final title".into(), description: "Final words".into(),
+                    },
+                    info => "", root => "/tmp/project",
+                    approved => approved,
+                    approved_at => approved.then_some("2026-10-10 14:05"),
+                },
+            )
+        };
+        let open = render(false);
+        assert!(!open.contains("Template error"), "{open}");
+        assert!(open.contains(r#"id="approve-copy""#));
+        assert!(
+            open.contains("approveYoutube"),
+            "the Approve script is wired"
+        );
+        assert!(open.contains("Save video details"));
+        assert!(open.contains(r#"id="write-copy""#));
+        // The attribute, not the stylesheet's `[readonly]` rule.
+        assert_eq!(open.matches(" readonly>").count(), 0, "{open}");
+        assert!(!open.contains("Un-approve"));
+
+        let locked = render(true);
+        assert!(!locked.contains("Template error"), "{locked}");
+        assert_eq!(
+            locked.matches(" readonly>").count(),
+            2,
+            "both boxes: {locked}"
+        );
+        assert!(locked.contains("Approved · 2026-10-10 14:05"));
+        assert!(locked.contains("unapproveYoutube"));
+        assert!(!locked.contains(r#"id="approve-copy""#));
+        assert!(!locked.contains("Save video details"));
+        assert!(!locked.contains(r#"id="write-copy""#));
+    }
+
     /// Write is on the tab the copy is edited on, not only on Video details:
     /// the same event, for this project, locked while a write runs.
     #[test]
@@ -1643,7 +1687,7 @@ mod tests {
     /// The team footer box, and the line that says a save now reaches the
     /// video on YouTube — only once it is up.
     #[test]
-    fn the_youtube_tab_edits_the_team_footer_and_says_a_save_updates_youtube() {
+    fn the_youtube_tab_edits_the_team_footer_and_says_approving_updates_youtube() {
         let html = page(
             "youtube.html",
             minijinja::context! {
@@ -1657,7 +1701,7 @@ mod tests {
             },
         );
         assert!(!html.contains("Template error"), "{html}");
-        assert!(html.contains("also changes its title and description there"));
+        assert!(html.contains("approving changes its title and description there"));
         assert!(html.contains("Team description footer"));
         assert!(html.contains("Start here:\n{links} &lt;b&gt;"));
         assert!(html.contains("2 team links."));

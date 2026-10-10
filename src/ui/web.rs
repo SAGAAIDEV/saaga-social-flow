@@ -90,6 +90,13 @@ pub enum WebEvent {
     SaveYoutube {
         fields: std::collections::BTreeMap<String, String>,
     },
+    /// The YouTube tab's Approve, with the title and description on screen:
+    /// they are saved and approved in one step.
+    ApproveYoutube {
+        fields: std::collections::BTreeMap<String, String>,
+    },
+    /// Unlocks approved copy for editing.
+    UnapproveYoutube,
     /// Critique the take, with the direction typed beside the button.
     CritiqueTake {
         root: String,
@@ -323,6 +330,8 @@ impl WebEvent {
             WebEvent::SaveVideoBrief { fields, apply } => UiEvent::SaveVideoBrief { fields, apply },
             WebEvent::GenerateVideoCopy { fields } => UiEvent::GenerateVideoCopy(fields),
             WebEvent::SaveYoutube { fields } => UiEvent::SaveYoutube(fields),
+            WebEvent::ApproveYoutube { fields } => UiEvent::ApproveYoutube(fields),
+            WebEvent::UnapproveYoutube => UiEvent::UnapproveYoutube,
             WebEvent::SaveTeamFooter { footer } => UiEvent::SaveTeamFooter(footer),
             WebEvent::YoutubeDraft { fields } => UiEvent::YoutubeDraft(fields),
             WebEvent::SummarizeVideo { root } => UiEvent::SummarizeVideo(root),
@@ -1018,5 +1027,22 @@ mod tests {
         };
         assert_eq!(fields["title"], "A video");
         assert_eq!(fields["description"], "Details");
+    }
+
+    #[test]
+    fn the_youtube_approval_messages_parse() {
+        let event: WebEvent = serde_json::from_str(
+            r#"{"type":"approveYoutube","fields":{"title":"A video","description":"Details"}}"#,
+        )
+        .unwrap();
+        let UiEvent::ApproveYoutube(fields) = event.into_ui_event() else {
+            panic!("wrong event")
+        };
+        assert_eq!(fields["title"], "A video");
+        assert_eq!(fields["description"], "Details");
+        assert_eq!(
+            serde_json::from_str::<WebEvent>(r#"{"type":"unapproveYoutube"}"#).unwrap(),
+            WebEvent::UnapproveYoutube
+        );
     }
 }

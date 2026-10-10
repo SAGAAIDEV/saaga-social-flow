@@ -82,6 +82,14 @@ impl App {
             self.report_copy("Copy generation is already running. Wait for it to finish.");
             return false;
         }
+        // Checked before the model call rather than at the save after it.
+        if crate::publish::metadata::approved(&self.session).is_some() {
+            self.report_copy(
+                "The title and description are approved — press Un-approve on the YouTube tab \
+                 to write new ones.",
+            );
+            return false;
+        }
         let brief = video_brief::load(&self.session);
         let source = video_brief::Source::for_session(&self.session, &brief.notes);
         if let Err(err) = source.prompt() {
@@ -165,10 +173,10 @@ impl App {
                         }
                         let written = note.unwrap_or_else(|| "Title and description written, and shared with the artwork and YouTube.".into());
                         // Saved here, not sent: the video already up keeps its
-                        // copy until Save video details pushes the new one.
+                        // copy until the new one is approved.
                         match crate::publish::longform(&job.session) {
-                            Some(_) => format!("{written} The video on YouTube still has the old copy — press Save video details to change it there."),
-                            None => written,
+                            Some(_) => format!("{written} The video on YouTube still has the old copy — approve the new one on the YouTube tab to change it there."),
+                            None => format!("{written} Approve it on the YouTube tab before uploading."),
                         }
                     }
                     Ok(false) => "Copy saved, but needs a valid title before it can update the artwork and YouTube.".into(),

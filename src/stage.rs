@@ -232,6 +232,10 @@ impl Stages {
                     },
                     has_thumbnail,
                     (crate::publish::metadata::load(session).validate().is_ok(), "Save a valid title and description on the YouTube tab"),
+                    (
+                        crate::publish::metadata::approved(session).is_some(),
+                        "Approve the title and description on the YouTube tab",
+                    ),
                 ],
             ),
             thumbnail: gate(
@@ -428,6 +432,18 @@ mod tests {
             .to_string();
         assert!(reason.contains("Approve on the Thumbnail tab"), "{reason}");
         crate::card::assets::approve(&root).unwrap();
+        // And on the YouTube tab's Approve: what goes up is what was read.
+        let reason = Stages::read(&session(&root), Busy::default())
+            .publish
+            .missing()
+            .unwrap()
+            .to_string();
+        assert!(
+            reason.contains("Approve the title and description"),
+            "{reason}"
+        );
+        let copy = crate::publish::metadata::load(&session(&root));
+        crate::publish::metadata::approve(&session(&root), &copy).unwrap();
         assert!(Stages::read(&session(&root), Busy::default())
             .publish
             .is_ready());
