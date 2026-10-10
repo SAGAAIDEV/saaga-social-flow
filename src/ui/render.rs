@@ -1480,6 +1480,60 @@ mod tests {
             aside.contains("disabled") && aside.contains("always vertical"),
             "{aside}"
         );
+        let planned = page(
+            "project.html",
+            context! {
+                title => "Agent limits", folder => "2026-10-12_09-05-00", root => "/tmp/project",
+                plan => no_plan_status(),
+                versions => Vec::<()>::new(), deck => None::<usize>, deck_from_plan => false,
+                links => Vec::<()>::new(), format => "long", format_fixed => false,
+                format_planned => true,
+            },
+        );
+        assert!(
+            planned.contains(r#"type":"projectFormat"}' disabled>"#),
+            "{planned}"
+        );
+        assert!(
+            planned.contains("the plan was built for a long video"),
+            "{planned}"
+        );
+    }
+
+    #[test]
+    fn the_project_pane_picks_one_off_or_series() {
+        let pane = |kind: &str, fixed: bool| {
+            page(
+                "project.html",
+                context! {
+                    title => "Agent limits", folder => "2026-10-12_09-05-00", root => "/tmp/project",
+                    plan => no_plan_status(),
+                    versions => Vec::<()>::new(), deck => None::<usize>, deck_from_plan => false,
+                    links => Vec::<()>::new(), format => "long", format_fixed => fixed,
+                    kind => kind, kind_fixed => fixed,
+                },
+            )
+        };
+        let series = pane("series", false);
+        assert!(!series.contains("template error"), "{series}");
+        assert!(
+            series.contains(r#"{"root":"/tmp/project","type":"projectKind"}"#),
+            "{series}"
+        );
+        assert!(series.contains(r#"<option value="series" selected>Series · episodes</option>"#));
+        assert!(
+            series.contains("That is not built yet"),
+            "a series says it records one video for now"
+        );
+        let one_off = pane("one-off", false);
+        assert!(
+            one_off.contains(r#"<option value="one-off" selected>One-off · one video</option>"#)
+        );
+        let aside = pane("one-off", true);
+        assert!(
+            aside.contains("A short recorded beside a video is one video."),
+            "{aside}"
+        );
     }
 
     /// Un-approving leaves the plan's deck in place, and the summary must not

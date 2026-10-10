@@ -66,6 +66,21 @@ pub struct PlanChapter {
     pub layout: Option<Pair>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub est_seconds: Option<u32>,
+    /// Whether a chapter card — its number and title — goes in front of it in
+    /// the long video. Only a body chapter can have one (see [`ChapterKind`]),
+    /// so it is read only for a body chapter. On unless the
+    /// plan says otherwise, which is what every plan made before there was a
+    /// choice meant, so only `false` is ever written.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub card: bool,
+}
+
+pub(super) fn on() -> bool {
+    true
+}
+
+pub(super) fn is_on(card: &bool) -> bool {
+    *card
 }
 
 /// What the model wrote, cleaned: a plan before it has a number.
@@ -222,6 +237,7 @@ mod tests {
             show: String::new(),
             layout: None,
             est_seconds: None,
+            card: true,
         }
     }
 
@@ -320,5 +336,25 @@ mod tests {
         let back: Plan = serde_json::from_value(json).unwrap();
         assert_eq!(back, plan);
         assert_eq!(back.label(), "Plan 2");
+    }
+
+    /// A card is on unless the plan turns it off, so a plan written before
+    /// the choice keeps its cards, and only `false` is ever written.
+    #[test]
+    fn a_card_is_on_unless_turned_off() {
+        let mut plan = plan();
+        let json = serde_json::to_value(&plan).unwrap();
+        assert!(
+            json["chapters"][1].get("card").is_none(),
+            "an on card is not written"
+        );
+        let back: Plan = serde_json::from_value(json).unwrap();
+        assert!(back.body.chapters.iter().all(|chapter| chapter.card));
+
+        plan.body.chapters[2].card = false;
+        let json = serde_json::to_value(&plan).unwrap();
+        assert_eq!(json["chapters"][2]["card"], false);
+        let back: Plan = serde_json::from_value(json).unwrap();
+        assert!(!back.body.chapters[2].card);
     }
 }

@@ -61,13 +61,54 @@ than 6.\n\
 - show: what is on screen while it is said, or \"camera\" for a talking head.\n\
 - layout: \"talking-head\", \"split\" (screen beside the camera) or \"outline\" (the \
 points beside the camera).\n\
-- est_seconds: roughly how long it runs.\n\n\
+- est_seconds: roughly how long it runs.\n\
+- card: body chapters only. Whether its chapter card (number and title) goes in front of \
+it. Leave it out to keep the card; false only when the chapter carries on from the one \
+before without a break, or the author asks. When a current plan is given, keep each \
+chapter's card as it is unless the refine note changes it.\n\n\
+The project's format and category come first in the request. When there is a category, \
+the video belongs in it: plan for the people who follow that topic.\n\n\
 Keep the author's voice and their examples; tighten, do not invent facts they did not \
 give. The hook chapter is short — the hook and the promise, nothing else — said to the \
 camera, layout \"talking-head\". The outline chapter is short too: one line per body \
 chapter, in order, layout \"outline\"; its points are the body chapters' titles. The \
 CTA chapter is short, usually \"talking-head\". When a current plan is given, refine it: keep what works and \
 change what the refine note asks.";
+
+/// The plan for a short-format project: one vertical video, recorded as one
+/// chapter. One chapter because a short renders and posts its chapters as
+/// clips of their own (see [`crate::config::RenderTargets::for_session`]), and
+/// because a short has no room for the long video's outline and closing ask —
+/// the render leaves both out of every vertical.
+pub const SHORT_SYSTEM: &str = "You plan a short video before it is recorded: one vertical \
+video under a minute, recorded in one take with the plan on a teleprompter beside the camera. \
+The author has talked through the idea, typed notes, or recorded a rehearsal.\n\n\
+Output a JSON object:\n\
+- working_title: what the short shows or argues, under 70 characters.\n\
+- audience: who it is for, one sentence.\n\
+- promise: what the viewer gets from it, one sentence.\n\
+- hook: { line, angle }. line is the first sentence, said in the first two seconds: the \
+claim, or the result on screen. angle is why it stops the scroll.\n\
+- outline: the beats in order, 2-4 of them.\n\
+- chapters: exactly one, of kind \"body\": the whole short.\n\
+- cta: { line, placement }. line is how it ends: a line to remember, a question for the \
+viewer, or a short ask. placement is what earns it.\n\
+- instructions: 2-5 directions for recording: what to have open, framing, delivery.\n\n\
+The chapter:\n\
+- kind: \"body\".\n\
+- title: 2-5 words naming it. No numbering, no trailing punctuation.\n\
+- goal: what the viewer should get from it, one sentence.\n\
+- points: the beats after the hook, as short fragments a glance is enough for. 2-4.\n\
+- verbatim: the hook line, unless other exact words matter more.\n\
+- cues: delivery notes, only where earned. Omit otherwise.\n\
+- show: what is on screen while it is said, or \"camera\" for a talking head.\n\
+- layout: \"talking-head\" when the camera carries it, \"split\" (screen beside the \
+camera) when the screen does.\n\
+- est_seconds: how long it runs, under 60.\n\n\
+One point, made fast: no intro, no outline, no \"in this video\". The project's category \
+comes first in the request with what makes a short one of its kind; follow it. Keep the \
+author's voice and their examples; tighten, do not invent facts they did not give. When a \
+current plan is given, refine it: keep what works and change what the refine note asks.";
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 struct PlanExtraction {
@@ -124,6 +165,8 @@ struct ExtractedChapter {
     layout: Option<ExtractedLayout>,
     #[serde(default)]
     est_seconds: Option<u32>,
+    #[serde(default)]
+    card: Option<bool>,
 }
 
 /// [`Pair`] as the model names it. Its own type because `Pair` is the
@@ -147,10 +190,30 @@ impl From<ExtractedLayout> for Pair {
     }
 }
 
+/// What the project is, from its settings: the planner is told before it
+/// reads a word of the idea, so a short is planned as a short and a demo as a
+/// demo.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Brief {
+    pub format: crate::sessions::Format,
+    /// The category's name, when the project has one.
+    pub category: Option<String>,
+    /// What makes a short one of its kind — see
+    /// [`crate::category::ShortCategory::definition`]. Topic categories have none.
+    pub definition: Option<&'static str>,
+}
+
+impl Brief {
+    fn short(&self) -> bool {
+        self.format == crate::sessions::Format::Short
+    }
+}
+
 /// What a plan is built from. Every field is optional on its own; [`user_prompt`]
 /// refuses when there is nothing at all.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sources {
+    pub brief: Brief,
     pub instructions: String,
     pub typed: String,
     /// `(take number, transcript)` for each idea take with words.
@@ -178,6 +241,19 @@ pub fn user_prompt(project: &str, sources: &Sources, refine: Option<&Refine>) ->
         bail!("nothing to plan from yet — record an idea take, type the idea, or plan from a rehearsal");
     }
     let mut user = format!("Video project: {project}\n");
+    let brief = &sources.brief;
+    user.push_str(if brief.short() {
+        "Format: short: one vertical video under a minute, recorded as one chapter\n"
+    } else {
+        "Format: long: a horizontal video recorded in chapters\n"
+    });
+    match (&brief.category, brief.definition) {
+        (Some(name), Some(definition)) => {
+            user.push_str(&format!("Category: {name}. {definition}\n"));
+        }
+        (Some(name), None) => user.push_str(&format!("Category: {name}\n")),
+        (None, _) => user.push_str("Category: none picked yet\n"),
+    }
     let instructions = sources.instructions.trim();
     user.push_str("\nAuthor's instructions:\n");
     user.push_str(if instructions.is_empty() {
@@ -226,17 +302,23 @@ pub fn build_plan(
     provider: Option<&str>,
     prompt_root: Option<&std::path::Path>,
 ) -> Result<(PlanBody, super::trace::LlmStep)> {
-    let preamble = prompt::resolve(prompt::PLAN, SYSTEM, prompt_root);
+    let short = sources.brief.short();
+    let (prompt_id, builtin) = if short {
+        (prompt::PLAN_SHORT, SHORT_SYSTEM)
+    } else {
+        (prompt::PLAN, SYSTEM)
+    };
+    let preamble = prompt::resolve(prompt_id, builtin, prompt_root);
     let prompt = user_prompt(project, sources, refine)?;
     let (extracted, step) = super::extract::extract::<PlanExtraction>(
-        prompt::PLAN,
-        "plan",
-        &preamble,
-        prompt,
-        model,
-        provider,
+        prompt_id, "plan", &preamble, prompt, model, provider,
     )?;
-    Ok((clean(extracted)?, step))
+    let body = if short {
+        clean_short(extracted)?
+    } else {
+        clean(extracted)?
+    };
+    Ok((body, step))
 }
 
 /// The model's plan, trimmed, capped, and put in the one shape the recorder
@@ -296,6 +378,63 @@ fn clean(raw: PlanExtraction) -> Result<PlanBody> {
     ordered.push(cta);
     check_layouts(&mut ordered);
 
+    Ok(PlanBody {
+        working_title: raw.working_title.trim().to_string(),
+        audience: raw.audience.trim().to_string(),
+        promise: raw.promise.trim().to_string(),
+        hook: Hook {
+            line: hook_line,
+            angle: raw.hook.angle.trim().to_string(),
+        },
+        outline: clean_list(&raw.outline, MAX_OUTLINE, MAX_POINT_CHARS),
+        chapters: ordered,
+        cta: Cta {
+            line: cta_line,
+            placement: raw.cta.placement.trim().to_string(),
+        },
+        instructions: clean_list(&raw.instructions, MAX_INSTRUCTIONS, 200),
+    })
+}
+
+/// The model's plan for a short, in the one shape a short records in: a
+/// single body chapter.
+///
+/// What the model split across chapters anyway is folded into one rather
+/// than dropped: the first body chapter (else the first) lends its title and
+/// wording, and every chapter's points follow in order, capped like any
+/// chapter's. The hook line is what it says first, word for word, unless the
+/// chapter has wording of its own, and the closing line rides as a cue. A
+/// short needs a hook; it may end without an ask.
+fn clean_short(raw: PlanExtraction) -> Result<PlanBody> {
+    let chapters: Vec<PlanChapter> = raw.chapters.into_iter().filter_map(clean_chapter).collect();
+    let hook_line = match raw.hook.line.trim() {
+        "" => verbatim_of(chapters.iter().find(|c| c.kind == ChapterKind::Hook)),
+        line => line.to_string(),
+    };
+    if hook_line.is_empty() {
+        bail!("the plan came back with no hook — build it again");
+    }
+    let lead = chapters
+        .iter()
+        .position(|c| c.kind == ChapterKind::Body)
+        .unwrap_or(0);
+    let Some(mut chapter) = chapters.get(lead).cloned() else {
+        bail!("the plan came back with no chapter — build it again");
+    };
+    let points: Vec<String> = chapters.iter().flat_map(|c| c.points.clone()).collect();
+    chapter.points = clean_list(&points, MAX_POINTS, MAX_POINT_CHARS);
+    let estimates: Vec<u32> = chapters.iter().filter_map(|c| c.est_seconds).collect();
+    chapter.est_seconds = (!estimates.is_empty()).then(|| estimates.iter().sum());
+    chapter.kind = ChapterKind::Body;
+    if chapter.verbatim.is_none() {
+        chapter.verbatim = Some(hook_line.clone());
+    }
+    let cta_line = raw.cta.line.trim().to_string();
+    if !cta_line.is_empty() {
+        chapter.cues.push(format!("End on: {cta_line}"));
+    }
+    let mut ordered = vec![chapter];
+    check_layouts(&mut ordered);
     Ok(PlanBody {
         working_title: raw.working_title.trim().to_string(),
         audience: raw.audience.trim().to_string(),
@@ -392,6 +531,7 @@ fn made_chapter(kind: ChapterKind, title: &str) -> PlanChapter {
         show: "camera".into(),
         layout: Some(Pair::TalkingHead),
         est_seconds: None,
+        card: true,
     }
 }
 
@@ -418,6 +558,7 @@ fn clean_chapter(raw: ExtractedChapter) -> Option<PlanChapter> {
         show: raw.show.trim().to_string(),
         layout: raw.layout.map(Pair::from),
         est_seconds: raw.est_seconds.filter(|&s| s > 0),
+        card: raw.card.unwrap_or(true),
     })
 }
 
@@ -458,6 +599,7 @@ mod tests {
             show: String::new(),
             layout: None,
             est_seconds: None,
+            card: None,
         }
     }
 
@@ -703,6 +845,7 @@ mod tests {
     #[test]
     fn the_prompt_carries_every_source_and_the_refine_base() {
         let sources = Sources {
+            brief: Brief::default(),
             instructions: "For engineers. Keep it under ten minutes.".into(),
             typed: "Mention the cache hit rate.".into(),
             takes: vec![(1, "So deploys are slow.".into()), (2, "  ".into())],
@@ -722,6 +865,8 @@ mod tests {
         };
         let prompt = user_prompt("Deploys", &sources, Some(&refine)).unwrap();
         assert!(prompt.contains("Video project: Deploys"));
+        assert!(prompt.contains("Format: long"), "{prompt}");
+        assert!(prompt.contains("Category: none picked yet"), "{prompt}");
         assert!(prompt.contains("Keep it under ten minutes."));
         assert!(prompt.contains("<Idea take 1>\nSo deploys are slow.\n"));
         assert!(
@@ -748,6 +893,126 @@ mod tests {
         };
         let prompt = user_prompt("Deploys", &empty, Some(&refine)).unwrap();
         assert!(prompt.contains("tighten it where it is weakest"));
+    }
+
+    /// The format and category are said before the idea: a topic by name,
+    /// and a short category with what makes a short one of its kind.
+    #[test]
+    fn the_prompt_says_the_format_and_the_category() {
+        let demos = crate::category::short_category("demos").unwrap();
+        let sources = Sources {
+            brief: Brief {
+                format: crate::sessions::Format::Short,
+                category: Some(demos.name.into()),
+                definition: Some(demos.definition),
+            },
+            typed: "The agent files the ticket itself.".into(),
+            ..Sources::default()
+        };
+        let prompt = user_prompt("Tickets", &sources, None).unwrap();
+        assert!(
+            prompt.contains("Format: short: one vertical video"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(&format!("Category: Demos. {}", demos.definition)),
+            "{prompt}"
+        );
+        let sources = Sources {
+            brief: Brief {
+                category: Some("Agents".into()),
+                ..Brief::default()
+            },
+            ..sources
+        };
+        let prompt = user_prompt("Tickets", &sources, None).unwrap();
+        assert!(
+            prompt.contains("Format: long: a horizontal video"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Category: Agents\n"), "{prompt}");
+    }
+
+    /// A short is one body chapter: what the model split up is folded into
+    /// it in order, it opens on the hook line and ends on the closing line.
+    #[test]
+    fn a_short_is_one_chapter_that_opens_on_the_hook() {
+        let body = clean_short(raw(vec![
+            chapter(HookKind, "The claim"),
+            ExtractedChapter {
+                show: "the ticket queue".into(),
+                est_seconds: Some(35),
+                ..chapter(Body, "Watch it file")
+            },
+            ExtractedChapter {
+                est_seconds: Some(10),
+                ..chapter(CtaKind, "Try it")
+            },
+        ]))
+        .unwrap();
+        assert_eq!(kinds(&body), [Body]);
+        let short = &body.chapters[0];
+        assert_eq!(short.title, "Watch it file");
+        assert_eq!(
+            short.points,
+            ["The claim point", "Watch it file point", "Try it point"]
+        );
+        assert_eq!(
+            short.verbatim.as_deref(),
+            Some("Your deploy takes an hour.")
+        );
+        assert_eq!(short.cues, ["End on: Subscribe for part two."]);
+        assert_eq!(short.layout, Some(Pair::Split), "the screen carries it");
+        assert_eq!(short.est_seconds, Some(45));
+        // Nothing for the render to leave out: no outline, no closing chapter.
+        assert!(!body.ends_with_cta());
+        let plan = Plan {
+            body,
+            ..Plan::default()
+        };
+        assert_eq!(
+            plan.to_notes().chapters[0].verbatim.as_deref(),
+            Some("Your deploy takes an hour.")
+        );
+    }
+
+    /// A short needs a hook and something to say; it may end without an ask.
+    #[test]
+    fn a_short_needs_a_hook_but_not_an_ask() {
+        let mut no_ask = raw(vec![chapter(Body, "Watch it file")]);
+        no_ask.cta.line.clear();
+        let body = clean_short(no_ask).unwrap();
+        assert!(body.chapters[0].cues.is_empty());
+        assert_eq!(body.cta.line, "");
+
+        let mut no_hook = raw(vec![chapter(Body, "Watch it file")]);
+        no_hook.hook.line.clear();
+        assert!(clean_short(no_hook)
+            .unwrap_err()
+            .to_string()
+            .contains("no hook"));
+        assert!(clean_short(raw(Vec::new()))
+            .unwrap_err()
+            .to_string()
+            .contains("no chapter"));
+    }
+
+    /// A card stays on unless the model turned it off, which it is told to do
+    /// only when the plan it refines or the note says so.
+    #[test]
+    fn a_card_the_model_turned_off_stays_off() {
+        let body = clean(raw(vec![
+            chapter(HookKind, "The hour"),
+            chapter(Body, "The cache"),
+            ExtractedChapter {
+                card: Some(false),
+                ..chapter(Body, "More on the cache")
+            },
+            chapter(CtaKind, "Next time"),
+        ]))
+        .unwrap();
+        let cards: Vec<bool> = body.chapters.iter().map(|c| c.card).collect();
+        assert_eq!(cards, [true, true, true, false, true]);
     }
 
     #[test]

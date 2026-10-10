@@ -162,6 +162,7 @@ pub fn prepare(
         &[],
         None,
         None,
+        &[],
         crate::config::RenderTargets::default(),
     )
 }
@@ -190,6 +191,11 @@ pub fn prepare(
 /// talking head with no card, and the body chapters after it are numbered from
 /// "01", so the cards count the chapters the outline listed. No vertical
 /// either, for the CTA's reason.
+///
+/// `uncarded` are the chapters whose plan chapter turned its card off — see
+/// [`crate::plan::uncarded_chapters_of`]. They follow the chapter before with
+/// no card between, and the cards after them count on from the last one
+/// shown, so a viewer counting cards never meets a gap.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_targets(
     edit_root: &Path,
@@ -199,6 +205,7 @@ pub fn prepare_targets(
     outlines: &[crate::outline::ChapterOutline],
     cta: Option<u32>,
     intro: Option<u32>,
+    uncarded: &[u32],
     targets: crate::config::RenderTargets,
 ) -> Result<Plan> {
     if !library
@@ -247,6 +254,8 @@ pub fn prepare_targets(
 
     let mut h_segments: Vec<Segment> = Vec::new();
     let mut v_jobs = Vec::new();
+    // The cards drawn so far: each one shows the next number.
+    let mut cards = 0;
     for (index, (n, title)) in titles.iter().enumerate() {
         // What the numbers viewers see count from: this chapter's place among
         // the chapters that render, not its number in the drafts. A chapter
@@ -266,20 +275,25 @@ pub fn prepare_targets(
             // there was taken out — three seconds of plate before a word is
             // said, on every video.
             //
-            // Cards display the chapter's place minus one: chapter one has no
-            // card, so the first inter-chapter card is labeled "01". Source
-            // paths and chapter IDs still use the draft number.
+            // Cards count themselves: chapter one has no card, so the first
+            // inter-chapter card is labeled "01", and each after it the next
+            // number. Source paths and chapter IDs still use the draft number.
             //
-            // The CTA chapter has none either, and the numbering is unaffected:
-            // it is last, so no card after it has a number to shift.
+            // The CTA chapter has none either. It is last, so no card after it
+            // has a number to shift.
             //
-            // The outline chapter has none, and the cards after it count from
-            // "01" again: it is one fewer chapter before them with a number.
-            if !h_segments.is_empty() && cta != Some(*n) && intro != Some(*n) {
-                let shown = place
-                    .saturating_sub(1)
-                    .saturating_sub(u32::from(intro.is_some_and(|i| i < *n)));
-                h_segments.push(Segment::Render(write_card(&horizontal, *n, shown, title)?));
+            // The outline chapter has none, and the first card after it is
+            // "01": the cards count the chapters the outline listed.
+            //
+            // A chapter whose plan turned its card off has none, and the next
+            // card shows the number after the last one drawn.
+            if !h_segments.is_empty()
+                && cta != Some(*n)
+                && intro != Some(*n)
+                && !uncarded.contains(n)
+            {
+                cards += 1;
+                h_segments.push(Segment::Render(write_card(&horizontal, *n, cards, title)?));
             }
             match outline {
                 // An outline chapter is drawn: its footage goes into the
@@ -952,6 +966,7 @@ mod tests {
             &[],
             Some(3),
             None,
+            &[],
             everything,
         )
         .unwrap();
@@ -981,6 +996,7 @@ mod tests {
             &[],
             None,
             None,
+            &[],
             horizontal,
         )
         .unwrap();
@@ -995,6 +1011,60 @@ mod tests {
             ],
             "no approved plan: a card in front of every chapter after the first"
         );
+        let _ = std::fs::remove_dir_all(edit.parent().unwrap());
+    }
+
+    /// A chapter whose plan turned its card off follows the one before with
+    /// no card between, and the next card counts on from the last one shown.
+    #[test]
+    fn a_chapter_without_a_card_leaves_no_gap_in_the_numbers() {
+        use crate::config::RenderTargets;
+        let (library, edit, compose) = fixture("uncarded");
+        for n in 3..=4 {
+            let chapter = edit.join(format!("chapter-{n:02}"));
+            std::fs::create_dir_all(&chapter).unwrap();
+            std::fs::write(chapter.join(format!("chapter-{n:02}-horizontal.mp4")), b"v").unwrap();
+        }
+        let titles = vec![
+            (1u32, "Hook".to_string()),
+            (2u32, "The cache".to_string()),
+            (3u32, "More on it".to_string()),
+            (4u32, "The fix".to_string()),
+        ];
+        let horizontal = RenderTargets {
+            horizontal: true,
+            vertical: false,
+            shorts: false,
+            cloud: false,
+        };
+        let plan = prepare_targets(
+            &edit,
+            &compose,
+            &library,
+            &titles,
+            &[],
+            None,
+            None,
+            &[3],
+            horizontal,
+        )
+        .unwrap();
+        let ids: Vec<String> = plan
+            .h_segments
+            .iter()
+            .filter_map(Segment::job)
+            .map(|job| job.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            ["seg-02-card", "seg-04-card"],
+            "no card for chapter three"
+        );
+        let card =
+            std::fs::read_to_string(compose.join("horizontal/compositions/seg-04-card.html"))
+                .unwrap();
+        assert!(card.contains(r#""chapterNumber":"02""#), "{card}");
+        assert!(card.contains("The fix"), "{card}");
         let _ = std::fs::remove_dir_all(edit.parent().unwrap());
     }
 
@@ -1075,7 +1145,17 @@ mod tests {
         }
         let titles = vec![(1u32, "First".to_string()), (2u32, "Second".to_string())];
         let plan = |targets: RenderTargets| {
-            prepare_targets(&edit, &compose, &library, &titles, &[], None, None, targets)
+            prepare_targets(
+                &edit,
+                &compose,
+                &library,
+                &titles,
+                &[],
+                None,
+                None,
+                &[],
+                targets,
+            )
         };
 
         // Only the horizontal: cards and bodies, no chapter compositions.
@@ -1154,6 +1234,7 @@ mod tests {
             &[],
             Some(4),
             Some(2),
+            &[],
             horizontal,
         )
         .unwrap();
@@ -1457,6 +1538,7 @@ mod library_tests {
             &[outline],
             None,
             None,
+            &[],
             crate::config::RenderTargets::default(),
         )
         .expect("prepare with an outline chapter");

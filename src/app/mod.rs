@@ -1047,6 +1047,7 @@ impl App {
             UiEvent::BlogCategorySelected(id) => self.select_blog_category(&id),
             UiEvent::ProjectCategory { root, value } => self.select_project_category(&root, &value),
             UiEvent::ProjectFormat { root, value } => self.select_project_format(&root, &value),
+            UiEvent::ProjectKind { root, value } => self.select_project_kind(&root, &value),
             UiEvent::SetUpCategory {
                 root,
                 slug,
@@ -1135,6 +1136,21 @@ impl App {
         self.update_publish_summary();
         self.update_schedule_summary();
         self.sync_controls();
+    }
+
+    /// One-off or series. Nothing else reads it until series are built, so
+    /// only the Project tab is redrawn.
+    fn select_project_kind(&mut self, root: &str, value: &str) {
+        if self.session.root.to_str() != Some(root) {
+            return;
+        }
+        let Some(kind) = crate::sessions::Kind::parse(value) else {
+            return;
+        };
+        if let Err(err) = self.session.set_kind(kind) {
+            self.set_project_status(&format!("Could not save one-off or series: {err:#}"));
+        }
+        self.update_project_view();
     }
 
     /// Names the open project. The folder keeps its timestamp — only the label moves.

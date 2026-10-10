@@ -194,6 +194,34 @@ pub fn outline_chapter_of(session: &Session) -> Option<u32> {
     (plan.body.chapter(2)?.kind == ChapterKind::Outline && recorded.contains(&2)).then_some(2)
 }
 
+/// The recording chapters, among `recorded`, whose plan chapter turned its
+/// card off — see [`schema::PlanChapter::card`].
+///
+/// Read from the bindings like [`cta_chapter_of`], so a take keeps the plan
+/// it was recorded against. A recording with no bindings at all falls back to
+/// the approved plan, chapter for chapter by position. With no plan, every
+/// chapter keeps its card, as before there was a choice.
+pub fn uncarded_chapters_of(session: &Session, recorded: &[u32]) -> Vec<u32> {
+    let bound = recorded
+        .iter()
+        .any(|&n| binding::load(&session.dir, n).is_some());
+    let approved = if bound { None } else { approved(&dir(session)) };
+    recorded
+        .iter()
+        .copied()
+        .filter(|&n| {
+            let chapter = if bound {
+                bound_chapter(session, n)
+            } else {
+                approved
+                    .as_ref()
+                    .and_then(|plan| plan.body.chapter(n).cloned())
+            };
+            chapter.is_some_and(|chapter| chapter.kind == ChapterKind::Body && !chapter.card)
+        })
+        .collect()
+}
+
 /// The plan the recording follows: the approved version, else the newest.
 ///
 /// This is what the teleprompter shows and what New Chapter takes its layout
@@ -635,6 +663,20 @@ pub fn take_text(take: &Take) -> TakeText {
     }
 }
 
+/// What the planner is told about the project before the idea: its format
+/// and its category, with a short category's definition.
+pub fn brief(session: &Session) -> crate::agent::plan::Brief {
+    let category = crate::category::load(&session.root);
+    crate::agent::plan::Brief {
+        format: session.format(),
+        definition: category
+            .as_ref()
+            .and_then(|choice| crate::category::short_category(&choice.slug))
+            .map(|short| short.definition),
+        category: category.map(|choice| choice.name),
+    }
+}
+
 /// Everything a plan is built from, and the labels it records as its sources.
 pub fn gather(session: &Session, rehearsal: bool) -> (Sources, Vec<String>) {
     let dir = dir(session);
@@ -667,6 +709,7 @@ pub fn gather(session: &Session, rehearsal: bool) -> (Sources, Vec<String>) {
     };
     (
         Sources {
+            brief: brief(session),
             instructions: input.instructions,
             typed: input.typed,
             takes,
@@ -846,6 +889,7 @@ mod tests {
             show: String::new(),
             layout: None,
             est_seconds: None,
+            card: true,
         };
         Plan {
             body: PlanBody {
@@ -1204,6 +1248,61 @@ mod tests {
             binding::bind(&short.dir, n, Some(&saved)).unwrap();
         }
         assert_eq!(cta_chapter_of(&short), None, "the ask is not recorded yet");
+    }
+
+    /// A body chapter whose card is off is found through the take bound to
+    /// it, or by position in the approved plan when no take is bound; with
+    /// no plan every chapter keeps its card.
+    #[test]
+    fn a_chapter_without_a_card_is_the_one_recorded_for_it() {
+        let mut uncarded = plan("One");
+        uncarded.body.chapters[1].card = false;
+        // A hook's card flag means nothing: chapter one never has a card.
+        uncarded.body.chapters[0].card = false;
+
+        let session = project("uncarded-bound");
+        let saved = save_new(&dir(&session), uncarded.clone()).unwrap();
+        for n in 1..=3 {
+            record(&session, n);
+            binding::bind(&session.dir, n, Some(&saved)).unwrap();
+        }
+        assert_eq!(uncarded_chapters_of(&session, &[1, 2, 3]), [2]);
+
+        let legacy = project("uncarded-legacy");
+        save_new(&dir(&legacy), uncarded).unwrap();
+        for n in 1..=3 {
+            record(&legacy, n);
+        }
+        assert!(
+            uncarded_chapters_of(&legacy, &[1, 2, 3]).is_empty(),
+            "nothing approved, every card stays"
+        );
+        approve(&dir(&legacy), 1, &legacy.root.join("notes")).unwrap();
+        assert_eq!(uncarded_chapters_of(&legacy, &[1, 2, 3]), [2]);
+    }
+
+    /// The planner is told what the project is: its format, and its
+    /// category with a short category's definition.
+    #[test]
+    fn the_brief_is_the_projects_format_and_category() {
+        let session = project("brief");
+        let brief = brief(&session);
+        assert_eq!(brief.format, crate::sessions::Format::Long);
+        assert_eq!((brief.category, brief.definition), (None, None));
+
+        session.set_format(crate::sessions::Format::Short).unwrap();
+        crate::category::save(
+            &session.root,
+            Some(&crate::category::Choice {
+                slug: "opinions".into(),
+                name: "Opinions".into(),
+            }),
+        )
+        .unwrap();
+        let brief = super::brief(&session);
+        assert_eq!(brief.format, crate::sessions::Format::Short);
+        assert_eq!(brief.category.as_deref(), Some("Opinions"));
+        assert!(brief.definition.unwrap().starts_with("Argues one take."));
     }
 
     /// A recording made before takes were bound keeps the old reading: the

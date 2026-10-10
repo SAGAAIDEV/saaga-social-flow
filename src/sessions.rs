@@ -24,6 +24,8 @@ pub struct SessionMeta {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<Format>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
     /// Whatever else a newer build wrote, kept through a rename.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
@@ -57,6 +59,47 @@ impl Format {
         match self {
             Format::Long => "long",
             Format::Short => "short",
+        }
+    }
+
+    /// "long video" or "short", for a sentence.
+    pub fn noun(self) -> &'static str {
+        match self {
+            Format::Long => "long video",
+            Format::Short => "short",
+        }
+    }
+}
+
+/// Whether a project is one video or a series of them.
+///
+/// Picked on the Project tab, beside the format. A project that never picked
+/// is a one-off, which is what every project was before there was a choice.
+/// A series plans its episodes up front and records each as a video of its
+/// own inside the project — see `docs/production-pipeline-plan.md`, Phase 7.
+/// Until that is built, a series records exactly as a one-off does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    #[default]
+    OneOff,
+    Series,
+}
+
+impl Kind {
+    /// The value the Project tab posts.
+    pub fn parse(value: &str) -> Option<Kind> {
+        match value {
+            "one-off" => Some(Kind::OneOff),
+            "series" => Some(Kind::Series),
+            _ => None,
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Kind::OneOff => "one-off",
+            Kind::Series => "series",
         }
     }
 }
@@ -258,6 +301,16 @@ pub fn load_format(root: &Path) -> Format {
 pub fn save_format(root: &Path, format: Format) -> Result<()> {
     let mut meta = load_meta(root);
     meta.format = Some(format);
+    save_meta(root, &meta)
+}
+
+pub fn load_kind(root: &Path) -> Kind {
+    load_meta(root).kind.unwrap_or_default()
+}
+
+pub fn save_kind(root: &Path, kind: Kind) -> Result<()> {
+    let mut meta = load_meta(root);
+    meta.kind = Some(kind);
     save_meta(root, &meta)
 }
 
@@ -577,6 +630,26 @@ mod tests {
         assert_eq!(load_name(&dir).as_deref(), Some("Agent limits"));
         let text = std::fs::read_to_string(dir.join(SESSION_JSON)).unwrap();
         assert!(text.contains("\"format\": \"short\""), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The kind shares `session.json` with the name and the format, and a
+    /// project that never picked one is a one-off.
+    #[test]
+    fn a_kind_round_trips_beside_the_name_and_format() {
+        let dir = temp("kind");
+        assert_eq!(load_kind(&dir), Kind::OneOff);
+        save_name(&dir, "Agents in production").unwrap();
+        save_format(&dir, Format::Long).unwrap();
+        save_kind(&dir, Kind::Series).unwrap();
+        assert_eq!(load_kind(&dir), Kind::Series);
+        assert_eq!(load_name(&dir).as_deref(), Some("Agents in production"));
+        assert_eq!(load_format(&dir), Format::Long);
+        let text = std::fs::read_to_string(dir.join(SESSION_JSON)).unwrap();
+        assert!(text.contains("\"kind\": \"series\""), "{text}");
+        assert_eq!(Kind::parse("one-off"), Some(Kind::OneOff));
+        assert_eq!(Kind::parse(Kind::Series.slug()), Some(Kind::Series));
+        assert_eq!(Kind::parse("episode"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

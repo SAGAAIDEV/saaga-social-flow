@@ -266,6 +266,11 @@ pub enum UiEvent {
         root: String,
         value: String,
     },
+    /// See [`web::WebEvent::ProjectKind`].
+    ProjectKind {
+        root: String,
+        value: String,
+    },
     /// See [`web::WebEvent::SetUpCategory`].
     SetUpCategory {
         root: String,

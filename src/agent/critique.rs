@@ -176,6 +176,7 @@ mod tests {
                 show: String::new(),
                 layout: None,
                 est_seconds: None,
+                card: true,
             }],
             ..PlanBody::default()
         };
