@@ -155,7 +155,11 @@ recording on:
    since the upload, or never uploaded — and the rows wait until all of them are
    up. **Upload to S3** beside it runs the upload by hand for the misses (the
    render starts it by itself); an object already at its key is not sent again,
-   so a needless press is cheap. Analytics and Reflect are secondary tabs here.
+   so a needless press is cheap. **Files**, one tab over, lists everything the
+   uploads have put under the bucket's prefix as folders, with the open
+   project's newest version expanded and Open / Copy link on every file; it
+   lists again at launch, after each upload and on Refresh. Analytics and
+   Reflect are secondary tabs here.
 
 Edit and Substack are absent from the navigation. Existing recording data, saved
 edits, and backend modules are retained. The order guides the work without requiring

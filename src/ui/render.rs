@@ -54,6 +54,8 @@ fn environment() -> Environment<'static> {
         .expect("project template");
     env.add_template("plan.html", include_str!("templates/plan.html"))
         .expect("plan template");
+    env.add_template("files.html", include_str!("templates/files.html"))
+        .expect("files template");
     env.add_template(
         "teleprompter.html",
         include_str!("templates/teleprompter.html"),
@@ -129,6 +131,7 @@ mod tests {
             "youtube.html",
             "project.html",
             "plan.html",
+            "files.html",
         ] {
             assert!(env.get_template(name).is_ok(), "{name} is registered");
         }
@@ -1814,5 +1817,79 @@ mod tests {
         assert!(blocked.contains("Record a take first"));
         let at = blocked.find("Critique and rewrite the notes").unwrap();
         assert!(blocked[blocked[..at].rfind("<button").unwrap()..at].contains("disabled"));
+    }
+
+    /// A listing drawn as folders and files: the open project expanded, each
+    /// file with the two buttons that carry its URL, and the totals beside
+    /// each folder.
+    #[test]
+    fn the_files_pane_draws_the_tree_with_a_link_on_every_file() {
+        let listed = |path: &str, size: u64| crate::distribute::Listed {
+            path: path.into(),
+            size,
+            modified: Some(1_791_600_000),
+            url: format!("https://cdn.example.com/socials/{path}"),
+        };
+        let objects = [
+            listed("mine/v1/landscape-aa.mp4", 2_000_000),
+            listed("mine/v1/chapters/01/c-bb.mp4", 500_000),
+            listed("other/v1/portrait-cc.mp4", 3_000),
+        ];
+        let pane = crate::files::Pane {
+            location: "s3://bucket/socials/".into(),
+            busy: false,
+            error: None,
+            listed_at: Some("2026-10-10 09:00".into()),
+            summary: Some("3 file(s) · 2.5 MB · 2 project(s)".into()),
+            truncated: false,
+            tree: crate::files::tree(&objects, "mine"),
+        };
+        // Autoescape writes `/` as `&#x2f;` in text, which the page shows as `/`.
+        let html = page("files.html", &pane).replace("&#x2f;", "/");
+        assert!(!html.contains("template error"), "{html}");
+        assert!(html.contains("s3://bucket/socials/ · listed 2026-10-10 09:00"));
+        assert!(html.contains("3 file(s) · 2.5 MB · 2 project(s)"));
+        // Every level of the recursion is drawn, the deepest file included.
+        for folder in ["mine", "v1", "chapters", "01", "other"] {
+            let drawn = format!("<span class=\"name folder-name\">{folder}/</span>");
+            assert!(html.contains(&drawn), "{folder}/ is drawn");
+        }
+        for file in ["landscape-aa.mp4", "c-bb.mp4", "portrait-cc.mp4"] {
+            let drawn = format!("<span class=\"name\">{file}</span>");
+            assert!(html.contains(&drawn), "{file} is drawn");
+        }
+        assert!(html.contains("openUrl"));
+        assert!(html.contains("copyText"));
+        assert!(html.contains("https://cdn.example.com/socials/mine/v1/chapters/01/c-bb.mp4"));
+        // The open project, and only it, starts expanded.
+        let opened = html.matches("<details open>").count();
+        assert_eq!(opened, 2, "mine/ and its newest version: {html}");
+    }
+
+    #[test]
+    fn the_files_pane_says_when_it_is_listing_and_why_it_failed() {
+        let busy = page(
+            "files.html",
+            crate::files::Pane {
+                busy: true,
+                ..crate::files::Pane::empty()
+            },
+        );
+        assert!(busy.contains("Listing…"));
+        let at = busy.find("Listing…").unwrap();
+        assert!(busy[busy[..at].rfind("<button").unwrap()..at].contains("disabled"));
+
+        let failed = page(
+            "files.html",
+            crate::files::Pane {
+                error: Some("listing s3://b/socials/: expired — run `aws sso login`".into()),
+                ..crate::files::Pane::empty()
+            },
+        );
+        assert!(failed.contains("aws sso login"));
+        assert!(!failed.contains("Nothing listed yet"));
+
+        let empty = page("files.html", crate::files::Pane::empty());
+        assert!(empty.contains("Nothing listed yet"));
     }
 }

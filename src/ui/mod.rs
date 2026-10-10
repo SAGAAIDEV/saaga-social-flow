@@ -292,6 +292,10 @@ pub enum UiEvent {
     ProjectNameChanged(String),
     /// Words a pane asked to be put on the system pasteboard.
     CopyText(String),
+    /// The Files tab's Refresh — see [`crate::files`].
+    RefreshFiles,
+    /// A URL a pane asked to open in the browser.
+    OpenUrl(String),
     /// Settings → YouTube: put this machine's stored refresh token on the
     /// pasteboard, for pasting into `dev.sops.env`.
     CopyYoutubeRefreshToken,
@@ -2387,6 +2391,8 @@ pub struct Attached {
     pub project_pane: WebPane,
     /// The Plan tab's pane: the idea, the instructions, the plan.
     pub plan_pane: WebPane,
+    /// Socials → Files: every object the uploads have put on S3.
+    pub files_pane: WebPane,
     pub layout: Layout,
 }
 
@@ -3983,6 +3989,30 @@ pub fn attach_controls(
     reflect_item.setView(Some(&reflect_view));
 
     // ==========================================
+    // FILES  (rendered HTML, see `files`)
+    // ==========================================
+    // What the uploads put on S3, folder by folder. The pane draws its own
+    // state — listing, failed, listed when — so there is no native line above.
+    let files_view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+    fill_parent(&files_view);
+    let files_pane = WebPane::attach(&files_view, mtm, tx.clone());
+    files_pane.set_frame(NSRect::new(
+        NSPoint::new(PAD, PAD),
+        NSSize::new(bounds.size.width - PAD * 2.0, bounds.size.height - 44.0),
+    ));
+    files_pane.fill_below();
+    files_pane.show(&render::page("files.html", crate::files::Pane::empty()));
+
+    let files_item = unsafe {
+        NSTabViewItem::initWithIdentifier(
+            NSTabViewItem::alloc(),
+            Some(&NSString::from_str("files")),
+        )
+    };
+    files_item.setLabel(&NSString::from_str("Files"));
+    files_item.setView(Some(&files_view));
+
+    // ==========================================
     // SETTINGS (API keys)
     // ==========================================
     // Deliberately outside `workflow::attach`: the workflow steps describe how a
@@ -4022,6 +4052,7 @@ pub fn attach_controls(
             ("blog", &blog_item),
             ("post", &post_item),
             ("schedule", &schedule_item),
+            ("files", &files_item),
             ("analytics", &analytics_item),
             ("reflect", &reflect_item),
         ],
@@ -4078,6 +4109,7 @@ pub fn attach_controls(
         settings_pane,
         project_pane,
         plan_pane,
+        files_pane,
         layout,
     })
 }
